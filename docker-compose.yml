@@ -13,32 +13,17 @@ services:
     build: ./backend
     environment:
       PORT: 5000
-      DATABASE_URL: postgres://${DB_USER:-lendwise}:${DB_PASSWORD:-change-me}@db:5432/${DB_NAME:-lendwise}
+      DB_HOST: host.docker.internal
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:?Set DB_NAME in .env}
+      DB_USER: ${DB_USER:?Set DB_USER in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       NODE_ENV: production
     ports:
       - "5000:5000"
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${DB_NAME:-lendwise}
-      POSTGRES_USER: ${DB_USER:-lendwise}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-lendwise} -d ${DB_NAME:-lendwise}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-volumes:
-  postgres_data:
