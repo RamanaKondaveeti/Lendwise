@@ -8,6 +8,8 @@ services:
         condition: service_healthy
     restart: unless-stopped
   backend:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     build: ./backend
     environment:
       PORT: 5000
