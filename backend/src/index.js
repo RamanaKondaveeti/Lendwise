@@ -3,7 +3,8 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const path = require('path');
-require('dotenv').config();
+const envPath = path.resolve(__dirname, '../../.env');
+if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
 const app = express();
 const pool = mysql.createPool({
