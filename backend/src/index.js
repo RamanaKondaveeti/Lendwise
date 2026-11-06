@@ -249,7 +249,7 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
-app.get('/api/summary', async (_req, res) => {
+app.get('/api/summary', async (req, res) => {
   try {
     const people = await q('SELECT id, name, initials, color FROM people ORDER BY id');
     const groups = await q(

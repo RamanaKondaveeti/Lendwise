@@ -349,9 +349,19 @@ function App() {
   if (!data) {
     return (
       <main className="startup-state">
-        {authError
-          ? <><p>{authError}</p><button className="button button-dark" onClick={() => refresh().catch(error => setAuthError(error.message))}>Try again</button></>
-          : <><LoaderCircle className="loading-icon" size={24} /><p>Loading your expense data…</p></>}
+        {authError ? (
+          <section className="workspace-error">
+            <h1>Your account is ready</h1>
+            <p>{authError}</p>
+            <p>Rebuild and restart the backend so its latest database schema is applied, then try again.</p>
+            <div className="workspace-error-actions">
+              <button className="button button-dark" onClick={() => refresh().catch(error => setAuthError(error.message))}>Try again</button>
+              <button className="button button-light" onClick={signOut}>Sign out</button>
+            </div>
+          </section>
+        ) : (
+          <><LoaderCircle className="loading-icon" size={24} /><p>Loading your expense data…</p></>
+        )}
       </main>
     )
   }

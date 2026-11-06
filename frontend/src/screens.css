@@ -149,6 +149,10 @@ footer a{color:#668575}
 .sign-out-button:hover{background:#eaf4ed;color:#1c7853}
 .sign-out-top-button{display:grid;place-items:center;width:30px;height:30px;border:1px solid #dfe9e3;border-radius:8px;background:#fff;color:#64796c}
 .sign-out-top-button:hover{border-color:#81c9a4;background:#f0f8f3;color:#1c7853}
+.workspace-error{width:min(440px,calc(100vw - 32px));padding:28px;border:1px solid #e0ebe5;border-radius:14px;background:#fff;box-shadow:0 12px 40px #18332612}
+.workspace-error h1{margin:0 0 10px;color:#20352e;font:700 20px Manrope,sans-serif}
+.workspace-error p{margin:8px 0;color:#718479;line-height:1.55}
+.workspace-error-actions{display:flex;gap:9px;margin-top:20px}
 
 .auth-page{min-height:100vh;display:grid;grid-template-columns:minmax(320px,.9fr) 1.1fr;background:#fff}
 .auth-showcase{position:relative;min-height:100vh;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;padding:38px clamp(28px,6vw,88px);background:radial-gradient(ellipse at 82% 18%,#abebcd 0,transparent 30%),linear-gradient(145deg,#daf5e6,#bcebd3 52%,#a7e4c8);color:#164d38}
