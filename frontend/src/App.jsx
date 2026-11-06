@@ -169,7 +169,11 @@ function App() {
     let payload
     let successMessage
 
-    if (modal === 'expense') {
+    if (modal === 'person') {
+      url = '/api/people'
+      payload = { name: form.get('name') }
+      successMessage = 'Person added.'
+    } else if (modal === 'expense') {
       url = '/api/expenses'
       payload = {
         groupId: Number(form.get('groupId')),
@@ -268,7 +272,7 @@ function App() {
           })}
         </div>
         <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => setModal('settlement')}><ArrowLeftRight size={18} />Record settlement</button>
+          <button className="nav-item" disabled={people.length < 2} onClick={() => setModal('settlement')}><ArrowLeftRight size={18} />Record settlement</button>
           <div className="profile">
             <div className="avatar me">{currentUser?.initials || 'ME'}</div>
             <div className="profile-copy"><b>{currentUser?.name || 'You'}</b><small>Personal account</small></div>
@@ -286,7 +290,7 @@ function App() {
               <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search expenses..." />
               <kbd>/</kbd>
             </label>
-            <button className="icon-button" aria-label="Record settlement" title="Record settlement" onClick={() => setModal('settlement')}>
+            <button className="icon-button" aria-label="Record settlement" title="Record settlement" disabled={people.length < 2} onClick={() => setModal('settlement')}>
               <ArrowLeftRight size={18} />
             </button>
             <div className="top-avatar">{currentUser?.initials || 'ME'}</div>
@@ -308,7 +312,7 @@ function App() {
             </div>
             <div className="welcome-actions">
               <button className="button button-light" onClick={() => setModal('group')}><Plus size={16} />Create group</button>
-              <button className="button button-dark" onClick={() => setModal('expense')}><Plus size={17} />Add an expense</button>
+              <button className="button button-dark" disabled={!people.length || !groups.length} onClick={() => setModal('expense')}><Plus size={17} />Add an expense</button>
             </div>
           </div>
 
@@ -427,9 +431,9 @@ function App() {
             <section className="panel screen-panel">
               <div className="panel-heading screen-panel-heading">
                 <div><div className="section-title">People & balances <span className="title-count">{data.balances.length}</span></div><div className="section-subtitle">Net balance calculated from expenses, splits, and settlements.</div></div>
-                <button className="button button-dark" onClick={() => setModal('settlement')}><ArrowLeftRight size={15} />Record settlement</button>
+                <button className="button button-light" onClick={() => setModal('person')}><Plus size={15} />Add person</button>
               </div>
-              <div className="balance-table">
+              {data.balances.length ? <div className="balance-table">
                 <div className="balance-table-header"><span>PERSON</span><span>NET BALANCE</span><span>STATUS</span></div>
                 {data.balances.map(person => {
                   const isCurrentUser = person.id === data.currentUserId
@@ -449,8 +453,8 @@ function App() {
                     </div>
                   )
                 })}
-              </div>
-              <p className="balance-note">A positive sign means the person is owed money overall; a minus sign means they owe money overall.</p>
+              </div> : <div className="empty">No people yet. Add a person to start setting up your workspace.</div>}
+              {data.balances.length > 0 && <p className="balance-note">A positive sign means the person is owed money overall; a minus sign means they owe money overall.</p>}
             </section>
           )}
 
@@ -462,13 +466,17 @@ function App() {
         <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
           <form className="modal" onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : 'Record a settlement'}</h2></div>
+              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'person' ? 'Add a person' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
+            {modal === 'person' && (
+              <label>Person's name<input required name="name" maxLength="255" autoFocus placeholder="Enter a name" /></label>
+            )}
+
             {modal === 'expense' && (
               <>
-                <label>What was it for?<input required name="title" maxLength="255" placeholder="e.g. Dinner at Momo House" /></label>
+                <label>What was it for?<input required name="title" maxLength="255" placeholder="Enter an expense name" /></label>
                 <div className="form-row">
                   <label>Amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" required /></label>
                   <label>Category<select name="category">{Object.keys(categoryIcons).map(category => <option key={category}>{category}</option>)}</select></label>
@@ -487,7 +495,7 @@ function App() {
 
             {modal === 'group' && (
               <>
-                <label>Group name<input required name="name" maxLength="255" placeholder="e.g. Summer road trip" /></label>
+                <label>Group name<input required name="name" maxLength="255" placeholder="Enter a group name" /></label>
                 <label>Group icon<select name="icon"><option value="users">People</option><option value="house">Home</option><option value="mountain">Travel</option></select></label>
               </>
             )}
@@ -506,7 +514,7 @@ function App() {
             )}
 
             <button className="button button-dark modal-submit" disabled={busy}>
-              {busy ? 'Saving…' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
+              {busy ? 'Saving…' : modal === 'person' ? 'Add person' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
               <ArrowRight size={15} />
             </button>
           </form>

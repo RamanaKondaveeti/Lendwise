@@ -30,70 +30,6 @@ async function init() {
   for (const statement of schema.split(';').map(part => part.trim()).filter(Boolean)) {
     await pool.query(statement);
   }
-
-  const [count] = await q('SELECT COUNT(*) AS n FROM people');
-  if (Number(count.n) !== 0) return;
-
-  const people = [
-    ['Alex Morgan', 'AM', '#d7efe2'],
-    ['Maya Chen', 'MC', '#f4d8bf'],
-    ['Leo Park', 'LP', '#d6e1f4'],
-    ['Nina Patel', 'NP', '#f1d6e3'],
-    ['Sam Rivera', 'SR', '#e8e2bd']
-  ];
-  for (const person of people) {
-    await q('INSERT INTO people(name, initials, color) VALUES(?, ?, ?)', person);
-  }
-
-  const groupIds = [];
-  for (const group of [
-    ['Weekend in the woods', 'mountain', '#dcebdd'],
-    ['Flat 4B', 'house', '#eee0cf'],
-    ['The usuals', 'users', '#e9ddf2']
-  ]) {
-    const result = await q('INSERT INTO `groups`(name, icon, color) VALUES(?, ?, ?)', group);
-    groupIds.push(result.insertId);
-  }
-
-  const ids = (await q('SELECT id FROM people ORDER BY id')).map(person => person.id);
-  await q(
-    `INSERT INTO expenses(group_id, title, amount, paid_by, category, created_at)
-     VALUES
-       (?, 'Cabin groceries', 186.40, ?, 'Shopping', NOW() - INTERVAL 2 DAY),
-       (?, 'Gas for the drive', 72.00, ?, 'Transport', NOW() - INTERVAL 3 DAY)`,
-    [groupIds[0], ids[1], groupIds[0], ids[2]]
-  );
-  await q(
-    `INSERT INTO expenses(group_id, title, amount, paid_by, category, created_at)
-     VALUES(?, 'Internet - November', 64.99, ?, 'Utilities', NOW() - INTERVAL 1 DAY)`,
-    [groupIds[1], ids[3]]
-  );
-  await q(
-    `INSERT INTO expenses(group_id, title, amount, paid_by, category, created_at)
-     VALUES(?, 'Dinner at Momo House', 124.50, ?, 'Food & drink', NOW() - INTERVAL 5 HOUR)`,
-    [groupIds[2], ids[1]]
-  );
-
-  const expenses = await q('SELECT id, group_id, amount FROM expenses');
-  for (const expense of expenses) {
-    const participants = expense.group_id === groupIds[0]
-      ? ids.slice(0, 4)
-      : expense.group_id === groupIds[1]
-        ? ids.slice(0, 3)
-        : ids.slice(0, 4);
-    const each = Number(expense.amount) / participants.length;
-    for (const personId of participants) {
-      await q('INSERT INTO splits(expense_id, person_id, amount) VALUES(?, ?, ?)', [
-        expense.id,
-        personId,
-        each
-      ]);
-    }
-  }
-  await q(
-    "INSERT INTO settlements(payer_id, payee_id, amount, note) VALUES(?, ?, 38.50, 'Coffee catch-up')",
-    [ids[0], ids[1]]
-  );
 }
 
 app.get('/api/health', async (_req, res) => {
@@ -171,6 +107,29 @@ app.get('/api/expenses', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Could not load expenses.' });
+  }
+});
+
+app.post('/api/people', async (req, res) => {
+  const { name } = req.body;
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 255) {
+    return res.status(400).json({ error: 'A name of 1 to 255 characters is required.' });
+  }
+
+  const initials = name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
+  try {
+    const result = await q(
+      'INSERT INTO people(name, initials) VALUES(?, ?)',
+      [name.trim(), initials]
+    );
+    const [person] = await q(
+      'SELECT id, name, initials, color FROM people WHERE id = ?',
+      [result.insertId]
+    );
+    res.status(201).json(person);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not create this person.' });
   }
 });
 
