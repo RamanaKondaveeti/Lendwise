@@ -573,7 +573,7 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav>
-          {[[LayoutDashboard, 'Overview'], [Users, 'Groups'], [ReceiptText, 'Activity'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
+          {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
             <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => setTab(name)}>
               <Icon size={18} />{name}
               {name === 'Activity' && <span className="nav-count">{data.activityCount || 0}</span>}
@@ -629,6 +629,7 @@ function App() {
               <h1>{tab === 'Overview' ? <>Good day<span className="wave">, {firstName}</span></> : pageTitle}</h1>
               <p className="subtitle">
                 {tab === 'Overview' && 'Here’s the latest on your shared expenses.'}
+                {tab === 'Users' && 'Everyone added to this workspace.'}
                 {tab === 'Groups' && 'Your shared circles and their expenses.'}
                 {tab === 'Activity' && 'Every expense recorded across your groups.'}
                 {tab === 'Balances' && 'See where everyone stands and record payments.'}
@@ -734,6 +735,49 @@ function App() {
                   })}
                 </div>
               ) : <div className="empty">No groups yet. Create one to start sharing expenses.</div>}
+            </section>
+          )}
+
+          {tab === 'Users' && (
+            <section className="screen-panel">
+              <div className="panel-heading screen-panel-heading">
+                <div>
+                  <div className="section-title">All users <span className="title-count">{people.length}</span></div>
+                  <div className="section-subtitle">Users added to {authUser.workspaceName || 'this workspace'}.</div>
+                </div>
+                <div className="user-screen-actions">
+                  <button className="button button-light" onClick={() => setModal('person')}><Plus size={15} />Add user</button>
+                  <button className="button button-dark" onClick={() => { setGlobalUserQuery(''); setGlobalUserResults([]); setManualInviteLink(''); setModal('invite') }}><Plus size={15} />Invite user</button>
+                </div>
+              </div>
+              {people.length ? (
+                <div className="workspace-user-list">
+                  {people
+                    .filter(person => person.name.toLowerCase().includes(normalizedSearch))
+                    .map(person => {
+                      const personBalance = Number(data.balances.find(balance => balance.id === person.id)?.balance || 0)
+                      const memberOf = groups.filter(group => group.members?.some(member => member.id === person.id))
+                      return (
+                        <article className="workspace-user-row" key={person.id}>
+                          <div className="avatar" style={{ background: person.color }}>{person.initials}</div>
+                          <div className="workspace-user-copy">
+                            <b>{person.name}{person.id === data.currentUserId ? ' (you)' : ''}</b>
+                            <span>{memberOf.length ? memberOf.map(group => group.name).join(', ') : 'Not assigned to a group'}</span>
+                          </div>
+                          <div className={`workspace-user-balance ${personBalance < 0 ? 'is-owed' : personBalance > 0 ? 'is-owing' : ''}`}>
+                            <b>{personBalance < 0 ? '+' : personBalance > 0 ? '−' : ''}{money(personBalance)}</b>
+                            <span>{personBalance < 0 ? 'owed' : personBalance > 0 ? 'owes' : 'settled'}</span>
+                          </div>
+                        </article>
+                      )
+                    })}
+                  {!people.some(person => person.name.toLowerCase().includes(normalizedSearch)) && (
+                    <div className="empty">No users match “{search}”.</div>
+                  )}
+                </div>
+              ) : (
+                <div className="empty">No users in this workspace yet. Add a user or invite someone to get started.</div>
+              )}
             </section>
           )}
 

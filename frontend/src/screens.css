@@ -31,6 +31,17 @@
 .manual-invite label{min-width:0}
 .manual-invite input{font-size:10px!important}
 .manual-invite .button{height:37px;padding:0 10px;font-size:10px}
+.user-screen-actions{display:flex;gap:8px}
+.workspace-user-list{display:grid}
+.workspace-user-row{display:flex;align-items:center;gap:12px;min-height:68px;padding:10px 8px;border-bottom:1px solid #eef2ef}
+.workspace-user-row:last-child{border-bottom:0}
+.workspace-user-copy{display:grid;flex:1;min-width:0;gap:4px}
+.workspace-user-copy b{overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.workspace-user-copy span,.workspace-user-balance span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#788a80;font-size:10px}
+.workspace-user-balance{display:grid;min-width:95px;gap:4px;text-align:right}
+.workspace-user-balance b{font-size:12px}
+.workspace-user-balance.is-owed b{color:#4f8057}
+.workspace-user-balance.is-owing b{color:#ad7952}
 .activity-copy i{font-style:normal;padding:0 6px;color:#b5bab2}
 .range-select select{appearance:none;border:0;outline:0;background:transparent;color:#727b70;font-size:9px;cursor:pointer}
 .back-arrow{transform:rotate(180deg)}
