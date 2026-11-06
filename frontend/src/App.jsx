@@ -311,6 +311,7 @@ function App() {
               </p>
             </div>
             <div className="welcome-actions">
+              <button className="button button-light" onClick={() => setModal('person')}><Plus size={16} />Add user</button>
               <button className="button button-light" onClick={() => setModal('group')}><Plus size={16} />Create group</button>
               <button className="button button-dark" disabled={!people.length || !groups.length} onClick={() => setModal('expense')}><Plus size={17} />Add an expense</button>
             </div>
@@ -431,7 +432,7 @@ function App() {
             <section className="panel screen-panel">
               <div className="panel-heading screen-panel-heading">
                 <div><div className="section-title">People & balances <span className="title-count">{data.balances.length}</span></div><div className="section-subtitle">Net balance calculated from expenses, splits, and settlements.</div></div>
-                <button className="button button-light" onClick={() => setModal('person')}><Plus size={15} />Add person</button>
+                <button className="button button-light" onClick={() => setModal('person')}><Plus size={15} />Add user</button>
               </div>
               {data.balances.length ? <div className="balance-table">
                 <div className="balance-table-header"><span>PERSON</span><span>NET BALANCE</span><span>STATUS</span></div>
@@ -466,12 +467,12 @@ function App() {
         <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
           <form className="modal" onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'person' ? 'Add a person' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : 'Record a settlement'}</h2></div>
+              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'person' ? 'Add a user' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
             {modal === 'person' && (
-              <label>Person's name<input required name="name" maxLength="255" autoFocus placeholder="Enter a name" /></label>
+              <label>User's name<input required name="name" maxLength="255" autoFocus placeholder="Enter a name" /></label>
             )}
 
             {modal === 'expense' && (
@@ -514,7 +515,7 @@ function App() {
             )}
 
             <button className="button button-dark modal-submit" disabled={busy}>
-              {busy ? 'Saving…' : modal === 'person' ? 'Add person' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
+              {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
               <ArrowRight size={15} />
             </button>
           </form>
