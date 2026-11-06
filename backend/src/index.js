@@ -182,7 +182,7 @@ async function migrateWorkspaceOwnership() {
   await ensureColumn('accounts', 'email_verified_at', 'DATETIME NULL');
   await ensureColumn('auth_sessions', 'workspace_id', 'INT NULL');
 
-  const [legacyAccounts] = await q(
+  const legacyAccounts = await q(
     `SELECT a.id, a.person_id, p.name, p.initials, p.color
      FROM accounts a JOIN people p ON p.id = a.person_id
      WHERE a.workspace_id IS NULL ORDER BY a.id`
@@ -222,7 +222,7 @@ async function migrateWorkspaceOwnership() {
        (SELECT COUNT(*) FROM \`groups\` WHERE workspace_id IS NULL) AS total`
   );
   if (Number(unownedRecords.total)) {
-    const [workspace] = await q("INSERT INTO workspaces(name) VALUES('Legacy workspace')");
+    const workspace = await q("INSERT INTO workspaces(name) VALUES('Legacy workspace')");
     await q('UPDATE people SET workspace_id = ? WHERE workspace_id IS NULL', [workspace.insertId]);
     await q('UPDATE `groups` SET workspace_id = ? WHERE workspace_id IS NULL', [workspace.insertId]);
   }
