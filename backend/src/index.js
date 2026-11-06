@@ -133,15 +133,6 @@ async function createEmailToken(accountId, type, seconds = emailTokenDurationSec
   return token;
 }
 
-async function sendVerification(account) {
-  const token = await createEmailToken(account.id, 'verification');
-  await sendEmail({
-    to: account.email,
-    subject: 'Verify your Lendwise email',
-    text: `Verify your email address: ${appUrl}/?verify=${encodeURIComponent(token)}`
-  });
-}
-
 const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 8,
@@ -179,7 +170,6 @@ async function migrateWorkspaceOwnership() {
   await ensureColumn('people', 'workspace_id', 'INT NULL');
   await ensureColumn('groups', 'workspace_id', 'INT NULL');
   await ensureColumn('accounts', 'workspace_id', 'INT NULL');
-  await ensureColumn('accounts', 'email_verified_at', 'DATETIME NULL');
   await ensureColumn('auth_sessions', 'workspace_id', 'INT NULL');
 
   const legacyAccounts = await q(
@@ -299,10 +289,6 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
     console.error(error);
     return res.status(500).json({ error: 'Could not create your account.' });
   }
-  if (!emailIsConfigured()) {
-    return res.status(503).json({ error: 'Account email is unavailable. Please contact the workspace administrator.' });
-  }
-
   const initials = normalizedName.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
   let connection;
   let inTransaction = false;
@@ -352,20 +338,13 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
     }
     await connection.commit();
     inTransaction = false;
-    try {
-      await sendVerification({ id: account.insertId, email: normalizedEmail });
-    } catch (emailError) {
-      console.error('Signup verification email delivery failed', emailError);
-      return res.status(201).json({
-        verificationRequired: true,
-        emailDeliveryFailed: true,
-        message: 'Your account was created, but the verification email could not be sent. Ask an administrator to check email settings.'
-      });
-    }
+    await createSession(account.insertId, workspaceId, res);
     res.status(201).json({
-      verificationRequired: true,
+      id: account.insertId,
       email: normalizedEmail,
-      message: 'Check your email for a verification link.'
+      name: normalizedName,
+      personId: person.insertId,
+      workspaceId
     });
   } catch (error) {
     if (inTransaction) {
@@ -382,74 +361,6 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
     res.status(500).json({ error: 'Could not create your account.' });
   } finally {
     connection?.release();
-  }
-});
-
-app.post('/api/auth/verify-email', authRateLimit, async (req, res) => {
-  const { token } = req.body || {};
-  if (typeof token !== 'string' || token.length < 20 || token.length > 128) {
-    return res.status(400).json({ error: 'Verification link is invalid or expired.' });
-  }
-
-  let connection;
-  try {
-    connection = await pool.getConnection();
-    await connection.beginTransaction();
-    const [tokens] = await connection.execute(
-      `SELECT t.account_id, a.workspace_id
-       FROM email_tokens t JOIN accounts a ON a.id = t.account_id
-       WHERE t.token_hash = ? AND t.token_type = 'verification'
-         AND t.expires_at > UTC_TIMESTAMP() FOR UPDATE`,
-      [hashSessionToken(token)]
-    );
-    const verification = tokens[0];
-    if (!verification) {
-      await connection.rollback();
-      return res.status(400).json({ error: 'Verification link is invalid or expired.' });
-    }
-    await connection.execute(
-      'UPDATE accounts SET email_verified_at = UTC_TIMESTAMP() WHERE id = ?',
-      [verification.account_id]
-    );
-    await connection.execute(
-      'DELETE FROM email_tokens WHERE account_id = ? AND token_type = ?',
-      [verification.account_id, 'verification']
-    );
-    const sessionToken = crypto.randomBytes(32).toString('base64url');
-    await connection.execute(
-      `INSERT INTO auth_sessions(token_hash, account_id, workspace_id, expires_at)
-       VALUES(?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND))`,
-      [hashSessionToken(sessionToken), verification.account_id, verification.workspace_id, sessionDurationSeconds]
-    );
-    await connection.commit();
-    setSessionCookie(res, sessionToken);
-    res.json({ ok: true });
-  } catch (error) {
-    if (connection) await connection.rollback();
-    console.error(error);
-    res.status(500).json({ error: 'Could not verify your email.' });
-  } finally {
-    connection?.release();
-  }
-});
-
-app.post('/api/auth/resend-verification', authRateLimit, async (req, res) => {
-  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: 'Enter a valid email address.' });
-  }
-  try {
-    const [account] = await q(
-      'SELECT id, email, email_verified_at FROM accounts WHERE email = ?',
-      [email]
-    );
-    if (account && !account.email_verified_at) {
-      await sendVerification(account);
-    }
-    res.json({ message: 'If that account needs verification, a link will be sent.' });
-  } catch (error) {
-    console.error('Verification email delivery failed', error);
-    res.json({ message: 'If that account needs verification, a link will be sent.' });
   }
 });
 
@@ -541,7 +452,7 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
   try {
     const [account] = await q(
       `SELECT a.id, a.email, a.password_salt, a.password_hash, a.person_id,
-              a.workspace_id, a.email_verified_at, p.name
+              a.workspace_id, p.name
        FROM accounts a JOIN people p ON p.id = a.person_id AND p.workspace_id = a.workspace_id
        WHERE a.email = ?`,
       [normalizedEmail]
@@ -558,9 +469,6 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
       return res.status(401).json({ error: 'Email or password is incorrect.' });
     }
 
-    if (!account.email_verified_at) {
-      return res.status(403).json({ error: 'Verify your email before signing in.', verificationRequired: true });
-    }
     await createSession(account.id, account.workspace_id, res);
     res.json({
       id: account.id,
@@ -600,8 +508,7 @@ async function requireAuth(req, res, next) {
        JOIN accounts a ON a.id = s.account_id
        JOIN people p ON p.id = a.person_id
          WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP()
-           AND a.workspace_id = s.workspace_id AND p.workspace_id = a.workspace_id
-           AND a.email_verified_at IS NOT NULL`,
+           AND a.workspace_id = s.workspace_id AND p.workspace_id = a.workspace_id`,
         [hashSessionToken(token)]
     );
     if (!account) {

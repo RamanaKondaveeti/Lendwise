@@ -49,7 +49,6 @@ async function request(url, options) {
   if (!response.ok) {
     const error = new Error(body.error || 'The request could not be completed.')
     error.status = response.status
-    error.verificationRequired = body.verificationRequired === true
     throw error
   }
   return body
@@ -100,7 +99,6 @@ function App() {
   const [authError, setAuthError] = useState('')
   const [authNotice, setAuthNotice] = useState('')
   const [authEmail, setAuthEmail] = useState('')
-  const [verificationRequired, setVerificationRequired] = useState(false)
   const [invitationToken, setInvitationToken] = useState('')
   const [resetToken, setResetToken] = useState('')
   const [tab, setTab] = useState('Overview')
@@ -124,9 +122,8 @@ function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const invite = params.get('invite')
-    const verify = params.get('verify')
     const reset = params.get('reset')
-    if (invite || verify || reset) window.history.replaceState({}, '', window.location.pathname)
+    if (invite || params.has('verify') || reset) window.history.replaceState({}, '', window.location.pathname)
     let active = true
     async function initializeAuth() {
       try {
@@ -140,16 +137,6 @@ function App() {
         } else if (reset) {
           setResetToken(reset)
           setAuthMode('reset')
-        } else if (verify) {
-          await request('/api/auth/verify-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: verify }),
-          })
-          const account = await request('/api/auth/me')
-          if (!active) return
-          setAuthUser(account)
-          await refresh()
         } else {
           const account = await request('/api/auth/me')
           if (!active) return
@@ -251,7 +238,6 @@ function App() {
         setAuthMode('login')
         setResetToken('')
         setAuthNotice(result.message)
-        setVerificationRequired(false)
         return
       }
       const response = await request(`/api/auth/${authMode}`, {
@@ -264,33 +250,8 @@ function App() {
           invitationToken: signingUp ? invitationToken || undefined : undefined,
         }),
       })
-      if (response.verificationRequired) {
-        setVerificationRequired(true)
-        setAuthMode('login')
-        setInvitationToken('')
-        setAuthNotice(response.message)
-        return
-      }
       setAuthUser(response)
       await refresh()
-    } catch (error) {
-      setAuthError(error.message)
-      if (error.verificationRequired) setVerificationRequired(true)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function resendVerification() {
-    setBusy(true)
-    setAuthError('')
-    try {
-      const result = await request('/api/auth/resend-verification', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: authEmail }),
-      })
-      setAuthNotice(result.message)
     } catch (error) {
       setAuthError(error.message)
     } finally {
@@ -306,7 +267,6 @@ function App() {
       setAuthMode('login')
       setAuthError('')
       setAuthNotice('')
-      setVerificationRequired(false)
     } catch (error) {
       notify(error.message)
     }
@@ -438,7 +398,6 @@ function App() {
                 <ArrowRight size={16} />
               </button>
             </form>
-            {verificationRequired && <button className="auth-text-button" type="button" onClick={resendVerification} disabled={busy}>Resend verification email</button>}
             {authMode === 'login' && <button className="auth-text-button" type="button" onClick={() => { setAuthMode('forgot'); setAuthError(''); setAuthNotice('') }}>Forgot password?</button>}
             {(authMode === 'forgot' || authMode === 'reset') && <button className="auth-text-button" type="button" onClick={() => { setAuthMode('login'); setAuthError(''); setAuthNotice('') }}>Back to sign in</button>}
             <p className="auth-privacy"><CircleHelp size={14} /> Your account details are stored securely.</p>

@@ -36,20 +36,20 @@ The frontend is published on port 3000 for the HTTPS proxy. The backend is only 
 
 ## Local development
 
-For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` in `.env`, then run `npm install` and `npm run dev` in `backend`, and `npm install` and `npm run dev` in `frontend` in separate terminals. The non-production backend can run without SMTP, but signup, verification, password recovery, and invitations require valid SMTP settings.
+For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` in `.env`, then run `npm install` and `npm run dev` in `backend`, and `npm install` and `npm run dev` in `frontend` in separate terminals. Account signup and login do not require email delivery. Password recovery and workspace invitations require valid SMTP settings.
 
 ## Included
 
 - Private workspace data isolation for people, groups, expenses, and settlements
 - Email/password signup and login with scrypt password hashes and database-backed sessions
-- Email verification, password reset, and workspace invitation links
+- Password reset and workspace invitation links
 - Rate limiting, security headers, and request body limits; secure cookies when `COOKIE_SECURE=true`
 - Manual creation of people and groups; no generated sample or dummy records
 - MySQL persistence for groups, group members, expenses, splits, and settlements
 
 ## Before customer release
 
-- Test signup, verification, login, reset, invitations, and workspace isolation against the production MySQL version and SMTP provider.
+- Test signup, login, password reset, invitations, and workspace isolation against the production MySQL version and SMTP provider.
 - Test upgrades and restores using a separate database copy; do not rely on an untested first-run migration.
 - Configure and verify HTTPS, SMTP, MySQL backups, monitoring, and an incident-response contact.
 - Define and implement customer data export/deletion and retention procedures before accepting customer data.

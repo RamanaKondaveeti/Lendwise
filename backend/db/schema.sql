@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS accounts (
   password_salt CHAR(32) NOT NULL,
   password_hash CHAR(128) NOT NULL,
   person_id INT NOT NULL UNIQUE,
-  email_verified_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_accounts_workspace (workspace_id),
   CONSTRAINT fk_accounts_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -43,7 +42,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 CREATE TABLE IF NOT EXISTS email_tokens (
   token_hash CHAR(64) PRIMARY KEY,
   account_id INT NOT NULL,
-  token_type ENUM('verification', 'password_reset') NOT NULL,
+  token_type ENUM('password_reset') NOT NULL,
   expires_at DATETIME NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_email_tokens_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
