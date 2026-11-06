@@ -967,6 +967,86 @@ app.post('/api/people', async (req, res) => {
   }
 });
 
+app.delete('/api/people/:id', async (req, res) => {
+  const personId = Number(req.params.id);
+  if (!Number.isInteger(personId) || personId <= 0) {
+    return res.status(400).json({ error: 'User ID must be a positive integer.' });
+  }
+  if (personId === req.account.person_id) {
+    return res.status(400).json({ error: 'You cannot delete yourself from this workspace.' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [people] = await connection.execute(
+      `SELECT p.id, a.id AS primary_account_id, wm.account_id AS member_account_id
+       FROM people p
+       LEFT JOIN accounts a ON a.person_id = p.id
+       LEFT JOIN workspace_members wm
+         ON wm.person_id = p.id AND wm.workspace_id = p.workspace_id
+       WHERE p.id = ? AND p.workspace_id = ?
+       FOR UPDATE`,
+      [personId, req.account.workspace_id]
+    );
+    const person = people[0];
+    if (!person) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'This user was not found in your workspace.' });
+    }
+    if (person.primary_account_id) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'This user owns an account and cannot be deleted from the workspace user list.'
+      });
+    }
+
+    const [references] = await connection.execute(
+      `SELECT
+         (SELECT COUNT(*) FROM expenses WHERE paid_by = ?) AS paid_expenses,
+         (SELECT COUNT(*) FROM splits WHERE person_id = ?) AS expense_splits,
+         (SELECT COUNT(*) FROM settlements WHERE payer_id = ? OR payee_id = ?) AS settlements`,
+      [personId, personId, personId, personId]
+    );
+    const history = references[0];
+    if (Number(history.paid_expenses) || Number(history.expense_splits) || Number(history.settlements)) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'This user has expense or settlement history and cannot be deleted.'
+      });
+    }
+
+    if (person.member_account_id) {
+      await connection.execute(
+        'DELETE FROM auth_sessions WHERE account_id = ? AND workspace_id = ?',
+        [person.member_account_id, req.account.workspace_id]
+      );
+      await connection.execute(
+        'DELETE FROM workspace_members WHERE account_id = ? AND workspace_id = ?',
+        [person.member_account_id, req.account.workspace_id]
+      );
+    }
+    await connection.execute(
+      'DELETE FROM people WHERE id = ? AND workspace_id = ?',
+      [personId, req.account.workspace_id]
+    );
+    await connection.commit();
+    res.json({ ok: true, message: 'User deleted from this workspace.' });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(409).json({
+        error: 'This user has expense or settlement history and cannot be deleted.'
+      });
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Could not delete this user.' });
+  } finally {
+    connection?.release();
+  }
+});
+
 app.post('/api/expenses', async (req, res) => {
   const { groupId, title, amount, paidBy, category = 'Other', participants } = req.body || {};
   const normalizedGroupId = Number(groupId);

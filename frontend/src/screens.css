@@ -42,6 +42,10 @@
 .workspace-user-balance b{font-size:12px}
 .workspace-user-balance.is-owed b{color:#4f8057}
 .workspace-user-balance.is-owing b{color:#ad7952}
+.user-delete-button{display:grid;flex:none;width:34px;height:34px;place-items:center;border:1px solid #f0dfdc;border-radius:8px;background:#fff;color:#a95e55;cursor:pointer}
+.user-delete-button:hover:not(:disabled){border-color:#d8aaa4;background:#fff7f6}
+.user-delete-button:focus-visible{outline:2px solid #b9685e;outline-offset:2px}
+.user-delete-button:disabled{opacity:.42;cursor:not-allowed}
 .activity-copy i{font-style:normal;padding:0 6px;color:#b5bab2}
 .range-select select{appearance:none;border:0;outline:0;background:transparent;color:#727b70;font-size:9px;cursor:pointer}
 .back-arrow{transform:rotate(180deg)}
@@ -93,6 +97,10 @@ footer svg{vertical-align:middle}
   .screen-panel{padding:13px}
   .screen-panel-heading{align-items:flex-start;gap:10px}
   .screen-panel-heading>.button{white-space:nowrap}
+  .user-screen-actions{flex-wrap:wrap;justify-content:flex-end}
+  .workspace-user-row{gap:8px;padding-right:2px;padding-left:2px}
+  .workspace-user-balance{min-width:68px}
+  .user-delete-button{width:30px;height:30px}
   .data-list .activity-row{grid-template-columns:28px minmax(70px,1fr) 52px;gap:6px;height:60px}
   .data-list .activity-payer{display:none}
   .data-list .activity-amount b{font-size:9px}

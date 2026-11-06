@@ -18,6 +18,7 @@ import {
   Plus,
   ReceiptText,
   Search,
+  Trash2,
   Users,
   Utensils,
   ShoppingBasket,
@@ -378,6 +379,24 @@ function App() {
       notify('Invitation link copied.')
     } catch (error) {
       notify('Copy was blocked. Select and copy the invitation link manually.')
+    }
+  }
+
+  async function deletePerson(person) {
+    if (!window.confirm(`Delete ${person.name} from this workspace? Users with expense or settlement history cannot be deleted.`)) {
+      return
+    }
+
+    setBusy(true)
+    try {
+      const result = await request(`/api/people/${person.id}`, { method: 'DELETE' })
+      await refresh()
+      setReloadKey(key => key + 1)
+      notify(result.message || 'User deleted from this workspace.')
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -768,6 +787,16 @@ function App() {
                             <b>{personBalance < 0 ? '+' : personBalance > 0 ? '−' : ''}{money(personBalance)}</b>
                             <span>{personBalance < 0 ? 'owed' : personBalance > 0 ? 'owes' : 'settled'}</span>
                           </div>
+                          <button
+                            className="user-delete-button"
+                            type="button"
+                            aria-label={`Delete ${person.name}`}
+                            title={person.id === data.currentUserId ? 'You cannot delete yourself' : `Delete ${person.name}`}
+                            disabled={busy || person.id === data.currentUserId}
+                            onClick={() => deletePerson(person)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
                         </article>
                       )
                     })}
