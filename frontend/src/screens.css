@@ -83,3 +83,60 @@ footer svg{vertical-align:middle}
   .search kbd{display:none}
   .form-row{grid-template-columns:1fr 1fr}
 }
+
+:root{color-scheme:dark;color:#e5eee8;background:#111815}
+body{background:#111815;color:#e5eee8}
+.sidebar,.topbar,.panel,.screen-panel,.balance-card,.modal{background:#19221e;border-color:#2a3931}
+.sidebar{background:#151e1a;border-right-color:#2a3931}
+.brand{color:#edf5ef}
+.brand-mark,.button-dark,.toast{background:#18866d;border-color:#18866d}
+.brand-mark{color:#eafff6}
+.brand-dot,.plain-link,.group-card-link,.view-all,.inline-link:hover{color:#5ce0ba}
+.workspace{border-color:#2a3931;background:#1a2520}
+.workspace-icon{background:#293a32;color:#79e3bc}
+.workspace small,.profile small,.section-subtitle,.group-name span,.group-total span,.activity-copy span,.activity-payer span,.activity-amount span,.group-card-meta,.balance-person span,.balance-table-header,.balance-status,.form-hint{color:#9aaea3}
+.muted,.nav-item svg{color:#8ba095}
+.nav-label,.eyebrow,.card-title{color:#91a69a}
+.nav-item{color:#bfcdc4}
+.nav-item.active{background:#203d34;color:#75e7c2}
+.nav-item.active svg{color:#75e7c2}
+.group-link{color:#c3d0c8}
+.group-link:hover,.group-row-button:hover{background:#22342c}
+.group-links .group-link:first-child .group-ico,.group-icon,.group-ico{color:#b4edda}
+.profile,.footer,.balance-person-row,.activity-row,.group-row,.view-all,.balance-note{border-color:#2a3931}
+.topbar{border-color:#2a3931}
+.crumb{color:#96aa9e}
+.crumb b,.welcome-row h1,.section-title,.group-card-name,.group-card strong,.activity-copy b,.activity-amount b,.group-name b,.group-total b,.balance-person b,.balance-value,.modal h2{color:#e5eee8}
+.search,.select-button,.button-light,.group-card{background:#1d2923;border-color:#33473b;color:#d4e1d8}
+.search input,.range-select select{color:#e5eee8}
+.search input::placeholder,.modal input::placeholder{color:#81958a}
+.search kbd{border-color:#384b40;color:#a5b8ac}
+.icon-button{color:#abc0b3}
+.top-avatar{background:#3c6856;color:#e0fff1}
+.live-dot{background:#57ddb4}
+.button-light:hover,.select-button:hover,.group-card:hover{border-color:#55bb96}
+.total-card{background:linear-gradient(125deg,#203d34,#254c40);border-color:#356a56}
+.positive-card{background:linear-gradient(125deg,#1d382d,#214838);border-color:#2d6549}
+.negative-card{background:linear-gradient(125deg,#392c22,#4a3426);border-color:#69472f}
+.balance-card .amount{color:#f0f7f2}
+.card-symbol,.tip-icon{background:#2c483a;color:#83e5bb}
+.orange-symbol{background:#513c2b;color:#ffc18b}
+.balance-foot,.small-detail,.tip-card p{color:#a7b9ac}
+.balance-indicator,.balance-value.is-owed,.balance-status.is-owed{color:#65dfb0}
+.balance-value.is-owing,.balance-status.is-owing{color:#ffb879}
+.title-count{background:#2a3931;color:#b8c9bf}
+.activity-icon{color:#e3c9ff}
+.tip-card{background:linear-gradient(120deg,#302c25,#393526);border-color:#504737}
+.tip-top{color:#c7ba8a}
+.tip-card p b{color:#e9dfb8}
+.empty{color:#9aafa3}
+.overlay{background:#050a08c9}
+.modal{box-shadow:0 20px 80px #0009}
+.modal label,.participant-field legend{color:#c5d4cb}
+.modal input,.modal select{background:#111a16;border-color:#34483c;color:#e5eee8}
+.participant-field{border-color:#34483c}
+.modal .close{color:#b7c9be}
+.balance-note{color:#9aafa3}
+footer{border-color:#2a3931;color:#82968a}
+footer a{color:#9ab7a4}
+.button:disabled{opacity:.45}
