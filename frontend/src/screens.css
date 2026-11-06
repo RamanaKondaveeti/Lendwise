@@ -14,6 +14,23 @@
 .data-list .activity-amount b{font-size:11px}
 .inline-link{border:0;background:transparent;padding:0;color:inherit;font-size:inherit}
 .inline-link:hover{color:#426a49;text-decoration:underline}
+.workspace-switcher{position:relative;margin-bottom:29px}
+.workspace-switcher .workspace{width:100%;margin:0;text-align:left;cursor:pointer;color:inherit}
+.workspace-switcher .workspace>div:nth-child(2){min-width:0;flex:1}
+.workspace-switcher .workspace b,.workspace-switcher .workspace small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-menu{position:absolute;z-index:20;top:calc(100% + 6px);left:0;right:0;padding:5px;border:1px solid #dfe9e3;border-radius:10px;background:#fff;box-shadow:0 12px 30px #213c2c20}
+.workspace-menu button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:8px;padding:9px;border:0;border-radius:7px;background:#fff;text-align:left;font-size:11px}
+.workspace-menu button:hover:not(:disabled){background:#f2f8f4}
+.workspace-menu button:disabled{color:#27805e}
+.workspace-menu-empty{display:block;padding:9px;color:#788a80;font-size:10px;line-height:1.5}
+.global-user-results{display:grid;gap:6px;max-height:180px;overflow:auto}
+.global-user-result{display:flex;align-items:center;gap:8px;padding:7px;border:1px solid #e8eee9;border-radius:8px}
+.global-user-result b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:11px}
+.global-user-result .button{height:30px;padding:0 10px;font-size:10px}
+.manual-invite{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:8px;padding:10px;border:1px solid #cfe8d8;border-radius:8px;background:#effaf3}
+.manual-invite label{min-width:0}
+.manual-invite input{font-size:10px!important}
+.manual-invite .button{height:37px;padding:0 10px;font-size:10px}
 .activity-copy i{font-style:normal;padding:0 6px;color:#b5bab2}
 .range-select select{appearance:none;border:0;outline:0;background:transparent;color:#727b70;font-size:9px;cursor:pointer}
 .back-arrow{transform:rotate(180deg)}

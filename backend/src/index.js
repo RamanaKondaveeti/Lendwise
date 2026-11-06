@@ -171,6 +171,7 @@ async function migrateWorkspaceOwnership() {
   await ensureColumn('groups', 'workspace_id', 'INT NULL');
   await ensureColumn('accounts', 'workspace_id', 'INT NULL');
   await ensureColumn('auth_sessions', 'workspace_id', 'INT NULL');
+  await ensureColumn('workspace_invitations', 'invitee_account_id', 'INT NULL');
 
   const legacyAccounts = await q(
     `SELECT a.id, a.person_id, p.name, p.initials, p.color
@@ -220,6 +221,22 @@ async function migrateWorkspaceOwnership() {
     `UPDATE auth_sessions s JOIN accounts a ON a.id = s.account_id
      SET s.workspace_id = a.workspace_id WHERE s.workspace_id IS NULL`
   );
+  await q(
+    `INSERT IGNORE INTO workspace_members(account_id, workspace_id, person_id)
+     SELECT id, workspace_id, person_id FROM accounts
+     WHERE workspace_id IS NOT NULL AND person_id IS NOT NULL`
+  );
+  const [inviteeConstraints] = await pool.query(
+    `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'workspace_invitations'
+       AND CONSTRAINT_NAME = 'fk_workspace_invitations_invitee'`
+  );
+  if (!inviteeConstraints.length) {
+    await pool.query(
+      `ALTER TABLE workspace_invitations ADD CONSTRAINT fk_workspace_invitations_invitee
+       FOREIGN KEY (invitee_account_id) REFERENCES accounts(id) ON DELETE CASCADE`
+    );
+  }
 
   const [unmigrated] = await q(
     `SELECT
@@ -299,12 +316,12 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
     inTransaction = true;
     if (typeof invitationToken === 'string' && invitationToken) {
       const [invitations] = await connection.execute(
-        `SELECT id, workspace_id, email FROM workspace_invitations
+        `SELECT id, workspace_id, email, invitee_account_id FROM workspace_invitations
          WHERE token_hash = ? AND accepted_at IS NULL AND expires_at > UTC_TIMESTAMP() FOR UPDATE`,
         [hashSessionToken(invitationToken)]
       );
       const invitation = invitations[0];
-      if (!invitation || invitation.email !== normalizedEmail) {
+      if (!invitation || invitation.invitee_account_id || invitation.email !== normalizedEmail) {
         await connection.rollback();
         inTransaction = false;
         return res.status(400).json({ error: 'This invitation is invalid, expired, or for a different email.' });
@@ -320,13 +337,34 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
       );
       workspaceId = workspace.insertId;
     }
-    const [person] = await connection.execute(
-      'INSERT INTO people(workspace_id, name, initials) VALUES(?, ?, ?)',
-      [workspaceId, normalizedName, initials]
-    );
+    let personId;
+    if (invitationToken) {
+      const [existingPeople] = await connection.execute(
+        `SELECT p.id
+         FROM people p
+         LEFT JOIN accounts a ON a.person_id = p.id
+         WHERE p.workspace_id = ? AND LOWER(TRIM(p.name)) = LOWER(?)
+           AND a.id IS NULL
+         ORDER BY p.id
+         LIMIT 1 FOR UPDATE`,
+        [workspaceId, normalizedName]
+      );
+      personId = existingPeople[0]?.id;
+    }
+    if (!personId) {
+      const [person] = await connection.execute(
+        'INSERT INTO people(workspace_id, name, initials) VALUES(?, ?, ?)',
+        [workspaceId, normalizedName, initials]
+      );
+      personId = person.insertId;
+    }
     const [account] = await connection.execute(
       'INSERT INTO accounts(workspace_id, email, password_salt, password_hash, person_id) VALUES(?, ?, ?, ?, ?)',
-      [workspaceId, normalizedEmail, salt, passwordHash.toString('hex'), person.insertId]
+      [workspaceId, normalizedEmail, salt, passwordHash.toString('hex'), personId]
+    );
+    await connection.execute(
+      'INSERT INTO workspace_members(account_id, workspace_id, person_id) VALUES(?, ?, ?)',
+      [account.insertId, workspaceId, personId]
     );
     if (invitationToken) {
       const [accepted] = await connection.execute(
@@ -343,7 +381,7 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
       id: account.insertId,
       email: normalizedEmail,
       name: normalizedName,
-      personId: person.insertId,
+      personId,
       workspaceId
     });
   } catch (error) {
@@ -503,12 +541,14 @@ async function requireAuth(req, res, next) {
 
   try {
     const [account] = await q(
-        `SELECT a.id, a.email, a.person_id, s.workspace_id, p.name
+        `SELECT a.id, a.email, wm.person_id, s.workspace_id, p.name, w.name AS workspace_name
        FROM auth_sessions s
        JOIN accounts a ON a.id = s.account_id
-       JOIN people p ON p.id = a.person_id
+       JOIN workspace_members wm ON wm.account_id = a.id AND wm.workspace_id = s.workspace_id
+       JOIN people p ON p.id = wm.person_id AND p.workspace_id = wm.workspace_id
+       JOIN workspaces w ON w.id = s.workspace_id
          WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP()
-           AND a.workspace_id = s.workspace_id AND p.workspace_id = a.workspace_id`,
+           AND a.workspace_id IS NOT NULL`,
         [hashSessionToken(token)]
     );
     if (!account) {
@@ -524,7 +564,8 @@ async function requireAuth(req, res, next) {
 }
 
 app.use('/api', (req, res, next) => {
-  if (req.path === '/health' || req.path.startsWith('/auth/') || req.path.startsWith('/invitations/')) return next();
+  if (req.path === '/health' || req.path.startsWith('/auth/') ||
+      (req.method === 'GET' && /^\/invitations\/[^/]+$/.test(req.path))) return next();
   return requireAuth(req, res, next);
 });
 
@@ -534,8 +575,49 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
     email: req.account.email,
     name: req.account.name,
     personId: req.account.person_id,
-    workspaceId: req.account.workspace_id
+    workspaceId: req.account.workspace_id,
+    workspaceName: req.account.workspace_name
   });
+});
+
+app.get('/api/workspaces', async (req, res) => {
+  try {
+    const workspaces = await q(
+      `SELECT w.id, w.name, wm.person_id, (w.id = ?) AS active
+       FROM workspace_members wm
+       JOIN workspaces w ON w.id = wm.workspace_id
+       WHERE wm.account_id = ?
+       ORDER BY active DESC, w.name, w.id`,
+      [req.account.workspace_id, req.account.id]
+    );
+    res.json(workspaces);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load your workspaces.' });
+  }
+});
+
+app.post('/api/workspaces/active', async (req, res) => {
+  const workspaceId = Number(req.body?.workspaceId);
+  if (!Number.isInteger(workspaceId) || workspaceId <= 0) {
+    return res.status(400).json({ error: 'Choose a valid workspace.' });
+  }
+  try {
+    const token = getSessionToken(req);
+    const [membership] = await q(
+      'SELECT workspace_id FROM workspace_members WHERE account_id = ? AND workspace_id = ?',
+      [req.account.id, workspaceId]
+    );
+    if (!membership) return res.status(404).json({ error: 'Workspace not found.' });
+    await q(
+      'UPDATE auth_sessions SET workspace_id = ? WHERE token_hash = ? AND account_id = ?',
+      [workspaceId, hashSessionToken(token), req.account.id]
+    );
+    res.json({ ok: true, workspaceId });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not switch workspaces.' });
+  }
 });
 
 app.get('/api/health', async (_req, res) => {
@@ -554,7 +636,8 @@ app.get('/api/invitations/:token', async (req, res) => {
   }
   try {
     const [invitation] = await q(
-      `SELECT i.email, w.name AS workspace_name
+      `SELECT i.email, i.invitee_account_id IS NOT NULL AS existing_account,
+              w.name AS workspace_name
        FROM workspace_invitations i
        JOIN workspaces w ON w.id = i.workspace_id
        WHERE i.token_hash = ? AND i.accepted_at IS NULL
@@ -569,42 +652,169 @@ app.get('/api/invitations/:token', async (req, res) => {
   }
 });
 
-app.post('/api/invitations', async (req, res) => {
-  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: 'Enter a valid email address.' });
-  }
-  if (!emailIsConfigured()) {
-    return res.status(503).json({ error: 'Workspace invitations are unavailable until email delivery is configured.' });
+app.get('/api/users/search', async (req, res) => {
+  const search = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (search.length < 2 || search.length > 80) {
+    return res.status(400).json({ error: 'Enter at least 2 and no more than 80 characters.' });
   }
   try {
-    const [existingAccount] = await q('SELECT id FROM accounts WHERE email = ?', [email]);
-    if (existingAccount) {
+    const matches = await q(
+      `SELECT a.id AS account_id, p.name
+       FROM accounts a
+       JOIN people p ON p.id = a.person_id
+       LEFT JOIN workspace_members wm
+         ON wm.account_id = a.id AND wm.workspace_id = ?
+       LEFT JOIN workspace_invitations wi
+         ON wi.invitee_account_id = a.id AND wi.workspace_id = ?
+         AND wi.accepted_at IS NULL AND wi.expires_at > UTC_TIMESTAMP()
+       WHERE a.id <> ? AND wm.account_id IS NULL AND wi.id IS NULL
+         AND LOCATE(LOWER(?), LOWER(p.name)) > 0
+       ORDER BY p.name, a.id
+       LIMIT 10`,
+      [req.account.workspace_id, req.account.workspace_id, req.account.id, search]
+    );
+    res.json(matches);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not search users.' });
+  }
+});
+
+app.post('/api/invitations', async (req, res) => {
+  const inviteeAccountId = Number(req.body?.accountId);
+  const hasAccountId = Number.isInteger(inviteeAccountId) && inviteeAccountId > 0;
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!hasAccountId && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    return res.status(400).json({ error: 'Enter a valid email address.' });
+  }
+  try {
+    let targetEmail = email;
+    if (hasAccountId) {
+      const [targetAccount] = await q(
+        'SELECT id, email FROM accounts WHERE id = ?',
+        [inviteeAccountId]
+      );
+      if (!targetAccount || targetAccount.id === req.account.id) {
+        return res.status(404).json({ error: 'User not found.' });
+      }
+      const [membership] = await q(
+        'SELECT account_id FROM workspace_members WHERE account_id = ? AND workspace_id = ?',
+        [inviteeAccountId, req.account.workspace_id]
+      );
+      if (membership) return res.status(409).json({ error: 'This user is already in your workspace.' });
+      targetEmail = targetAccount.email;
+    } else {
+      const [existingAccount] = await q('SELECT id FROM accounts WHERE email = ?', [email]);
+      if (existingAccount) {
+        return res.status(400).json({ error: 'This email belongs to an existing account. Search for their name instead.' });
+      }
+    }
+
+    const [pending] = await q(
+      `SELECT id FROM workspace_invitations
+       WHERE workspace_id = ? AND accepted_at IS NULL AND expires_at > UTC_TIMESTAMP()
+         AND ((? IS NOT NULL AND invitee_account_id = ?) OR email = ?)`,
+      [req.account.workspace_id, hasAccountId ? inviteeAccountId : null, inviteeAccountId, targetEmail]
+    );
+    if (pending) {
       return res.status(202).json({ message: 'If the address can be invited, an invitation email will arrive shortly.' });
     }
 
     const token = crypto.randomBytes(32).toString('base64url');
     await q(
-      `INSERT INTO workspace_invitations(workspace_id, email, token_hash, invited_by, expires_at)
-       VALUES(?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 DAY))`,
-      [req.account.workspace_id, email, hashSessionToken(token), req.account.id]
+      `INSERT INTO workspace_invitations(workspace_id, invitee_account_id, email, token_hash, invited_by, expires_at)
+       VALUES(?, ?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 DAY))`,
+      [req.account.workspace_id, hasAccountId ? inviteeAccountId : null, targetEmail, hashSessionToken(token), req.account.id]
     );
     const inviteUrl = `${appUrl}/?invite=${encodeURIComponent(token)}`;
     try {
       await sendEmail({
-        to: email,
+        to: targetEmail,
         subject: 'You are invited to Lendwise',
-        text: `${req.account.name} invited you to join their Lendwise workspace. Create your account: ${inviteUrl}`
+        text: `${req.account.name} invited you to join the ${req.account.workspace_name} Lendwise workspace. Accept the invitation: ${inviteUrl}`
       });
     } catch (emailError) {
       console.error('Workspace invitation email delivery failed', emailError);
-      await q('DELETE FROM workspace_invitations WHERE token_hash = ?', [hashSessionToken(token)]);
-      return res.status(503).json({ error: 'Could not send this invitation. Please try again later.' });
+      return res.status(201).json({
+        message: 'Email could not be sent. Share the invitation link manually.',
+        emailSent: false,
+        invitationUrl: inviteUrl
+      });
     }
     res.status(201).json({ message: 'Invitation email sent.' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Could not create this invitation.' });
+  }
+});
+
+app.post('/api/invitations/accept', requireAuth, async (req, res) => {
+  const token = req.body?.token;
+  if (typeof token !== 'string' || token.length < 20 || token.length > 128) {
+    return res.status(400).json({ error: 'Invitation link is invalid or expired.' });
+  }
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [invitations] = await connection.execute(
+      `SELECT id, workspace_id FROM workspace_invitations
+       WHERE token_hash = ? AND invitee_account_id = ? AND accepted_at IS NULL
+         AND expires_at > UTC_TIMESTAMP() FOR UPDATE`,
+      [hashSessionToken(token), req.account.id]
+    );
+    const invitation = invitations[0];
+    if (!invitation) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'This invitation is invalid, expired, or for another account.' });
+    }
+
+    const [existingMembership] = await connection.execute(
+      'SELECT person_id FROM workspace_members WHERE account_id = ? AND workspace_id = ?',
+      [req.account.id, invitation.workspace_id]
+    );
+    let personId = existingMembership[0]?.person_id;
+    if (!personId) {
+      const [availablePeople] = await connection.execute(
+        `SELECT p.id FROM people p
+         LEFT JOIN accounts a ON a.person_id = p.id
+         LEFT JOIN workspace_members wm ON wm.person_id = p.id
+         WHERE p.workspace_id = ? AND LOWER(TRIM(p.name)) = LOWER(?)
+           AND a.id IS NULL AND wm.account_id IS NULL
+         ORDER BY p.id LIMIT 1 FOR UPDATE`,
+        [invitation.workspace_id, req.account.name]
+      );
+      if (availablePeople[0]) {
+        personId = availablePeople[0].id;
+      } else {
+        const initials = req.account.name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
+        const [person] = await connection.execute(
+          'INSERT INTO people(workspace_id, name, initials) VALUES(?, ?, ?)',
+          [invitation.workspace_id, req.account.name, initials]
+        );
+        personId = person.insertId;
+      }
+      await connection.execute(
+        'INSERT INTO workspace_members(account_id, workspace_id, person_id) VALUES(?, ?, ?)',
+        [req.account.id, invitation.workspace_id, personId]
+      );
+    }
+    await connection.execute(
+      'UPDATE workspace_invitations SET accepted_at = UTC_TIMESTAMP() WHERE id = ?',
+      [invitation.id]
+    );
+    await connection.execute(
+      'UPDATE auth_sessions SET workspace_id = ? WHERE token_hash = ? AND account_id = ?',
+      [invitation.workspace_id, hashSessionToken(getSessionToken(req)), req.account.id]
+    );
+    await connection.commit();
+    res.json({ ok: true, workspaceId: invitation.workspace_id });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error(error);
+    res.status(500).json({ error: 'Could not accept this invitation.' });
+  } finally {
+    connection?.release();
   }
 });
 
@@ -733,6 +943,15 @@ app.post('/api/people', async (req, res) => {
 
   const initials = name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
   try {
+    const [existingPerson] = await q(
+      `SELECT id FROM people
+       WHERE workspace_id = ? AND LOWER(TRIM(name)) = LOWER(?)
+       ORDER BY id LIMIT 1`,
+      [req.account.workspace_id, name.trim()]
+    );
+    if (existingPerson) {
+      return res.status(409).json({ error: 'A user with this name already exists in your workspace.' });
+    }
     const result = await q(
       'INSERT INTO people(workspace_id, name, initials) VALUES(?, ?, ?)',
       [req.account.workspace_id, name.trim(), initials]

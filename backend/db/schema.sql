@@ -39,6 +39,18 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   INDEX idx_auth_sessions_expiration (expires_at)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_members (
+  account_id INT NOT NULL,
+  workspace_id INT NOT NULL,
+  person_id INT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (account_id, workspace_id),
+  UNIQUE KEY uq_workspace_members_person (workspace_id, person_id),
+  CONSTRAINT fk_workspace_members_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_workspace_members_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+  CONSTRAINT fk_workspace_members_person FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS email_tokens (
   token_hash CHAR(64) PRIMARY KEY,
   account_id INT NOT NULL,
@@ -105,6 +117,7 @@ CREATE TABLE IF NOT EXISTS settlements (
 CREATE TABLE IF NOT EXISTS workspace_invitations (
   id INT AUTO_INCREMENT PRIMARY KEY,
   workspace_id INT NOT NULL,
+  invitee_account_id INT NULL,
   email VARCHAR(254) NOT NULL,
   token_hash CHAR(64) NOT NULL UNIQUE,
   invited_by INT NOT NULL,
@@ -113,6 +126,7 @@ CREATE TABLE IF NOT EXISTS workspace_invitations (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_workspace_invitations_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
   CONSTRAINT fk_workspace_invitations_account FOREIGN KEY (invited_by) REFERENCES accounts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_workspace_invitations_invitee FOREIGN KEY (invitee_account_id) REFERENCES accounts(id) ON DELETE CASCADE,
   INDEX idx_workspace_invitations_email (email),
   INDEX idx_workspace_invitations_expiration (expires_at)
 );

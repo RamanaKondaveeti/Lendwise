@@ -101,6 +101,12 @@ function App() {
   const [authEmail, setAuthEmail] = useState('')
   const [invitationToken, setInvitationToken] = useState('')
   const [resetToken, setResetToken] = useState('')
+  const [workspaces, setWorkspaces] = useState([])
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
+  const [globalUserQuery, setGlobalUserQuery] = useState('')
+  const [globalUserResults, setGlobalUserResults] = useState([])
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false)
+  const [manualInviteLink, setManualInviteLink] = useState('')
   const [tab, setTab] = useState('Overview')
   const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
@@ -119,6 +125,10 @@ function App() {
     setNotice('')
   }
 
+  const refreshWorkspaces = async () => {
+    setWorkspaces(await request('/api/workspaces'))
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const invite = params.get('invite')
@@ -132,8 +142,25 @@ function App() {
           if (!active) return
           setInvitationToken(invite)
           setAuthEmail(invitation.email)
-          setAuthMode('signup')
+          setAuthMode(invitation.existing_account ? 'login' : 'signup')
           setAuthNotice(`You are invited to join ${invitation.workspace_name}.`)
+          if (invitation.existing_account) {
+            try {
+              await request('/api/auth/me')
+              await request('/api/invitations/accept', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: invite }),
+              })
+              const account = await request('/api/auth/me')
+              if (!active) return
+              setAuthUser(account)
+              await Promise.all([refresh(), refreshWorkspaces()])
+              setInvitationToken('')
+            } catch (error) {
+              if (error.status !== 401) throw error
+            }
+          }
         } else if (reset) {
           setResetToken(reset)
           setAuthMode('reset')
@@ -141,7 +168,7 @@ function App() {
           const account = await request('/api/auth/me')
           if (!active) return
           setAuthUser(account)
-          await refresh()
+          await Promise.all([refresh(), refreshWorkspaces()])
         }
       } catch (error) {
         if (active && error.status !== 401) setAuthError(error.message)
@@ -152,6 +179,29 @@ function App() {
     initializeAuth()
     return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    if (modal !== 'invite' || globalUserQuery.trim().length < 2) {
+      setGlobalUserResults([])
+      return undefined
+    }
+    let active = true
+    const timer = window.setTimeout(async () => {
+      setGlobalSearchLoading(true)
+      try {
+        const results = await request(`/api/users/search?q=${encodeURIComponent(globalUserQuery.trim())}`)
+        if (active) setGlobalUserResults(results)
+      } catch (error) {
+        if (active) notify(error.message)
+      } finally {
+        if (active) setGlobalSearchLoading(false)
+      }
+    }, 250)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [modal, globalUserQuery])
 
   useEffect(() => {
     if (tab !== 'Activity' && tab !== 'Group') return undefined
@@ -240,7 +290,7 @@ function App() {
         setAuthNotice(result.message)
         return
       }
-      const response = await request(`/api/auth/${authMode}`, {
+      await request(`/api/auth/${authMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -250,8 +300,17 @@ function App() {
           invitationToken: signingUp ? invitationToken || undefined : undefined,
         }),
       })
-      setAuthUser(response)
-      await refresh()
+      if (authMode === 'login' && invitationToken) {
+        await request('/api/invitations/accept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: invitationToken }),
+        })
+        setInvitationToken('')
+      }
+      const currentAccount = await request('/api/auth/me')
+      setAuthUser(currentAccount)
+      await Promise.all([refresh(), refreshWorkspaces()])
     } catch (error) {
       setAuthError(error.message)
     } finally {
@@ -264,11 +323,61 @@ function App() {
       await request('/api/auth/logout', { method: 'POST' })
       setAuthUser(null)
       setData(null)
+      setWorkspaces([])
       setAuthMode('login')
       setAuthError('')
       setAuthNotice('')
     } catch (error) {
       notify(error.message)
+    }
+  }
+
+  async function switchWorkspace(workspaceId) {
+    setBusy(true)
+    try {
+      await request('/api/workspaces/active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId }),
+      })
+      const account = await request('/api/auth/me')
+      setAuthUser(account)
+      await Promise.all([refresh(), refreshWorkspaces()])
+      setTab('Overview')
+      setSelectedGroupId(null)
+      setWorkspaceMenuOpen(false)
+      notify(`Switched to ${account.workspaceName}.`)
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function inviteGlobalUser(accountId) {
+    setBusy(true)
+    try {
+      const result = await request('/api/invitations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId }),
+      })
+      setManualInviteLink(result.invitationUrl || '')
+      notify(result.message)
+      setGlobalUserResults(results => results.filter(user => user.account_id !== accountId))
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function copyInviteLink() {
+    try {
+      await navigator.clipboard.writeText(manualInviteLink)
+      notify('Invitation link copied.')
+    } catch (error) {
+      notify('Copy was blocked. Select and copy the invitation link manually.')
     }
   }
 
@@ -328,7 +437,8 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      setModal('')
+      if (result.invitationUrl) setManualInviteLink(result.invitationUrl)
+      else setModal('')
       await refresh()
       setReloadKey(key => key + 1)
       notify(result.message || successMessage)
@@ -443,10 +553,23 @@ function App() {
           <span className="brand-mark"><ArrowLeftRight size={19} /></span>
           <span>lendwise<span className="brand-dot">.</span></span>
         </a>
-        <div className="workspace">
-          <div className="workspace-icon">{currentUser?.initials || 'LW'}</div>
-          <div><b>{currentUser?.name || 'Personal space'}</b><small>Personal account</small></div>
-          <ChevronDown size={15} className="muted" />
+        <div className="workspace-switcher">
+          <button type="button" className="workspace" aria-expanded={workspaceMenuOpen} onClick={() => setWorkspaceMenuOpen(open => !open)}>
+            <div className="workspace-icon">{currentUser?.initials || 'LW'}</div>
+            <div><b>{authUser.workspaceName || 'Workspace'}</b><small>{currentUser?.name || authUser.name}</small></div>
+            <ChevronDown size={15} className="muted" />
+          </button>
+          {workspaceMenuOpen && (
+            <div className="workspace-menu">
+              {workspaces.map(workspace => (
+                <button type="button" key={workspace.id} disabled={busy || Number(workspace.id) === Number(authUser.workspaceId)} onClick={() => switchWorkspace(Number(workspace.id))}>
+                  <span>{workspace.name}</span>
+                  {Number(workspace.id) === Number(authUser.workspaceId) && <Check size={15} />}
+                </button>
+              ))}
+              {workspaces.length < 2 && <span className="workspace-menu-empty">Join a workspace from an invitation to see it here.</span>}
+            </div>
+          )}
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav>
@@ -514,7 +637,7 @@ function App() {
             </div>
             <div className="welcome-actions">
               <button className="button button-light" onClick={() => setModal('person')}><Plus size={16} />Add user</button>
-              <button className="button button-light" onClick={() => setModal('invite')}><Plus size={16} />Invite user</button>
+              <button className="button button-light" onClick={() => { setGlobalUserQuery(''); setGlobalUserResults([]); setManualInviteLink(''); setModal('invite') }}><Plus size={16} />Invite user</button>
               <button className="button button-light" onClick={() => setModal('group')}><Plus size={16} />Create group</button>
               <button className="button button-dark" disabled={!groups.some(group => group.members?.length)} onClick={openExpense}><Plus size={17} />Add an expense</button>
             </div>
@@ -705,8 +828,26 @@ function App() {
 
             {modal === 'invite' && (
               <>
-                <label>Email address<input required name="email" type="email" maxLength="254" autoFocus placeholder="person@example.com" /></label>
-                <p className="form-hint">They will receive a secure link to create an account and join this workspace.</p>
+                <label>Search Lendwise users<input value={globalUserQuery} onChange={event => setGlobalUserQuery(event.target.value)} maxLength="80" autoFocus placeholder="Type a name (2 characters minimum)" /></label>
+                <div className="global-user-results" aria-live="polite">
+                  {globalSearchLoading && <span className="form-hint">Searching…</span>}
+                  {!globalSearchLoading && globalUserQuery.trim().length >= 2 && !globalUserResults.length && <span className="form-hint">No matching users available to invite.</span>}
+                  {globalUserResults.map(user => (
+                    <div className="global-user-result" key={user.account_id}>
+                      <span className="avatar tiny">{user.name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase()}</span>
+                      <b>{user.name}</b>
+                      <button type="button" className="button button-light" disabled={busy} onClick={() => inviteGlobalUser(user.account_id)}>Invite</button>
+                    </div>
+                  ))}
+                </div>
+                <label>Or invite by email<input name="email" type="email" maxLength="254" placeholder="person@example.com" required /></label>
+                <p className="form-hint">Existing Lendwise users are searchable by name. Email invitations are for people who have not registered yet.</p>
+                {manualInviteLink && (
+                  <div className="manual-invite">
+                    <label>Share this invitation link<input readOnly value={manualInviteLink} onFocus={event => event.target.select()} /></label>
+                    <button type="button" className="button button-light" onClick={copyInviteLink}>Copy link</button>
+                  </div>
+                )}
               </>
             )}
 
@@ -769,7 +910,7 @@ function App() {
             )}
 
             <button className="button button-dark modal-submit" disabled={busy}>
-              {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Send invitation' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
+              {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Send email invitation' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
               <ArrowRight size={15} />
             </button>
           </form>
