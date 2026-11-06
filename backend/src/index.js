@@ -3,9 +3,13 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { promisify } = require('util');
 const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
+const scrypt = promisify(crypto.scrypt);
+const passwordHashOptions = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const app = express();
 const pool = mysql.createPool({
   host: process.env.DB_HOST || '127.0.0.1',
@@ -25,12 +29,216 @@ const q = async (text, params = []) => {
   return result;
 };
 
+function derivePasswordHash(password, salt) {
+  return scrypt(password, salt, 64, passwordHashOptions);
+}
+
+const sessionCookieName = 'lendwise_session';
+const sessionDurationSeconds = 7 * 24 * 60 * 60;
+
+function getSessionToken(req) {
+  const cookies = req.headers.cookie || '';
+  const cookie = cookies.split(';').map(value => value.trim())
+    .find(value => value.startsWith(`${sessionCookieName}=`));
+  return cookie?.slice(sessionCookieName.length + 1) || '';
+}
+
+function setSessionCookie(res, token) {
+  const secure = process.env.COOKIE_SECURE === 'true' ? '; Secure' : '';
+  res.setHeader(
+    'Set-Cookie',
+    `${sessionCookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${sessionDurationSeconds}${secure}`
+  );
+}
+
+function clearSessionCookie(res) {
+  const secure = process.env.COOKIE_SECURE === 'true' ? '; Secure' : '';
+  res.setHeader(
+    'Set-Cookie',
+    `${sessionCookieName}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure}`
+  );
+}
+
+function hashSessionToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+async function createSession(accountId, res) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  await q(
+    `INSERT INTO auth_sessions(token_hash, account_id, expires_at)
+     VALUES(?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 604800 SECOND))`,
+    [hashSessionToken(token), accountId]
+  );
+  setSessionCookie(res, token);
+}
+
 async function init() {
   const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
   for (const statement of schema.split(';').map(part => part.trim()).filter(Boolean)) {
     await pool.query(statement);
   }
+  await q('DELETE FROM auth_sessions WHERE expires_at <= UTC_TIMESTAMP()');
 }
+
+app.post('/api/auth/signup', async (req, res) => {
+  const { name, email, password } = req.body || {};
+  const normalizedName = typeof name === 'string' ? name.trim() : '';
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!normalizedName || normalizedName.length > 255 ||
+      normalizedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail) ||
+      typeof password !== 'string' || password.length < 8 || password.length > 128) {
+    return res.status(400).json({ error: 'Enter a name, valid email, and password between 8 and 128 characters.' });
+  }
+
+  const salt = crypto.randomBytes(16).toString('hex');
+  let passwordHash;
+  try {
+    passwordHash = await derivePasswordHash(password, salt);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Could not create your account.' });
+  }
+  const initials = normalizedName.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
+  let connection;
+  let inTransaction = false;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    inTransaction = true;
+    const [person] = await connection.execute(
+      'INSERT INTO people(name, initials) VALUES(?, ?)',
+      [normalizedName, initials]
+    );
+    const [account] = await connection.execute(
+      'INSERT INTO accounts(email, password_salt, password_hash, person_id) VALUES(?, ?, ?, ?)',
+      [normalizedEmail, salt, passwordHash.toString('hex'), person.insertId]
+    );
+    const token = crypto.randomBytes(32).toString('base64url');
+    await connection.execute(
+      `INSERT INTO auth_sessions(token_hash, account_id, expires_at)
+       VALUES(?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 604800 SECOND))`,
+      [hashSessionToken(token), account.insertId]
+    );
+    await connection.commit();
+    inTransaction = false;
+    setSessionCookie(res, token);
+    res.status(201).json({
+      id: account.insertId,
+      email: normalizedEmail,
+      name: normalizedName,
+      personId: person.insertId
+    });
+  } catch (error) {
+    if (inTransaction) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Signup rollback failed', rollbackError);
+      }
+    }
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'An account with this email already exists.' });
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Could not create your account.' });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (normalizedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail) ||
+      typeof password !== 'string' || !password.length || password.length > 128) {
+    return res.status(400).json({ error: 'Enter a valid email and password.' });
+  }
+
+  try {
+    const [account] = await q(
+      `SELECT a.id, a.email, a.password_salt, a.password_hash, a.person_id, p.name
+       FROM accounts a JOIN people p ON p.id = a.person_id
+       WHERE a.email = ?`,
+      [normalizedEmail]
+    );
+    if (!account) {
+      await derivePasswordHash(password, 'lendwise-invalid-account');
+      return res.status(401).json({ error: 'Email or password is incorrect.' });
+    }
+
+    const passwordHash = await derivePasswordHash(password, account.password_salt);
+    const storedHash = Buffer.from(account.password_hash, 'hex');
+    if (storedHash.length !== passwordHash.length ||
+        !crypto.timingSafeEqual(storedHash, passwordHash)) {
+      return res.status(401).json({ error: 'Email or password is incorrect.' });
+    }
+
+    await createSession(account.id, res);
+    res.json({
+      id: account.id,
+      email: account.email,
+      name: account.name,
+      personId: account.person_id
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not sign in.' });
+  }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    const token = getSessionToken(req);
+    if (token) {
+      await q('DELETE FROM auth_sessions WHERE token_hash = ?', [hashSessionToken(token)]);
+    }
+    clearSessionCookie(res);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not sign out.' });
+  }
+});
+
+async function requireAuth(req, res, next) {
+  const token = getSessionToken(req);
+  if (!token) return res.status(401).json({ error: 'Sign in to continue.' });
+
+  try {
+    const [account] = await q(
+      `SELECT a.id, a.email, a.person_id, p.name
+       FROM auth_sessions s
+       JOIN accounts a ON a.id = s.account_id
+       JOIN people p ON p.id = a.person_id
+       WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP()`,
+      [hashSessionToken(token)]
+    );
+    if (!account) {
+      clearSessionCookie(res);
+      return res.status(401).json({ error: 'Your session has expired. Sign in again.' });
+    }
+    req.account = account;
+    next();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not verify your session.' });
+  }
+}
+
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health' || req.path.startsWith('/auth/')) return next();
+  return requireAuth(req, res, next);
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({
+    id: req.account.id,
+    email: req.account.email,
+    name: req.account.name,
+    personId: req.account.person_id
+  });
+});
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -97,7 +305,7 @@ app.get('/api/summary', async (_req, res) => {
       activity,
       activityCount: Number(activityCount.count),
       balances: net,
-      currentUserId: people[0]?.id
+      currentUserId: req.account.person_id
     });
   } catch (error) {
     console.error(error);

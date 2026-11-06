@@ -13,8 +13,8 @@ import {
   House,
   LayoutDashboard,
   LoaderCircle,
+  LogOut,
   Mountain,
-  MoreHorizontal,
   Plus,
   ReceiptText,
   Search,
@@ -46,7 +46,11 @@ const date = value => new Intl.DateTimeFormat('en-US', {
 async function request(url, options) {
   const response = await fetch(url, options)
   const body = await response.json()
-  if (!response.ok) throw new Error(body.error || 'The request could not be completed.')
+  if (!response.ok) {
+    const error = new Error(body.error || 'The request could not be completed.')
+    error.status = response.status
+    throw error
+  }
   return body
 }
 
@@ -89,6 +93,10 @@ function ExpenseRows({ expenses, currentUser, onGroupClick }) {
 
 function App() {
   const [data, setData] = useState(null)
+  const [authUser, setAuthUser] = useState(null)
+  const [authChecked, setAuthChecked] = useState(false)
+  const [authMode, setAuthMode] = useState('login')
+  const [authError, setAuthError] = useState('')
   const [tab, setTab] = useState('Overview')
   const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
@@ -108,7 +116,15 @@ function App() {
   }
 
   useEffect(() => {
-    refresh().catch(error => setNotice(error.message))
+    request('/api/auth/me')
+      .then(account => {
+        setAuthUser(account)
+        return refresh()
+      })
+      .catch(error => {
+        if (error.status !== 401) setAuthError(error.message)
+      })
+      .finally(() => setAuthChecked(true))
   }, [])
 
   useEffect(() => {
@@ -169,6 +185,43 @@ function App() {
   function notify(message) {
     setNotice(message)
     window.setTimeout(() => setNotice(''), 3200)
+  }
+
+  async function submitAuth(event) {
+    event.preventDefault()
+    setBusy(true)
+    setAuthError('')
+    const form = new FormData(event.currentTarget)
+    const signingUp = authMode === 'signup'
+    try {
+      const account = await request(`/api/auth/${authMode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: signingUp ? form.get('name') : undefined,
+          email: form.get('email'),
+          password: form.get('password'),
+        }),
+      })
+      setAuthUser(account)
+      await refresh()
+    } catch (error) {
+      setAuthError(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function signOut() {
+    try {
+      await request('/api/auth/logout', { method: 'POST' })
+      setAuthUser(null)
+      setData(null)
+      setAuthMode('login')
+      setAuthError('')
+    } catch (error) {
+      notify(error.message)
+    }
   }
 
   async function submit(event) {
@@ -234,11 +287,70 @@ function App() {
     }
   }
 
+  if (!authChecked) {
+    return (
+      <main className="startup-state">
+        <LoaderCircle className="loading-icon" size={24} />
+        <p>Loading your workspace…</p>
+      </main>
+    )
+  }
+
+  if (!authUser) {
+    return (
+      <main className="auth-page">
+        <section className="auth-showcase">
+          <a className="brand auth-brand" href="#" onClick={event => event.preventDefault()}>
+            <span className="brand-mark"><ArrowLeftRight size={19} /></span>
+            <span>lendwise<span className="brand-dot">.</span></span>
+          </a>
+          <div className="auth-message">
+            <span className="auth-kicker"><span className="live-dot" /> SHARED EXPENSES, MADE SIMPLE</span>
+            <h1>Good company.<br /><span>Clear balances.</span></h1>
+            <p>Create your account to organize groups, track shared costs, and settle up with confidence.</p>
+            <div className="auth-orbit"><Users size={34} /><span><Check size={17} /></span></div>
+          </div>
+          <span className="auth-footer">Your groups and expenses, all in one place.</span>
+        </section>
+        <section className="auth-form-side">
+          <div className="auth-form-wrap">
+            <div className="auth-mobile-brand">
+              <span className="brand-mark"><ArrowLeftRight size={18} /></span>
+              <b>lendwise<span className="brand-dot">.</span></b>
+            </div>
+            <div className="auth-heading">
+              <span className="eyebrow">{authMode === 'signup' ? 'GET STARTED' : 'WELCOME BACK'}</span>
+              <h2>{authMode === 'signup' ? 'Create your account' : 'Sign in to Lendwise'}</h2>
+              <p>{authMode === 'signup' ? 'Your account will also be added to the workspace.' : 'Pick up right where your group left off.'}</p>
+            </div>
+            <div className="auth-tabs">
+              <button type="button" className={authMode === 'login' ? 'active' : ''} onClick={() => { setAuthMode('login'); setAuthError('') }}>Log in</button>
+              <button type="button" className={authMode === 'signup' ? 'active' : ''} onClick={() => { setAuthMode('signup'); setAuthError('') }}>Sign up</button>
+            </div>
+            <form className="auth-form" onSubmit={submitAuth}>
+              {authMode === 'signup' && (
+                <label>Full name<input name="name" autoComplete="name" maxLength="255" placeholder="Your name" required /></label>
+              )}
+              <label>Email address<input name="email" type="email" autoComplete="email" maxLength="254" placeholder="you@example.com" required /></label>
+              <label>Password<input name="password" type="password" autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} minLength="8" maxLength="128" placeholder={authMode === 'signup' ? 'At least 8 characters' : 'Your password'} required /></label>
+              {authError && <p className="auth-error" role="alert">{authError}</p>}
+              <button className="button button-dark auth-submit" disabled={busy}>
+                {busy ? 'Please wait…' : authMode === 'signup' ? 'Create account' : 'Log in'}
+                <ArrowRight size={16} />
+              </button>
+            </form>
+            <p className="auth-privacy"><CircleHelp size={14} /> Your account details are stored securely.</p>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
   if (!data) {
     return (
       <main className="startup-state">
-        {notice
-          ? <><p>{notice}</p><button className="button button-dark" onClick={() => refresh().catch(error => setNotice(error.message))}>Try again</button></>
+        {authError
+          ? <><p>{authError}</p><button className="button button-dark" onClick={() => refresh().catch(error => setAuthError(error.message))}>Try again</button></>
           : <><LoaderCircle className="loading-icon" size={24} /><p>Loading your expense data…</p></>}
       </main>
     )
@@ -293,8 +405,8 @@ function App() {
           <button className="nav-item" disabled={people.length < 2} onClick={() => setModal('settlement')}><ArrowLeftRight size={18} />Record settlement</button>
           <div className="profile">
             <div className="avatar me">{currentUser?.initials || 'ME'}</div>
-            <div className="profile-copy"><b>{currentUser?.name || 'You'}</b><small>Personal account</small></div>
-            <MoreHorizontal size={18} className="muted" />
+            <div className="profile-copy"><b>{currentUser?.name || authUser.name}</b><small>{authUser.email}</small></div>
+            <button type="button" className="sign-out-button" onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>
           </div>
         </div>
       </aside>
@@ -311,6 +423,7 @@ function App() {
             <button className="icon-button" aria-label="Record settlement" title="Record settlement" disabled={people.length < 2} onClick={() => setModal('settlement')}>
               <ArrowLeftRight size={18} />
             </button>
+            <button type="button" className="sign-out-top-button" onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>
             <div className="top-avatar">{currentUser?.initials || 'ME'}</div>
           </div>
         </header>

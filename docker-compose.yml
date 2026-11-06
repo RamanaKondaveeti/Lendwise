@@ -18,6 +18,7 @@ services:
       DB_NAME: ${DB_NAME:?Set DB_NAME in .env}
       DB_USER: ${DB_USER:?Set DB_USER in .env}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       NODE_ENV: production
     ports:
       - "5000:5000"

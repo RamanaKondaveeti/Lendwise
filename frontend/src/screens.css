@@ -59,6 +59,7 @@ footer svg{vertical-align:middle}
   .data-list .activity-row{grid-template-columns:30px minmax(90px,1fr) minmax(68px,.55fr) 63px;gap:7px}
   .balance-table-header,.balance-person-row{grid-template-columns:minmax(135px,1fr) minmax(85px,.6fr) minmax(74px,.5fr);gap:8px}
   .group-grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
+  .sign-out-button{display:none}
 }
 @media(max-width:540px){
   .screen-panel{padding:13px}
@@ -84,64 +85,106 @@ footer svg{vertical-align:middle}
   .form-row{grid-template-columns:1fr 1fr}
 }
 
-:root{color-scheme:dark;color:#e5eee8;background:#111815}
-body{background:#111815;color:#e5eee8}
-.sidebar,.topbar,.panel,.screen-panel,.balance-card,.modal{background:#19221e;border-color:#2a3931}
-.sidebar{background:#151e1a;border-right-color:#2a3931}
-.brand{color:#edf5ef}
-.brand-mark,.button-dark,.toast{background:#18866d;border-color:#18866d}
-.brand-mark{color:#eafff6}
-.brand-dot,.plain-link,.group-card-link,.view-all,.inline-link:hover{color:#5ce0ba}
-.workspace{border-color:#2a3931;background:#1a2520}
-.workspace-icon{background:#293a32;color:#79e3bc}
-.workspace small,.profile small,.section-subtitle,.group-name span,.group-total span,.activity-copy span,.activity-payer span,.activity-amount span,.group-card-meta,.balance-person span,.balance-table-header,.balance-status,.form-hint{color:#9aaea3}
-.muted,.nav-item svg{color:#8ba095}
-.nav-label,.eyebrow,.card-title{color:#91a69a}
-.nav-item{color:#bfcdc4}
-.nav-item.active{background:#203d34;color:#75e7c2}
-.nav-item.active svg{color:#75e7c2}
-.group-link{color:#c3d0c8}
-.group-link:hover,.group-row-button:hover{background:#22342c}
-.group-links .group-link:first-child .group-ico,.group-icon,.group-ico{color:#b4edda}
-.profile,.footer,.balance-person-row,.activity-row,.group-row,.view-all,.balance-note{border-color:#2a3931}
-.topbar{border-color:#2a3931}
-.crumb{color:#96aa9e}
-.crumb b,.welcome-row h1,.section-title,.group-card-name,.group-card strong,.activity-copy b,.activity-amount b,.group-name b,.group-total b,.balance-person b,.balance-value,.modal h2{color:#e5eee8}
-.search,.select-button,.button-light,.group-card{background:#1d2923;border-color:#33473b;color:#d4e1d8}
-.search input,.range-select select{color:#e5eee8}
-.search input::placeholder,.modal input::placeholder{color:#81958a}
-.search kbd{border-color:#384b40;color:#a5b8ac}
-.icon-button{color:#abc0b3}
-.top-avatar{background:#3c6856;color:#e0fff1}
-.live-dot{background:#57ddb4}
-.button-light:hover,.select-button:hover,.group-card:hover{border-color:#55bb96}
-.total-card{background:linear-gradient(125deg,#203d34,#254c40);border-color:#356a56}
-.positive-card{background:linear-gradient(125deg,#1d382d,#214838);border-color:#2d6549}
-.negative-card{background:linear-gradient(125deg,#392c22,#4a3426);border-color:#69472f}
-.balance-card .amount{color:#f0f7f2}
-.card-symbol,.tip-icon{background:#2c483a;color:#83e5bb}
-.orange-symbol{background:#513c2b;color:#ffc18b}
-.balance-foot,.small-detail,.tip-card p{color:#a7b9ac}
-.balance-indicator,.balance-value.is-owed,.balance-status.is-owed{color:#65dfb0}
-.balance-value.is-owing,.balance-status.is-owing{color:#ffb879}
-.title-count{background:#2a3931;color:#b8c9bf}
-.activity-icon{color:#e3c9ff}
-.tip-card{background:linear-gradient(120deg,#302c25,#393526);border-color:#504737}
-.tip-top{color:#c7ba8a}
-.tip-card p b{color:#e9dfb8}
-.empty{color:#9aafa3}
-.overlay{background:#050a08c9}
-.modal{box-shadow:0 20px 80px #0009}
-.modal label,.participant-field legend{color:#c5d4cb}
-.modal input,.modal select{background:#111a16;border-color:#34483c;color:#e5eee8}
-.participant-field{border-color:#34483c}
-.modal .close{color:#b7c9be}
-.balance-note{color:#9aafa3}
-footer{border-color:#2a3931;color:#82968a}
-footer a{color:#9ab7a4}
-.button:disabled{opacity:.45}
+:root{color-scheme:light;color:#20352e;background:#f3f9f6}
+body{background:#f3f9f6;color:#20352e}
+.sidebar,.topbar,.panel,.screen-panel,.balance-card,.modal{background:#fff;border-color:#e0ebe5}
+.sidebar{background:#fbfefc;border-right-color:#dfebe4}
+.brand{color:#20352e}
+.brand-mark,.button-dark,.toast{background:#167f68;border-color:#167f68}
+.brand-mark{color:#fff}
+.brand-dot,.plain-link,.group-card-link,.view-all,.inline-link:hover{color:#168b70}
+.workspace{border-color:#e1ebe5;background:#f8fcf9}
+.workspace-icon{background:#ddf2e7;color:#287a5a}
+.workspace small,.profile small,.section-subtitle,.group-name span,.group-total span,.activity-copy span,.activity-payer span,.activity-amount span,.group-card-meta,.balance-person span,.balance-table-header,.balance-status,.form-hint{color:#788a80}
+.muted,.nav-item svg{color:#82938a}
+.nav-label,.eyebrow,.card-title{color:#71877b}
+.nav-item{color:#53675d}
+.nav-item.active{background:#e2f5eb;color:#167653}
+.nav-item.active svg{color:#167653}
+.group-link{color:#51665a}
+.group-link:hover,.group-row-button:hover{background:#f0f8f3}
+.profile,.footer,.balance-person-row,.activity-row,.group-row,.view-all,.balance-note{border-color:#e5ede8}
+.topbar{border-color:#e1ebe5}
+.crumb{color:#788a80}
+.crumb b,.welcome-row h1,.section-title,.group-card-name,.group-card strong,.activity-copy b,.activity-amount b,.group-name b,.group-total b,.balance-person b,.balance-value,.modal h2{color:#20352e}
+.search,.select-button,.button-light,.group-card{background:#fff;border-color:#dfe9e3;color:#52675b}
+.search input,.range-select select{color:#20352e}
+.search input::placeholder,.modal input::placeholder{color:#94a39a}
+.search kbd{border-color:#e1ebe5;color:#8a9b91}
+.icon-button{color:#64796c}
+.top-avatar{background:#dcf2e6;color:#24734f}
+.live-dot{background:#35b782}
+.button-light:hover,.select-button:hover,.group-card:hover{border-color:#81c9a4}
+.total-card{background:linear-gradient(125deg,#e1f4e8,#d4f0e2);border-color:#cbe9d6}
+.positive-card{background:linear-gradient(125deg,#e7f7eb,#d9f3e1);border-color:#cdebd5}
+.negative-card{background:linear-gradient(125deg,#fff1df,#ffead3);border-color:#f6dfc3}
+.balance-card .amount{color:#20352e}
+.card-symbol,.tip-icon{background:#d1efdf;color:#168257}
+.orange-symbol{background:#ffdfbd;color:#af6832}
+.balance-foot,.small-detail,.tip-card p{color:#6e8175}
+.balance-indicator,.balance-value.is-owed,.balance-status.is-owed{color:#258a5e}
+.balance-value.is-owing,.balance-status.is-owing{color:#b46c35}
+.title-count{background:#edf4ef;color:#718479}
+.activity-icon{color:#6547a4}
+.tip-card{background:linear-gradient(120deg,#fff4d9,#f8efcf);border-color:#efe4c2}
+.tip-top{color:#8c7840}
+.tip-card p b{color:#5c502d}
+.empty{color:#788b7f}
+.overlay{background:#213b2d70}
+.modal{box-shadow:0 20px 80px #18332625}
+.modal label,.participant-field legend{color:#52675b}
+.modal input,.modal select{background:#fff;border-color:#dfe9e3;color:#20352e}
+.participant-field{border-color:#dfe9e3}
+.modal .close{color:#74877b}
+.balance-note{color:#788b7f}
+footer{border-color:#e0ebe5;color:#84958b}
+footer a{color:#668575}
+.button:disabled{opacity:.55}
 .group-members-panel{margin-bottom:16px}
 .group-member-list{display:flex;flex-wrap:wrap;gap:10px;padding-top:16px}
-.group-member{display:flex;align-items:center;gap:8px;padding:7px 11px;background:#1f3028;border:1px solid #30483b;border-radius:999px}
+.group-member{display:flex;align-items:center;gap:8px;padding:7px 11px;background:#eff8f2;border:1px solid #dcebe1;border-radius:999px}
 .group-member .avatar{width:26px;height:26px}
-.group-member b{font-size:10px;color:#e5eee8}
+.group-member b{font-size:10px;color:#284638}
+.sign-out-button{display:grid;place-items:center;width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:#73867a}
+.sign-out-button:hover{background:#eaf4ed;color:#1c7853}
+.sign-out-top-button{display:grid;place-items:center;width:30px;height:30px;border:1px solid #dfe9e3;border-radius:8px;background:#fff;color:#64796c}
+.sign-out-top-button:hover{border-color:#81c9a4;background:#f0f8f3;color:#1c7853}
+
+.auth-page{min-height:100vh;display:grid;grid-template-columns:minmax(320px,.9fr) 1.1fr;background:#fff}
+.auth-showcase{position:relative;min-height:100vh;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;padding:38px clamp(28px,6vw,88px);background:radial-gradient(ellipse at 82% 18%,#abebcd 0,transparent 30%),linear-gradient(145deg,#daf5e6,#bcebd3 52%,#a7e4c8);color:#164d38}
+.auth-showcase:after{content:"";position:absolute;width:480px;height:480px;right:-175px;bottom:-235px;border:1px solid #298d6338;border-radius:50%;box-shadow:0 0 0 36px #298d630a,0 0 0 72px #298d630a}
+.auth-brand{position:relative;z-index:1;margin:0;color:#174b37}
+.auth-brand .brand-mark{background:#177b59}
+.auth-message{position:relative;z-index:1;max-width:460px;margin:40px 0}
+.auth-kicker{display:flex;align-items:center;gap:9px;color:#438666;font-size:9px;font-weight:700;letter-spacing:1.4px}
+.auth-message h1{margin:21px 0 14px;font:800 clamp(38px,5vw,62px)/1.08 Manrope,sans-serif;letter-spacing:-2.5px;color:#174c37}
+.auth-message h1 span{color:#258a61}
+.auth-message>p{max-width:370px;color:#507b64;font-size:14px;line-height:1.75}
+.auth-orbit{position:relative;display:grid;place-items:center;width:84px;height:84px;margin-top:35px;border:1px solid #3b9a6b55;border-radius:27px;background:#ffffff77;color:#19805a;box-shadow:0 12px 30px #24784c13}
+.auth-orbit>span{position:absolute;right:-9px;bottom:-6px;display:grid;place-items:center;width:30px;height:30px;border:3px solid #c8efd9;border-radius:50%;background:#16875f;color:white}
+.auth-footer{position:relative;z-index:1;color:#4e8063;font-size:10px}
+.auth-form-side{display:grid;place-items:center;padding:48px 28px;background:linear-gradient(145deg,#fff,#f8fcf9)}
+.auth-form-wrap{width:min(410px,100%)}
+.auth-mobile-brand{display:none}
+.auth-heading{margin-bottom:25px}
+.auth-heading .eyebrow{color:#258462}
+.auth-heading h2{margin:10px 0 7px;font:750 27px Manrope,sans-serif;letter-spacing:-.7px;color:#20392e}
+.auth-heading p{margin:0;color:#829188;font-size:12px}
+.auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;margin-bottom:22px;border:1px solid #e4eee7;border-radius:10px;background:#f2f8f4}
+.auth-tabs button{height:36px;border:0;border-radius:7px;background:transparent;color:#718278;font-size:11px;font-weight:600}
+.auth-tabs button.active{background:white;color:#187b55;box-shadow:0 2px 8px #183b2810}
+.auth-form{display:grid;gap:16px}
+.auth-form label{display:grid;gap:7px;color:#52685b;font-size:10px;font-weight:600}
+.auth-form input{height:43px;width:100%;padding:0 12px;border:1px solid #dfeae3;border-radius:8px;background:white;color:#20352e;font-size:12px;outline:none}
+.auth-form input:focus{border-color:#58b987;box-shadow:0 0 0 3px #58b98720}
+.auth-submit{width:100%;height:43px;margin-top:3px;border-radius:8px;font-size:11px}
+.auth-submit svg{margin-left:auto}
+.auth-error{margin:0;padding:10px 12px;border:1px solid #f2d1cd;border-radius:8px;background:#fff1ef;color:#aa4138;font-size:10px}
+.auth-privacy{display:flex;align-items:center;justify-content:center;gap:6px;margin:21px 0 0;color:#91a097;font-size:9px}
+@media(max-width:760px){
+  .auth-page{grid-template-columns:1fr}
+  .auth-showcase{display:none}
+  .auth-form-side{min-height:100vh;padding:32px 22px}
+  .auth-mobile-brand{display:flex;align-items:center;gap:9px;margin-bottom:47px;color:#20352e;font:800 19px Manrope,sans-serif}
+  .auth-mobile-brand .brand-mark{width:29px;height:29px}
+}
