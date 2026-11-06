@@ -1,36 +1,65 @@
+CREATE TABLE IF NOT EXISTS workspaces (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS people (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  workspace_id INT NOT NULL,
   name VARCHAR(255) NOT NULL,
   initials VARCHAR(16) NOT NULL,
   color VARCHAR(16) NOT NULL DEFAULT '#dcebdd',
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_people_workspace (workspace_id),
+  CONSTRAINT fk_people_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS accounts (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  workspace_id INT NOT NULL,
   email VARCHAR(254) NOT NULL UNIQUE,
   password_salt CHAR(32) NOT NULL,
   password_hash CHAR(128) NOT NULL,
   person_id INT NOT NULL UNIQUE,
+  email_verified_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_accounts_workspace (workspace_id),
+  CONSTRAINT fk_accounts_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
   CONSTRAINT fk_accounts_person FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS auth_sessions (
   token_hash CHAR(64) PRIMARY KEY,
   account_id INT NOT NULL,
+  workspace_id INT NOT NULL,
   expires_at DATETIME NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_auth_sessions_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_auth_sessions_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
   INDEX idx_auth_sessions_expiration (expires_at)
+);
+
+CREATE TABLE IF NOT EXISTS email_tokens (
+  token_hash CHAR(64) PRIMARY KEY,
+  account_id INT NOT NULL,
+  token_type ENUM('verification', 'password_reset') NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_email_tokens_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+  INDEX idx_email_tokens_account_type (account_id, token_type),
+  INDEX idx_email_tokens_expiration (expires_at)
 );
 
 CREATE TABLE IF NOT EXISTS `groups` (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  workspace_id INT NOT NULL,
   name VARCHAR(255) NOT NULL,
   icon VARCHAR(64) NOT NULL DEFAULT 'users',
   color VARCHAR(16) NOT NULL DEFAULT '#dcebdd',
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_groups_workspace (workspace_id),
+  CONSTRAINT fk_groups_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS group_members (
@@ -72,4 +101,19 @@ CREATE TABLE IF NOT EXISTS settlements (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_settlements_payer FOREIGN KEY (payer_id) REFERENCES people(id),
   CONSTRAINT fk_settlements_payee FOREIGN KEY (payee_id) REFERENCES people(id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_invitations (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  workspace_id INT NOT NULL,
+  email VARCHAR(254) NOT NULL,
+  token_hash CHAR(64) NOT NULL UNIQUE,
+  invited_by INT NOT NULL,
+  expires_at DATETIME NOT NULL,
+  accepted_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_workspace_invitations_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+  CONSTRAINT fk_workspace_invitations_account FOREIGN KEY (invited_by) REFERENCES accounts(id) ON DELETE CASCADE,
+  INDEX idx_workspace_invitations_email (email),
+  INDEX idx_workspace_invitations_expiration (expires_at)
 );

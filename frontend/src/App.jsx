@@ -49,6 +49,7 @@ async function request(url, options) {
   if (!response.ok) {
     const error = new Error(body.error || 'The request could not be completed.')
     error.status = response.status
+    error.verificationRequired = body.verificationRequired === true
     throw error
   }
   return body
@@ -97,6 +98,11 @@ function App() {
   const [authChecked, setAuthChecked] = useState(false)
   const [authMode, setAuthMode] = useState('login')
   const [authError, setAuthError] = useState('')
+  const [authNotice, setAuthNotice] = useState('')
+  const [authEmail, setAuthEmail] = useState('')
+  const [verificationRequired, setVerificationRequired] = useState(false)
+  const [invitationToken, setInvitationToken] = useState('')
+  const [resetToken, setResetToken] = useState('')
   const [tab, setTab] = useState('Overview')
   const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
@@ -116,15 +122,48 @@ function App() {
   }
 
   useEffect(() => {
-    request('/api/auth/me')
-      .then(account => {
-        setAuthUser(account)
-        return refresh()
-      })
-      .catch(error => {
-        if (error.status !== 401) setAuthError(error.message)
-      })
-      .finally(() => setAuthChecked(true))
+    const params = new URLSearchParams(window.location.search)
+    const invite = params.get('invite')
+    const verify = params.get('verify')
+    const reset = params.get('reset')
+    if (invite || verify || reset) window.history.replaceState({}, '', window.location.pathname)
+    let active = true
+    async function initializeAuth() {
+      try {
+        if (invite) {
+          const invitation = await request(`/api/invitations/${encodeURIComponent(invite)}`)
+          if (!active) return
+          setInvitationToken(invite)
+          setAuthEmail(invitation.email)
+          setAuthMode('signup')
+          setAuthNotice(`You are invited to join ${invitation.workspace_name}.`)
+        } else if (reset) {
+          setResetToken(reset)
+          setAuthMode('reset')
+        } else if (verify) {
+          await request('/api/auth/verify-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: verify }),
+          })
+          const account = await request('/api/auth/me')
+          if (!active) return
+          setAuthUser(account)
+          await refresh()
+        } else {
+          const account = await request('/api/auth/me')
+          if (!active) return
+          setAuthUser(account)
+          await refresh()
+        }
+      } catch (error) {
+        if (active && error.status !== 401) setAuthError(error.message)
+      } finally {
+        if (active) setAuthChecked(true)
+      }
+    }
+    initializeAuth()
+    return () => { active = false }
   }, [])
 
   useEffect(() => {
@@ -194,17 +233,64 @@ function App() {
     const form = new FormData(event.currentTarget)
     const signingUp = authMode === 'signup'
     try {
-      const account = await request(`/api/auth/${authMode}`, {
+      if (authMode === 'forgot') {
+        const result = await request('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: authEmail }),
+        })
+        setAuthNotice(result.message)
+        return
+      }
+      if (authMode === 'reset') {
+        const result = await request('/api/auth/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: resetToken, password: form.get('password') }),
+        })
+        setAuthMode('login')
+        setResetToken('')
+        setAuthNotice(result.message)
+        setVerificationRequired(false)
+        return
+      }
+      const response = await request(`/api/auth/${authMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: signingUp ? form.get('name') : undefined,
-          email: form.get('email'),
+          email: authEmail,
           password: form.get('password'),
+          invitationToken: signingUp ? invitationToken || undefined : undefined,
         }),
       })
-      setAuthUser(account)
+      if (response.verificationRequired) {
+        setVerificationRequired(true)
+        setAuthMode('login')
+        setInvitationToken('')
+        setAuthNotice(response.message)
+        return
+      }
+      setAuthUser(response)
       await refresh()
+    } catch (error) {
+      setAuthError(error.message)
+      if (error.verificationRequired) setVerificationRequired(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function resendVerification() {
+    setBusy(true)
+    setAuthError('')
+    try {
+      const result = await request('/api/auth/resend-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authEmail }),
+      })
+      setAuthNotice(result.message)
     } catch (error) {
       setAuthError(error.message)
     } finally {
@@ -219,6 +305,8 @@ function App() {
       setData(null)
       setAuthMode('login')
       setAuthError('')
+      setAuthNotice('')
+      setVerificationRequired(false)
     } catch (error) {
       notify(error.message)
     }
@@ -232,7 +320,11 @@ function App() {
     let payload
     let successMessage
 
-    if (modal === 'person') {
+    if (modal === 'invite') {
+      url = '/api/invitations'
+      payload = { email: form.get('email') }
+      successMessage = 'Invitation email sent.'
+    } else if (modal === 'person') {
       url = '/api/people'
       payload = { name: form.get('name') }
       successMessage = 'Person added.'
@@ -271,7 +363,7 @@ function App() {
     }
 
     try {
-      await request(url, {
+      const result = await request(url, {
         method: modal === 'members' ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -279,7 +371,7 @@ function App() {
       setModal('')
       await refresh()
       setReloadKey(key => key + 1)
-      notify(successMessage)
+      notify(result.message || successMessage)
     } catch (error) {
       notify(error.message)
     } finally {
@@ -319,26 +411,36 @@ function App() {
               <b>lendwise<span className="brand-dot">.</span></b>
             </div>
             <div className="auth-heading">
-              <span className="eyebrow">{authMode === 'signup' ? 'GET STARTED' : 'WELCOME BACK'}</span>
-              <h2>{authMode === 'signup' ? 'Create your account' : 'Sign in to Lendwise'}</h2>
-              <p>{authMode === 'signup' ? 'Your account will also be added to the workspace.' : 'Pick up right where your group left off.'}</p>
+              <span className="eyebrow">{authMode === 'signup' ? 'GET STARTED' : authMode === 'reset' ? 'ACCOUNT SECURITY' : authMode === 'forgot' ? 'ACCOUNT RECOVERY' : 'WELCOME BACK'}</span>
+              <h2>{authMode === 'signup' ? 'Create your account' : authMode === 'reset' ? 'Choose a new password' : authMode === 'forgot' ? 'Reset your password' : 'Sign in to Lendwise'}</h2>
+              <p>{authMode === 'signup' ? invitationToken ? 'Create your account to join the invited workspace.' : 'A private workspace will be created for your account.' : authMode === 'reset' ? 'Use at least 12 characters for your new password.' : authMode === 'forgot' ? 'We’ll email you a secure password reset link.' : 'Pick up right where your group left off.'}</p>
             </div>
-            <div className="auth-tabs">
-              <button type="button" className={authMode === 'login' ? 'active' : ''} onClick={() => { setAuthMode('login'); setAuthError('') }}>Log in</button>
-              <button type="button" className={authMode === 'signup' ? 'active' : ''} onClick={() => { setAuthMode('signup'); setAuthError('') }}>Sign up</button>
-            </div>
+            {(authMode === 'login' || authMode === 'signup') && (
+              <div className="auth-tabs">
+                <button type="button" className={authMode === 'login' ? 'active' : ''} onClick={() => { setAuthMode('login'); setAuthError(''); setAuthNotice('') }}>Log in</button>
+                <button type="button" className={authMode === 'signup' ? 'active' : ''} onClick={() => { setAuthMode('signup'); setAuthError(''); setAuthNotice('') }}>Sign up</button>
+              </div>
+            )}
             <form className="auth-form" onSubmit={submitAuth}>
               {authMode === 'signup' && (
                 <label>Full name<input name="name" autoComplete="name" maxLength="255" placeholder="Your name" required /></label>
               )}
-              <label>Email address<input name="email" type="email" autoComplete="email" maxLength="254" placeholder="you@example.com" required /></label>
-              <label>Password<input name="password" type="password" autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} minLength="8" maxLength="128" placeholder={authMode === 'signup' ? 'At least 8 characters' : 'Your password'} required /></label>
+              {authMode !== 'reset' && (
+                <label>Email address<input name="email" type="email" autoComplete="email" maxLength="254" placeholder="you@example.com" value={authEmail} onChange={event => setAuthEmail(event.target.value)} readOnly={authMode === 'signup' && Boolean(invitationToken)} required /></label>
+              )}
+              {authMode !== 'forgot' && (
+                <label>{authMode === 'reset' ? 'New password' : 'Password'}<input name="password" type="password" autoComplete={authMode === 'signup' || authMode === 'reset' ? 'new-password' : 'current-password'} minLength={authMode === 'reset' ? '12' : '8'} maxLength="128" placeholder={authMode === 'signup' ? 'At least 8 characters' : authMode === 'reset' ? 'At least 12 characters' : 'Your password'} required /></label>
+              )}
+              {authNotice && <p className="auth-success" role="status">{authNotice}</p>}
               {authError && <p className="auth-error" role="alert">{authError}</p>}
               <button className="button button-dark auth-submit" disabled={busy}>
-                {busy ? 'Please wait…' : authMode === 'signup' ? 'Create account' : 'Log in'}
+                {busy ? 'Please wait…' : authMode === 'signup' ? 'Create account' : authMode === 'reset' ? 'Reset password' : authMode === 'forgot' ? 'Send reset link' : 'Log in'}
                 <ArrowRight size={16} />
               </button>
             </form>
+            {verificationRequired && <button className="auth-text-button" type="button" onClick={resendVerification} disabled={busy}>Resend verification email</button>}
+            {authMode === 'login' && <button className="auth-text-button" type="button" onClick={() => { setAuthMode('forgot'); setAuthError(''); setAuthNotice('') }}>Forgot password?</button>}
+            {(authMode === 'forgot' || authMode === 'reset') && <button className="auth-text-button" type="button" onClick={() => { setAuthMode('login'); setAuthError(''); setAuthNotice('') }}>Back to sign in</button>}
             <p className="auth-privacy"><CircleHelp size={14} /> Your account details are stored securely.</p>
           </div>
         </section>
@@ -453,6 +555,7 @@ function App() {
             </div>
             <div className="welcome-actions">
               <button className="button button-light" onClick={() => setModal('person')}><Plus size={16} />Add user</button>
+              <button className="button button-light" onClick={() => setModal('invite')}><Plus size={16} />Invite user</button>
               <button className="button button-light" onClick={() => setModal('group')}><Plus size={16} />Create group</button>
               <button className="button button-dark" disabled={!groups.some(group => group.members?.length)} onClick={openExpense}><Plus size={17} />Add an expense</button>
             </div>
@@ -633,12 +736,19 @@ function App() {
         <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
           <form className="modal" onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'person' ? 'Add a user' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : 'Record a settlement'}</h2></div>
+              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
             {modal === 'person' && (
               <label>User's name<input required name="name" maxLength="255" autoFocus placeholder="Enter a name" /></label>
+            )}
+
+            {modal === 'invite' && (
+              <>
+                <label>Email address<input required name="email" type="email" maxLength="254" autoFocus placeholder="person@example.com" /></label>
+                <p className="form-hint">They will receive a secure link to create an account and join this workspace.</p>
+              </>
             )}
 
             {modal === 'expense' && (
@@ -700,7 +810,7 @@ function App() {
             )}
 
             <button className="button button-dark modal-submit" disabled={busy}>
-              {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
+              {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Send invitation' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
               <ArrowRight size={15} />
             </button>
           </form>
