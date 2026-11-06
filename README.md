@@ -10,11 +10,11 @@ A responsive shared expense app starter inspired by the Splitwise workflow.
 The app is served on port 3000. The API is available on port 5000 and connects to MySQL on the Docker host at `host.docker.internal:3306`. Nginx serves the frontend and proxies `/api` to the backend. Vite proxies `/api` to localhost:5000 in development.
 
 ## Local development
-Start MySQL, create the database and grant the configured user access, copy `.env.example` to `.env`, then run `cd backend && npm install && npm run dev` and `cd frontend && npm install && npm run dev` in separate terminals. The backend reads `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`; it initializes empty tables on first startup. Add people from the People & balances screen and create groups from the sidebar or overview.
+Start MySQL, create the database and grant the configured user access, copy `.env.example` to `.env`, then run `cd backend && npm install && npm run dev` and `cd frontend && npm install && npm run dev` in separate terminals. The backend reads `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`; it initializes or migrates tables on startup. Add users from the workspace and assign them when creating a group or manage group membership from the group details screen.
 
 ## Included
 - Database-driven overview, group details, full expense activity, and balances screens
-- Create groups and add expenses with selectable participants
+- Create groups, assign users to groups, and add expenses shared among group members
 - Record settlements and see balances recalculated from expenses, splits, and payments
 - MySQL persistence with no automatically generated people, groups, expenses, or settlements
 - Frontend and backend Dockerfiles plus Docker Compose

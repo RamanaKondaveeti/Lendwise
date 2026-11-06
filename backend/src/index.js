@@ -52,6 +52,26 @@ app.get('/api/summary', async (_req, res) => {
        GROUP BY g.id
        ORDER BY g.id`
     );
+    const members = await q(
+      `SELECT gm.group_id, p.id, p.name, p.initials, p.color
+       FROM group_members gm
+       JOIN people p ON p.id = gm.person_id
+       ORDER BY p.name, p.id`
+    );
+    const membersByGroup = new Map();
+    for (const person of members) {
+      const groupMembers = membersByGroup.get(person.group_id) || [];
+      groupMembers.push({
+        id: person.id,
+        name: person.name,
+        initials: person.initials,
+        color: person.color
+      });
+      membersByGroup.set(person.group_id, groupMembers);
+    }
+    for (const group of groups) {
+      group.members = membersByGroup.get(group.id) || [];
+    }
     const activity = await q(
       `SELECT e.id, e.title, e.amount, e.category, e.created_at, p.name AS payer,
               p.initials, p.color, g.name AS group_name
@@ -153,15 +173,16 @@ app.post('/api/expenses', async (req, res) => {
   let connection;
   let inTransaction = false;
   try {
-    const [groups, people] = await Promise.all([
+    const [groups, members] = await Promise.all([
       q('SELECT id FROM `groups` WHERE id = ?', [normalizedGroupId]),
       q(
-        `SELECT id FROM people WHERE id IN (${[normalizedPaidBy, ...participantIds].map(() => '?').join(',')})`,
-        [normalizedPaidBy, ...participantIds]
+        `SELECT person_id AS id FROM group_members
+         WHERE group_id = ? AND person_id IN (${[normalizedPaidBy, ...participantIds].map(() => '?').join(',')})`,
+        [normalizedGroupId, normalizedPaidBy, ...participantIds]
       )
     ]);
-    if (!groups.length || people.length !== new Set([normalizedPaidBy, ...participantIds]).size) {
-      return res.status(400).json({ error: 'Choose an existing group, payer, and participants.' });
+    if (!groups.length || members.length !== new Set([normalizedPaidBy, ...participantIds]).size) {
+      return res.status(400).json({ error: 'Choose a group member as payer and participants.' });
     }
 
     connection = await pool.getConnection();
@@ -198,19 +219,110 @@ app.post('/api/expenses', async (req, res) => {
 });
 
 app.post('/api/groups', async (req, res) => {
-  const { name, icon = 'users', color = '#e9ddf2' } = req.body;
-  if (!name?.trim()) return res.status(400).json({ error: 'Group name is required.' });
+  const { name, icon = 'users', color = '#e9ddf2', memberIds = [] } = req.body;
+  const normalizedMemberIds = Array.isArray(memberIds) ? memberIds.map(Number) : null;
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 255 ||
+      !normalizedMemberIds ||
+      normalizedMemberIds.some(id => !Number.isInteger(id) || id <= 0) ||
+      new Set(normalizedMemberIds).size !== normalizedMemberIds.length) {
+    return res.status(400).json({ error: 'Provide a group name and valid, unique member IDs.' });
+  }
+
+  let connection;
+  let inTransaction = false;
   try {
-    const result = await q('INSERT INTO `groups`(name, icon, color) VALUES(?, ?, ?)', [
-      name.trim(),
-      icon,
-      color
-    ]);
+    if (normalizedMemberIds.length) {
+      const people = await q(
+        `SELECT id FROM people WHERE id IN (${normalizedMemberIds.map(() => '?').join(',')})`,
+        normalizedMemberIds
+      );
+      if (people.length !== normalizedMemberIds.length) {
+        return res.status(400).json({ error: 'Choose existing users for this group.' });
+      }
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    inTransaction = true;
+    const [result] = await connection.execute(
+      'INSERT INTO `groups`(name, icon, color) VALUES(?, ?, ?)',
+      [name.trim(), icon, color]
+    );
+    for (const personId of normalizedMemberIds) {
+      await connection.execute(
+        'INSERT INTO group_members(group_id, person_id) VALUES(?, ?)',
+        [result.insertId, personId]
+      );
+    }
+    await connection.commit();
+    inTransaction = false;
     const [group] = await q('SELECT * FROM `groups` WHERE id = ?', [result.insertId]);
     res.status(201).json(group);
   } catch (error) {
+    if (inTransaction) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Group rollback failed', rollbackError);
+      }
+    }
     console.error(error);
     res.status(500).json({ error: 'Could not create this group.' });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.put('/api/groups/:groupId/members', async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  const { personIds } = req.body;
+  const memberIds = Array.isArray(personIds) ? personIds.map(Number) : null;
+  if (!Number.isInteger(groupId) || groupId <= 0 ||
+      !memberIds ||
+      memberIds.some(id => !Number.isInteger(id) || id <= 0) ||
+      new Set(memberIds).size !== memberIds.length) {
+    return res.status(400).json({ error: 'Provide a valid group ID and unique user IDs.' });
+  }
+
+  let connection;
+  let inTransaction = false;
+  try {
+    const [groups, people] = await Promise.all([
+      q('SELECT id FROM `groups` WHERE id = ?', [groupId]),
+      memberIds.length
+        ? q(`SELECT id FROM people WHERE id IN (${memberIds.map(() => '?').join(',')})`, memberIds)
+        : Promise.resolve([])
+    ]);
+    if (!groups.length) return res.status(404).json({ error: 'Group not found.' });
+    if (people.length !== memberIds.length) {
+      return res.status(400).json({ error: 'Choose existing users for this group.' });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    inTransaction = true;
+    await connection.execute('DELETE FROM group_members WHERE group_id = ?', [groupId]);
+    for (const personId of memberIds) {
+      await connection.execute(
+        'INSERT INTO group_members(group_id, person_id) VALUES(?, ?)',
+        [groupId, personId]
+      );
+    }
+    await connection.commit();
+    inTransaction = false;
+    res.json({ ok: true, memberIds });
+  } catch (error) {
+    if (inTransaction) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Group member update rollback failed', rollbackError);
+      }
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Could not update this group’s members.' });
+  } finally {
+    connection?.release();
   }
 });
 

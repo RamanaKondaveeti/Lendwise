@@ -91,6 +91,7 @@ function App() {
   const [data, setData] = useState(null)
   const [tab, setTab] = useState('Overview')
   const [selectedGroupId, setSelectedGroupId] = useState(null)
+  const [expenseGroupId, setExpenseGroupId] = useState('')
   const [modal, setModal] = useState('')
   const [search, setSearch] = useState('')
   const [dateRange, setDateRange] = useState('30')
@@ -138,6 +139,7 @@ function App() {
   const owedToMe = myBalance < 0 ? Math.abs(myBalance) : 0
   const owedByMe = myBalance > 0 ? myBalance : 0
   const selectedGroup = groups.find(group => group.id === Number(selectedGroupId))
+  const selectedExpenseGroup = groups.find(group => group.id === Number(expenseGroupId))
   const normalizedSearch = search.trim().toLowerCase()
 
   const visibleActivity = useMemo(() => {
@@ -154,6 +156,14 @@ function App() {
   function openGroup(groupId) {
     setSelectedGroupId(Number(groupId))
     setTab('Group')
+  }
+
+  function openExpense() {
+    const defaultGroup = selectedGroup?.members?.length
+      ? selectedGroup
+      : groups.find(group => group.members?.length)
+    setExpenseGroupId(defaultGroup?.id || '')
+    setModal('expense')
   }
 
   function notify(message) {
@@ -173,6 +183,10 @@ function App() {
       url = '/api/people'
       payload = { name: form.get('name') }
       successMessage = 'Person added.'
+    } else if (modal === 'members') {
+      url = `/api/groups/${selectedGroupId}/members`
+      payload = { personIds: form.getAll('memberIds').map(Number) }
+      successMessage = 'Group members updated.'
     } else if (modal === 'expense') {
       url = '/api/expenses'
       payload = {
@@ -186,7 +200,11 @@ function App() {
       successMessage = 'Expense added.'
     } else if (modal === 'group') {
       url = '/api/groups'
-      payload = { name: form.get('name'), icon: form.get('icon') }
+      payload = {
+        name: form.get('name'),
+        icon: form.get('icon'),
+        memberIds: form.getAll('memberIds').map(Number),
+      }
       successMessage = 'Group created.'
     } else {
       url = '/api/settlements'
@@ -201,7 +219,7 @@ function App() {
 
     try {
       await request(url, {
-        method: 'POST',
+        method: modal === 'members' ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
@@ -313,7 +331,7 @@ function App() {
             <div className="welcome-actions">
               <button className="button button-light" onClick={() => setModal('person')}><Plus size={16} />Add user</button>
               <button className="button button-light" onClick={() => setModal('group')}><Plus size={16} />Create group</button>
-              <button className="button button-dark" disabled={!people.length || !groups.length} onClick={() => setModal('expense')}><Plus size={17} />Add an expense</button>
+              <button className="button button-dark" disabled={!groups.some(group => group.members?.length)} onClick={openExpense}><Plus size={17} />Add an expense</button>
             </div>
           </div>
 
@@ -369,7 +387,7 @@ function App() {
                         return (
                           <button className="group-row group-row-button" key={group.id} onClick={() => openGroup(group.id)}>
                             <span className="group-icon" style={{ background: group.color }}><Icon size={17} /></span>
-                            <span className="group-name"><b>{group.name}</b><span>{group.expenses} expenses</span></span>
+                            <span className="group-name"><b>{group.name}</b><span>{group.members?.length || 0} members · {group.expenses} expenses</span></span>
                             <span className="group-total"><b>{money(group.total)}</b><span>total</span></span>
                           </button>
                         )
@@ -400,7 +418,7 @@ function App() {
                       <button className="group-card" key={group.id} onClick={() => openGroup(group.id)}>
                         <span className="group-card-icon" style={{ background: group.color }}><Icon size={20} /></span>
                         <span className="group-card-name">{group.name}</span>
-                        <span className="group-card-meta">{group.expenses} {group.expenses === 1 ? 'expense' : 'expenses'}</span>
+                        <span className="group-card-meta">{group.members?.length || 0} members · {group.expenses} {group.expenses === 1 ? 'expense' : 'expenses'}</span>
                         <strong>{money(group.total)}</strong>
                         <span className="group-card-link">Open group <ArrowRight size={14} /></span>
                       </button>
@@ -412,6 +430,30 @@ function App() {
           )}
 
           {(tab === 'Activity' || tab === 'Group') && (
+            <>
+            {tab === 'Group' && selectedGroup && (
+              <section className="panel screen-panel group-members-panel">
+                <div className="panel-heading screen-panel-heading">
+                  <div>
+                    <div className="section-title">Group members <span className="title-count">{selectedGroup.members?.length || 0}</span></div>
+                    <div className="section-subtitle">Users in this group are available to share its expenses.</div>
+                  </div>
+                  <button className="button button-light" onClick={() => setModal('members')}><Users size={15} />Manage members</button>
+                </div>
+                {selectedGroup.members?.length ? (
+                  <div className="group-member-list">
+                    {selectedGroup.members.map(person => (
+                      <div className="group-member" key={person.id}>
+                        <div className="avatar" style={{ background: person.color }}>{person.initials}</div>
+                        <b>{person.name}</b>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty">No users in this group yet. Manage members to add users before recording expenses.</div>
+                )}
+              </section>
+            )}
             <section className="panel screen-panel activity-screen">
               <div className="panel-heading screen-panel-heading">
                 <div>
@@ -426,6 +468,7 @@ function App() {
                 ? <div className="empty"><LoaderCircle className="loading-icon" size={20} />Loading expenses…</div>
                 : <ExpenseRows expenses={visibleActivity} currentUser={currentUser} onGroupClick={openGroup} />}
             </section>
+            </>
           )}
 
           {tab === 'Balances' && (
@@ -467,7 +510,7 @@ function App() {
         <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
           <form className="modal" onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'person' ? 'Add a user' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : 'Record a settlement'}</h2></div>
+              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'person' ? 'Add a user' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
@@ -482,12 +525,12 @@ function App() {
                   <label>Amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" required /></label>
                   <label>Category<select name="category">{Object.keys(categoryIcons).map(category => <option key={category}>{category}</option>)}</select></label>
                 </div>
-                <label>Group<select name="groupId" required defaultValue={selectedGroupId || ''}><option value="" disabled>Select a group</option>{groups.map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
-                <label>Paid by<select name="paidBy" defaultValue={data.currentUserId}>{people.map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
-                <fieldset className="participant-field">
+                <label>Group<select name="groupId" required value={expenseGroupId} onChange={event => setExpenseGroupId(Number(event.target.value))}><option value="" disabled>Select a group</option>{groups.filter(group => group.members?.length).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
+                <label key={selectedExpenseGroup?.id}>Paid by<select name="paidBy" required defaultValue={selectedExpenseGroup?.members?.some(person => person.id === data.currentUserId) ? data.currentUserId : selectedExpenseGroup?.members?.[0]?.id || ''}>{(selectedExpenseGroup?.members || []).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
+                <fieldset className="participant-field" key={selectedExpenseGroup?.id}>
                   <legend>Split equally between</legend>
                   <div className="participant-list">
-                    {people.map(person => <label key={person.id}><input type="checkbox" name="participants" value={person.id} defaultChecked /><span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span>{person.name}</label>)}
+                    {(selectedExpenseGroup?.members || []).map(person => <label key={person.id}><input type="checkbox" name="participants" value={person.id} defaultChecked /><span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span>{person.name}</label>)}
                   </div>
                 </fieldset>
                 <p className="form-hint">Choose who shares this expense. Any extra cents are split fairly.</p>
@@ -498,7 +541,26 @@ function App() {
               <>
                 <label>Group name<input required name="name" maxLength="255" placeholder="Enter a group name" /></label>
                 <label>Group icon<select name="icon"><option value="users">People</option><option value="house">Home</option><option value="mountain">Travel</option></select></label>
+                <fieldset className="participant-field">
+                  <legend>Add users to this group</legend>
+                  {people.length ? (
+                    <div className="participant-list">
+                      {people.map(person => <label key={person.id}><input type="checkbox" name="memberIds" value={person.id} /><span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span>{person.name}</label>)}
+                    </div>
+                  ) : <p className="form-hint">Add users first, then you can assign them to this group.</p>}
+                </fieldset>
               </>
+            )}
+
+            {modal === 'members' && selectedGroup && (
+              <fieldset className="participant-field">
+                <legend>Select users for {selectedGroup.name}</legend>
+                {people.length ? (
+                  <div className="participant-list">
+                    {people.map(person => <label key={person.id}><input type="checkbox" name="memberIds" value={person.id} defaultChecked={selectedGroup.members?.some(member => member.id === person.id)} /><span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span>{person.name}</label>)}
+                  </div>
+                ) : <p className="form-hint">Add users before assigning them to a group.</p>}
+              </fieldset>
             )}
 
             {modal === 'settlement' && (
@@ -515,7 +577,7 @@ function App() {
             )}
 
             <button className="button button-dark modal-submit" disabled={busy}>
-              {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
+              {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
               <ArrowRight size={15} />
             </button>
           </form>

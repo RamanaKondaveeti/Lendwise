@@ -140,3 +140,8 @@ body{background:#111815;color:#e5eee8}
 footer{border-color:#2a3931;color:#82968a}
 footer a{color:#9ab7a4}
 .button:disabled{opacity:.45}
+.group-members-panel{margin-bottom:16px}
+.group-member-list{display:flex;flex-wrap:wrap;gap:10px;padding-top:16px}
+.group-member{display:flex;align-items:center;gap:8px;padding:7px 11px;background:#1f3028;border:1px solid #30483b;border-radius:999px}
+.group-member .avatar{width:26px;height:26px}
+.group-member b{font-size:10px;color:#e5eee8}
