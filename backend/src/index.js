@@ -125,6 +125,7 @@ app.get('/api/summary', async (_req, res) => {
        ORDER BY e.created_at DESC
        LIMIT 12`
     );
+    const [activityCount] = await q('SELECT COUNT(*) AS count FROM expenses');
     const net = await q(
       `SELECT p.id, p.name, p.initials, p.color,
               COALESCE((SELECT SUM(s.amount) FROM splits s JOIN expenses e ON e.id = s.expense_id WHERE s.person_id = p.id), 0)
@@ -134,42 +135,106 @@ app.get('/api/summary', async (_req, res) => {
        FROM people p
        ORDER BY p.id`
     );
-    res.json({ people, groups, activity, balances: net, currentUserId: people[0]?.id });
+    res.json({
+      people,
+      groups,
+      activity,
+      activityCount: Number(activityCount.count),
+      balances: net,
+      currentUserId: people[0]?.id
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Could not load your expense data.' });
   }
 });
 
+app.get('/api/expenses', async (req, res) => {
+  const groupId = req.query.groupId === undefined ? null : Number(req.query.groupId);
+  if (groupId !== null && (!Number.isInteger(groupId) || groupId <= 0)) {
+    return res.status(400).json({ error: 'Group ID must be a positive integer.' });
+  }
+
+  try {
+    const expenses = await q(
+      `SELECT e.id, e.group_id, e.title, e.amount, e.category, e.created_at,
+              p.id AS payer_id, p.name AS payer, p.initials, p.color,
+              g.name AS group_name
+       FROM expenses e
+       JOIN people p ON p.id = e.paid_by
+       JOIN \`groups\` g ON g.id = e.group_id
+       ${groupId === null ? '' : 'WHERE e.group_id = ?'}
+       ORDER BY e.created_at DESC, e.id DESC`,
+      groupId === null ? [] : [groupId]
+    );
+    res.json(expenses);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load expenses.' });
+  }
+});
+
 app.post('/api/expenses', async (req, res) => {
   const { groupId, title, amount, paidBy, category = 'Other', participants } = req.body;
-  if (!groupId || !title || !Number.isFinite(Number(amount)) || Number(amount) <= 0 ||
-      !Array.isArray(participants) || !participants.length) {
+  const normalizedGroupId = Number(groupId);
+  const normalizedPaidBy = Number(paidBy);
+  const amountCents = Math.round(Number(amount) * 100);
+  const participantIds = Array.isArray(participants) ? participants.map(Number) : [];
+  if (!Number.isInteger(normalizedGroupId) || normalizedGroupId <= 0 ||
+      typeof title !== 'string' || !title.trim() ||
+      !Number.isFinite(Number(amount)) || !Number.isSafeInteger(amountCents) ||
+      amountCents <= 0 || amountCents > 999999999999 ||
+      !Number.isInteger(normalizedPaidBy) || normalizedPaidBy <= 0 ||
+      !Array.isArray(participants) || !participantIds.length ||
+      participantIds.some(id => !Number.isInteger(id) || id <= 0) ||
+      new Set(participantIds).size !== participantIds.length) {
     return res.status(400).json({ error: 'Add a title, positive amount, group, and participants.' });
   }
 
-  const connection = await pool.getConnection();
+  let connection;
+  let inTransaction = false;
   try {
+    const [groups, people] = await Promise.all([
+      q('SELECT id FROM `groups` WHERE id = ?', [normalizedGroupId]),
+      q(
+        `SELECT id FROM people WHERE id IN (${[normalizedPaidBy, ...participantIds].map(() => '?').join(',')})`,
+        [normalizedPaidBy, ...participantIds]
+      )
+    ]);
+    if (!groups.length || people.length !== new Set([normalizedPaidBy, ...participantIds]).size) {
+      return res.status(400).json({ error: 'Choose an existing group, payer, and participants.' });
+    }
+
+    connection = await pool.getConnection();
     await connection.beginTransaction();
+    inTransaction = true;
     const [expense] = await connection.execute(
       'INSERT INTO expenses(group_id, title, amount, paid_by, category) VALUES(?, ?, ?, ?, ?)',
-      [groupId, title, amount, paidBy, category]
+      [normalizedGroupId, title.trim(), amountCents / 100, normalizedPaidBy, category]
     );
-    const each = Number(amount) / participants.length;
-    for (const personId of participants) {
+    const baseShare = Math.floor(amountCents / participantIds.length);
+    const remainder = amountCents % participantIds.length;
+    for (const [index, personId] of participantIds.entries()) {
       await connection.execute(
         'INSERT INTO splits(expense_id, person_id, amount) VALUES(?, ?, ?)',
-        [expense.insertId, personId, each]
+        [expense.insertId, personId, (baseShare + (index < remainder ? 1 : 0)) / 100]
       );
     }
     await connection.commit();
+    inTransaction = false;
     res.status(201).json({ ok: true, id: expense.insertId });
   } catch (error) {
-    await connection.rollback();
+    if (inTransaction) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Expense rollback failed', rollbackError);
+      }
+    }
     console.error(error);
     res.status(500).json({ error: 'Could not save this expense.' });
   } finally {
-    connection.release();
+    connection?.release();
   }
 });
 
@@ -192,13 +257,21 @@ app.post('/api/groups', async (req, res) => {
 
 app.post('/api/settlements', async (req, res) => {
   const { payerId, payeeId, amount, note = 'Settlement' } = req.body;
-  if (!payerId || !payeeId || Number(amount) <= 0) {
+  const normalizedPayerId = Number(payerId);
+  const normalizedPayeeId = Number(payeeId);
+  const amountCents = Math.round(Number(amount) * 100);
+  if (!Number.isInteger(normalizedPayerId) || normalizedPayerId <= 0 ||
+      !Number.isInteger(normalizedPayeeId) || normalizedPayeeId <= 0 ||
+      normalizedPayerId === normalizedPayeeId ||
+      !Number.isFinite(Number(amount)) || !Number.isSafeInteger(amountCents) ||
+      amountCents <= 0 || amountCents > 999999999999 ||
+      typeof note !== 'string' || !note.trim() || note.length > 255) {
     return res.status(400).json({ error: 'Choose two people and a positive amount.' });
   }
   try {
     await q(
       'INSERT INTO settlements(payer_id, payee_id, amount, note) VALUES(?, ?, ?, ?)',
-      [payerId, payeeId, amount, note]
+      [normalizedPayerId, normalizedPayeeId, amountCents / 100, note.trim()]
     );
     res.status(201).json({ ok: true });
   } catch (error) {

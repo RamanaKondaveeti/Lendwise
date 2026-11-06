@@ -13,10 +13,10 @@ The app is served on port 3000. The API is available on port 5000 and connects t
 Start MySQL, create the database and grant the configured user access, copy `.env.example` to `.env`, then run `cd backend && npm install && npm run dev` and `cd frontend && npm install && npm run dev` in separate terminals. The backend reads `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`; it initializes the tables and demo data on first startup.
 
 ## Included
-- Expense dashboard, recent activity and balances
-- Add an expense with an equal split across everyone in your circles
-- Create groups
+- Database-driven overview, group details, full expense activity, and balances screens
+- Create groups and add expenses with selectable participants
+- Record settlements and see balances recalculated from expenses, splits, and payments
 - MySQL persistence and demo data initialized on first startup
 - Frontend and backend Dockerfiles plus Docker Compose
 
-Authentication, invitations, participant selection, editing, settlements UI and production hardening remain future work.
+The first person in the database is used as the current account because authentication and invitations are not included yet. Editing expenses and production hardening remain future work.

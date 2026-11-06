@@ -1,0 +1,85 @@
+.startup-state{min-height:100vh;display:grid;place-content:center;justify-items:center;gap:12px;padding:24px;color:#697169;font-size:13px}
+.startup-state p{margin:0}
+.loading-icon{animation:spin 1s linear infinite;color:#568060}
+@keyframes spin{to{transform:rotate(360deg)}}
+.group-link{width:100%;cursor:pointer}
+.nav-item:focus-visible,.group-link:focus-visible,.group-card:focus-visible,.group-row-button:focus-visible,.button:focus-visible,.select-button:focus-visible{outline:2px solid #719978;outline-offset:2px}
+.screen-panel{padding:20px;background:#fff;border:1px solid #e9ebe5;border-radius:11px}
+.screen-panel-heading{padding-bottom:18px;border-bottom:1px solid #f0f1ed}
+.activity-screen{padding-bottom:0}
+.data-list .activity-row{grid-template-columns:34px minmax(120px,1fr) minmax(90px,.55fr) 75px;gap:12px;height:64px}
+.data-list .activity-copy b{font-size:11px}
+.data-list .activity-copy span{font-size:9px}
+.data-list .activity-payer span{font-size:9px}
+.data-list .activity-amount b{font-size:11px}
+.inline-link{border:0;background:transparent;padding:0;color:inherit;font-size:inherit}
+.inline-link:hover{color:#426a49;text-decoration:underline}
+.activity-copy i{font-style:normal;padding:0 6px;color:#b5bab2}
+.range-select select{appearance:none;border:0;outline:0;background:transparent;color:#727b70;font-size:9px;cursor:pointer}
+.back-arrow{transform:rotate(180deg)}
+.group-row-button{width:100%;padding:0;background:#fff;border-right:0;border-bottom:0;border-left:0;text-align:left;cursor:pointer}
+.group-row-button:hover,.group-link:hover{background:#f7f9f5}
+.group-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:13px;padding-top:18px}
+.group-card{min-height:185px;padding:17px;border:1px solid #e9ebe5;border-radius:10px;background:#fff;text-align:left;display:flex;flex-direction:column;align-items:flex-start;transition:border-color .15s,transform .15s}
+.group-card:hover{border-color:#b9cbb8;transform:translateY(-2px)}
+.group-card-icon{height:38px;width:38px;border-radius:10px;display:grid;place-items:center;color:#576b58}
+.group-card-name{margin-top:13px;font-size:12px;font-weight:700}
+.group-card-meta{margin-top:5px;font-size:9px;color:#899087}
+.group-card strong{margin-top:11px;font:700 17px Manrope,sans-serif}
+.group-card-link{display:flex;align-items:center;gap:5px;margin-top:auto;padding-top:14px;color:#527656;font-size:9px;font-weight:600}
+.group-card-link svg{transition:transform .15s}
+.group-card:hover .group-card-link svg{transform:translateX(3px)}
+.balance-table{width:100%}
+.balance-table-header,.balance-person-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(120px,.5fr) minmax(120px,.5fr);align-items:center;gap:14px}
+.balance-table-header{padding:13px 8px;color:#92998f;font-size:8px;font-weight:700;letter-spacing:.7px}
+.balance-person-row{min-height:67px;padding:10px 8px;border-top:1px solid #f0f1ed}
+.balance-person{display:flex;align-items:center;gap:10px;min-width:0}
+.balance-person .avatar{width:32px;height:32px}
+.balance-person>div:last-child{display:grid;gap:4px}
+.balance-person b{font-size:10px}
+.balance-person span{font-size:8px;color:#92998f}
+.balance-value{font-size:11px}
+.balance-value.is-owed,.balance-status.is-owed{color:#4f8057}
+.balance-value.is-owing,.balance-status.is-owing{color:#ad7952}
+.balance-status{font-size:9px;color:#778075}
+.balance-note{margin:16px 0 0;padding-top:13px;border-top:1px solid #f0f1ed;color:#92998f;font-size:9px}
+.participant-field{margin:0;padding:10px;border:1px solid #e5e8e1;border-radius:7px}
+.participant-field legend{padding:0 4px;font-size:10px;font-weight:600;color:#5c665b}
+.participant-list{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.modal .participant-list label{display:flex;align-items:center;gap:7px;font-weight:400}
+.participant-list input{width:14px;height:14px;margin:0;accent-color:#426a49}
+.participant-list .avatar{flex:none}
+footer>span:last-child{display:flex;align-items:center;gap:5px}
+footer svg{vertical-align:middle}
+.button:disabled{opacity:.65;cursor:wait}
+.tip-card p{margin-left:0}
+.activity-screen .empty{display:flex;align-items:center;justify-content:center;gap:9px}
+@media(max-width:800px){
+  .screen-panel{padding:16px}
+  .data-list .activity-row{grid-template-columns:30px minmax(90px,1fr) minmax(68px,.55fr) 63px;gap:7px}
+  .balance-table-header,.balance-person-row{grid-template-columns:minmax(135px,1fr) minmax(85px,.6fr) minmax(74px,.5fr);gap:8px}
+  .group-grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
+}
+@media(max-width:540px){
+  .screen-panel{padding:13px}
+  .screen-panel-heading{align-items:flex-start;gap:10px}
+  .screen-panel-heading>.button{white-space:nowrap}
+  .data-list .activity-row{grid-template-columns:28px minmax(70px,1fr) 52px;gap:6px;height:60px}
+  .data-list .activity-payer{display:none}
+  .data-list .activity-amount b{font-size:9px}
+  .data-list .activity-copy b{font-size:9px}
+  .data-list .activity-copy span{font-size:8px}
+  .group-grid{grid-template-columns:1fr}
+  .group-card{min-height:165px}
+  .balance-table-header,.balance-person-row{grid-template-columns:minmax(105px,1fr) minmax(77px,.6fr)}
+  .balance-table-header span:last-child,.balance-status{display:none}
+  .balance-person .avatar{width:27px;height:27px}
+  .balance-person b{font-size:9px}
+  .balance-value{font-size:9px}
+  .participant-list{grid-template-columns:1fr}
+  .top-actions .icon-button{display:none}
+  .search{width:142px;padding:0 7px;border:1px solid #e9ebe6;background:#fbfcfa}
+  .search input{display:block;min-width:0}
+  .search kbd{display:none}
+  .form-row{grid-template-columns:1fr 1fr}
+}
