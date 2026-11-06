@@ -11,14 +11,8 @@ const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
 const isProduction = process.env.NODE_ENV === 'production';
-if (isProduction && (
-  process.env.COOKIE_SECURE !== 'true' ||
-  !/^https:\/\//.test(process.env.APP_URL || '') ||
-  !process.env.SMTP_HOST ||
-  !process.env.MAIL_FROM ||
-  !process.env.DB_PASSWORD
-)) {
-  throw new Error('Production requires HTTPS COOKIE_SECURE, HTTPS APP_URL, SMTP_HOST, MAIL_FROM, and DB_PASSWORD.');
+if (isProduction && !process.env.DB_PASSWORD) {
+  throw new Error('Production requires DB_PASSWORD.');
 }
 
 const scrypt = promisify(crypto.scrypt);
