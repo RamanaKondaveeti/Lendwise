@@ -1,10 +1,10 @@
-# Lendwise
+# GroupBuk
 
 A responsive shared-expense app with private workspaces, database-backed accounts, groups, expenses, and settlements.
 
 ## Production deployment
 
-The Docker Compose setup expects MySQL to be reachable from the backend container at `host.docker.internal:3306`. Create the database and a dedicated MySQL user with only the permissions required by Lendwise; do not use the MySQL root account. Configure these values in the ignored `.env` file:
+The Docker Compose setup expects MySQL to be reachable from the backend container at `host.docker.internal:3306`. Create the database and a dedicated MySQL user with only the permissions required by GroupBuk; do not use the MySQL root account. Configure these values in the ignored `.env` file:
 
 ```dotenv
 DB_NAME=lendwise
@@ -17,7 +17,7 @@ SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=your-mailbox-user
 SMTP_PASSWORD=your-mailbox-password
-MAIL_FROM=Lendwise <no-reply@your-domain.example>
+MAIL_FROM=GroupBuk <no-reply@your-domain.example>
 ```
 
 Use the SMTP provider's required port and TLS settings. `APP_URL` must be the exact public HTTPS origin used by customers. For temporary HTTP testing, `COOKIE_SECURE=false` allows session cookies over HTTP, and email variables may be left unset so the backend can start. Signup and login do not require email delivery. Password recovery and invitation emails require SMTP; when an invitation email cannot be sent, the app provides a shareable invitation link. HTTP and non-secure cookies are not safe for customer use; configure HTTPS and set `COOKIE_SECURE=true` before release. Keep `.env` private and out of version control.
@@ -48,7 +48,7 @@ For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and
 - Rate limiting, security headers, and request body limits; secure cookies when `COOKIE_SECURE=true`
 - Manual creation of people and groups; no generated sample or dummy records
 - MySQL persistence for groups, group members, expenses, splits, and settlements
-- Record expense-share payments individually, or review and confirm suggested workspace-wide settlements
+- Record expense-share payments individually, or review and confirm suggested payments to clear your own balance
 
 ## Before customer release
 

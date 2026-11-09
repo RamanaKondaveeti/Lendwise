@@ -144,7 +144,7 @@ function ShareServiceIcon({ service }) {
 }
 
 function InvitationShareButtons({ url, workspaceName, onInstagram }) {
-  const message = `Join my ${workspaceName} workspace on Lendwise: ${url}`
+  const message = `Join my ${workspaceName} workspace on GroupBuk: ${url}`
   const encodedMessage = encodeURIComponent(message)
 
   return (
@@ -160,7 +160,7 @@ function InvitationShareButtons({ url, workspaceName, onInstagram }) {
         <a className="share-button share-whatsapp" href={`https://wa.me/?text=${encodedMessage}`} target="_blank" rel="noopener noreferrer">
           <span className="share-brand"><ShareServiceIcon service="whatsapp" /></span>WhatsApp
         </a>
-        <a className="share-button share-gmail" href={`https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent('Join my Lendwise workspace')}&body=${encodedMessage}`} target="_blank" rel="noopener noreferrer">
+        <a className="share-button share-gmail" href={`https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent('Join my GroupBuk workspace')}&body=${encodedMessage}`} target="_blank" rel="noopener noreferrer">
           <span className="share-brand"><ShareServiceIcon service="gmail" /></span>Gmail
         </a>
       </div>
@@ -170,11 +170,11 @@ function InvitationShareButtons({ url, workspaceName, onInstagram }) {
 }
 
 function SiteShareButtons({ url, onInstagram, className = '' }) {
-  const message = `Check out Lendwise, shared expenses made simple: ${url}`
+  const message = `Check out GroupBuk, shared expenses made simple: ${url}`
   const encodedMessage = encodeURIComponent(message)
 
   return (
-    <div className={`site-share-buttons ${className}`} aria-label="Share Lendwise">
+    <div className={`site-share-buttons ${className}`} aria-label="Share GroupBuk">
       <a className="site-share-button share-facebook" href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`} target="_blank" rel="noopener noreferrer" aria-label="Share on Facebook" title="Facebook">
         <ShareServiceIcon service="facebook" />
       </a>
@@ -184,7 +184,7 @@ function SiteShareButtons({ url, onInstagram, className = '' }) {
       <a className="site-share-button share-whatsapp" href={`https://wa.me/?text=${encodedMessage}`} target="_blank" rel="noopener noreferrer" aria-label="Share on WhatsApp" title="WhatsApp">
         <ShareServiceIcon service="whatsapp" />
       </a>
-      <a className="site-share-button share-gmail" href={`https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent('Check out Lendwise')}&body=${encodedMessage}`} target="_blank" rel="noopener noreferrer" aria-label="Share by Gmail" title="Gmail">
+      <a className="site-share-button share-gmail" href={`https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent('Check out GroupBuk')}&body=${encodedMessage}`} target="_blank" rel="noopener noreferrer" aria-label="Share by Gmail" title="Gmail">
         <ShareServiceIcon service="gmail" />
       </a>
     </div>
@@ -542,7 +542,7 @@ function App() {
   async function shareOnInstagram(url, message) {
     if (typeof navigator.share === 'function') {
       try {
-        await navigator.share({ title: 'Lendwise', text: message, url })
+        await navigator.share({ title: 'GroupBuk', text: message, url })
         return
       } catch (error) {
         if (error.name === 'AbortError') return
@@ -552,18 +552,18 @@ function App() {
     window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer')
     try {
       await navigator.clipboard.writeText(`${message} ${url}`)
-      notify('Lendwise link copied. Paste it into Instagram to share.')
+      notify('GroupBuk link copied. Paste it into Instagram to share.')
     } catch (error) {
       notify('Instagram opened. Copy the invitation link to share it.')
     }
   }
 
   async function shareInviteOnInstagram() {
-    return shareOnInstagram(manualInviteLink, `Join my ${authUser.workspaceName || 'Lendwise'} workspace on Lendwise:`)
+    return shareOnInstagram(manualInviteLink, `Join my ${authUser.workspaceName || 'GroupBuk'} workspace on GroupBuk:`)
   }
 
   async function shareSiteOnInstagram(url) {
-    return shareOnInstagram(url, 'Check out Lendwise, shared expenses made simple:')
+    return shareOnInstagram(url, 'Check out GroupBuk, shared expenses made simple:')
   }
 
   async function deletePerson(person) {
@@ -685,7 +685,7 @@ function App() {
         <section className="auth-showcase">
           <a className="brand auth-brand" href="#" onClick={event => event.preventDefault()}>
             <span className="brand-mark"><ArrowLeftRight size={19} /></span>
-            <span>lendwise<span className="brand-dot">.</span></span>
+            <span>GroupBuk</span>
           </a>
           <div className="auth-message">
             <span className="auth-kicker"><span className="live-dot" /> SHARED EXPENSES, MADE SIMPLE</span>
@@ -699,11 +699,11 @@ function App() {
           <div className="auth-form-wrap">
             <div className="auth-mobile-brand">
               <span className="brand-mark"><ArrowLeftRight size={18} /></span>
-              <b>lendwise<span className="brand-dot">.</span></b>
+              <b>GroupBuk</b>
             </div>
             <div className="auth-heading">
               <span className="eyebrow">{authMode === 'signup' ? 'GET STARTED' : authMode === 'reset' ? 'ACCOUNT SECURITY' : authMode === 'forgot' ? 'ACCOUNT RECOVERY' : 'WELCOME BACK'}</span>
-              <h2>{authMode === 'signup' ? 'Create your account' : authMode === 'reset' ? 'Choose a new password' : authMode === 'forgot' ? 'Reset your password' : 'Sign in to Lendwise'}</h2>
+              <h2>{authMode === 'signup' ? 'Create your account' : authMode === 'reset' ? 'Choose a new password' : authMode === 'forgot' ? 'Reset your password' : 'Sign in to GroupBuk'}</h2>
               <p>{authMode === 'signup' ? invitationToken ? 'Create your account to join the invited workspace.' : 'A private workspace will be created for your account.' : authMode === 'reset' ? 'Use at least 12 characters for your new password.' : authMode === 'forgot' ? 'We’ll email you a secure password reset link.' : 'Pick up right where your group left off.'}</p>
             </div>
             {(authMode === 'login' || authMode === 'signup') && (
@@ -772,7 +772,7 @@ function App() {
       <aside className="sidebar">
         <a className="brand" href="#" onClick={event => { event.preventDefault(); setTab('Overview') }}>
           <span className="brand-mark"><ArrowLeftRight size={19} /></span>
-          <span>lendwise<span className="brand-dot">.</span></span>
+          <span>GroupBuk</span>
         </a>
         <div className="workspace-switcher">
           <button type="button" className="workspace" aria-expanded={workspaceMenuOpen} onClick={() => setWorkspaceMenuOpen(open => !open)}>
@@ -800,6 +800,9 @@ function App() {
               {name === 'Activity' && <span className="nav-count">{data.activityCount || 0}</span>}
             </button>
           ))}
+          <button className="nav-item settle-up-nav" type="button" aria-label="Settle up" title="Settle up" disabled={!Number(currentUser?.balance)} onClick={openSettleAll}>
+            <Check size={18} />Settle up
+          </button>
         </nav>
         <div className="nav-label groups-label">
           YOUR GROUPS
@@ -1112,7 +1115,7 @@ function App() {
         <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
           <form className="modal" onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : 'Record a settlement'}</h2></div>
+              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
@@ -1159,7 +1162,7 @@ function App() {
               <>
                 {!manualInviteLink && (
                   <>
-                    <label>Search Lendwise users<input value={globalUserQuery} onChange={event => setGlobalUserQuery(event.target.value)} maxLength="80" autoFocus placeholder="Type a name (2 characters minimum)" /></label>
+                    <label>Search GroupBuk users<input value={globalUserQuery} onChange={event => setGlobalUserQuery(event.target.value)} maxLength="80" autoFocus placeholder="Type a name (2 characters minimum)" /></label>
                     <div className="global-user-results" aria-live="polite">
                       {globalSearchLoading && <span className="form-hint">Searching…</span>}
                       {!globalSearchLoading && globalUserQuery.trim().length >= 2 && !globalUserResults.length && <span className="form-hint">No matching users available to invite.</span>}
@@ -1182,7 +1185,7 @@ function App() {
                       <label>Share this invitation link<input readOnly value={manualInviteLink} onFocus={event => event.target.select()} /></label>
                       <button type="button" className="button button-light" onClick={copyInviteLink}>Copy link</button>
                     </div>
-                    <InvitationShareButtons url={manualInviteLink} workspaceName={authUser.workspaceName || 'Lendwise'} onInstagram={shareInviteOnInstagram} />
+                    <InvitationShareButtons url={manualInviteLink} workspaceName={authUser.workspaceName || 'GroupBuk'} onInstagram={shareInviteOnInstagram} />
                   </>
                 )}
               </>

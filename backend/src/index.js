@@ -458,7 +458,7 @@ app.post('/api/auth/forgot-password', authRateLimit, async (req, res) => {
       try {
         await sendEmail({
           to: account.email,
-          subject: 'Reset your Lendwise password',
+          subject: 'Reset your GroupBuk password',
           text: `Reset your password: ${appUrl}/?reset=${encodeURIComponent(token)}`
         });
       } catch (emailError) {
@@ -774,8 +774,8 @@ app.post('/api/invitations', async (req, res) => {
     try {
       await sendEmail({
         to: targetEmail,
-        subject: 'You are invited to Lendwise',
-        text: `${req.account.name} invited you to join the ${req.account.workspace_name} Lendwise workspace. Accept the invitation: ${inviteUrl}`
+        subject: 'You are invited to GroupBuk',
+        text: `${req.account.name} invited you to join the ${req.account.workspace_name} GroupBuk workspace. Accept the invitation: ${inviteUrl}`
       });
     } catch (emailError) {
       console.error('Workspace invitation email delivery failed', emailError);
@@ -1504,7 +1504,7 @@ app.use((error, _req, res, next) => {
 
 const port = process.env.PORT || 5000;
 init()
-  .then(() => app.listen(port, '0.0.0.0', () => console.log(`Lendwise API listening on ${port}`)))
+  .then(() => app.listen(port, '0.0.0.0', () => console.log(`GroupBuk API listening on ${port}`)))
   .catch(error => {
     console.error('Database startup failed', error);
     process.exit(1);
