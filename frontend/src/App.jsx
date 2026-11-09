@@ -55,7 +55,7 @@ async function request(url, options) {
   return body
 }
 
-function ExpenseRows({ expenses, currentUser, onGroupClick }) {
+function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, showSettlement = false }) {
   if (!expenses.length) return <div className="empty">No expenses to show yet.</div>
 
   return (
@@ -83,8 +83,15 @@ function ExpenseRows({ expenses, currentUser, onGroupClick }) {
             </div>
             <div className="activity-amount">
               <b>{money(expense.amount)}</b>
-              <span>total</span>
+              <span>{showSettlement
+                ? expense.outstanding_amount > 0 ? `${money(expense.outstanding_amount)} unpaid` : 'settled'
+                : 'total'}</span>
             </div>
+            {showSettlement && (
+              expense.outstanding_amount > 0
+                ? <button className="settle-expense-button" type="button" onClick={() => onSettleExpense(expense)}>Settle</button>
+                : <span className="expense-settled" title="All shares are settled"><Check size={15} /></span>
+            )}
           </div>
         )
       })}
@@ -203,6 +210,9 @@ function App() {
   const [tab, setTab] = useState('Overview')
   const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
+  const [expenseToSettle, setExpenseToSettle] = useState(null)
+  const [settlementPlan, setSettlementPlan] = useState([])
+  const [settlementDefaults, setSettlementDefaults] = useState(null)
   const [modal, setModal] = useState('')
   const [search, setSearch] = useState('')
   const [dateRange, setDateRange] = useState('30')
@@ -349,6 +359,70 @@ function App() {
       : groups.find(group => group.members?.length)
     setExpenseGroupId(defaultGroup?.id || '')
     setModal('expense')
+  }
+
+  function openManualSettlement() {
+    setSettlementDefaults(null)
+    setModal('settlement')
+  }
+
+  function openExpenseSettlement(expense) {
+    setExpenseToSettle(expense)
+    setModal('expense-settlement')
+  }
+
+  function createSettlementPlan() {
+    const debtors = data.balances
+      .map(person => ({ ...person, cents: Math.max(0, Math.round(Number(person.balance) * 100)) }))
+      .filter(person => person.cents > 0)
+      .sort((left, right) => right.cents - left.cents)
+    const creditors = data.balances
+      .map(person => ({ ...person, cents: Math.max(0, -Math.round(Number(person.balance) * 100)) }))
+      .filter(person => person.cents > 0)
+      .sort((left, right) => right.cents - left.cents)
+    const payments = []
+    let debtorIndex = 0
+    let creditorIndex = 0
+
+    while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
+      const debtor = debtors[debtorIndex]
+      const creditor = creditors[creditorIndex]
+      const cents = Math.min(debtor.cents, creditor.cents)
+      payments.push({
+        payerId: debtor.id,
+        payer: debtor.name,
+        payeeId: creditor.id,
+        payee: creditor.name,
+        amount: cents / 100,
+      })
+      debtor.cents -= cents
+      creditor.cents -= cents
+      if (!debtor.cents) debtorIndex += 1
+      if (!creditor.cents) creditorIndex += 1
+    }
+
+    return payments
+  }
+
+  function openSettleAll() {
+    const plan = createSettlementPlan()
+    if (!plan.length) {
+      notify('Everyone is already settled up.')
+      return
+    }
+    setSettlementPlan(plan)
+    setModal('settle-all')
+  }
+
+  function openPersonSettlement(person) {
+    const personBalance = Number(person.balance)
+    const userBalance = Number(currentUser?.balance || 0)
+    if (!userBalance || !personBalance || Math.sign(personBalance) === Math.sign(userBalance)) return
+    const payer = userBalance > 0 ? currentUser : person
+    const payee = userBalance < 0 ? currentUser : person
+    const amount = Math.min(Math.abs(userBalance), Math.abs(personBalance))
+    setSettlementDefaults({ payerId: payer.id, payeeId: payee.id, amount: (Math.round(amount * 100) / 100).toFixed(2) })
+    setModal('settlement')
   }
 
   function notify(message) {
@@ -521,13 +595,25 @@ function App() {
 
   async function submit(event) {
     event.preventDefault()
-    setBusy(true)
     const form = new FormData(event.currentTarget)
     let url
     let payload
     let successMessage
 
-    if (modal === 'invite') {
+    if (modal === 'expense-settlement') {
+      const personIds = form.getAll('personIds').map(Number)
+      if (!personIds.length) {
+        notify('Select at least one expense share to settle.')
+        return
+      }
+      url = `/api/expenses/${expenseToSettle.id}/settle`
+      payload = { personIds }
+      successMessage = 'Selected expense shares settled.'
+    } else if (modal === 'settle-all') {
+      url = '/api/settlements/bulk'
+      payload = { payments: settlementPlan.map(({ payerId, payeeId, amount }) => ({ payerId, payeeId, amount })) }
+      successMessage = 'All suggested settlements recorded.'
+    } else if (modal === 'invite') {
       url = '/api/invitations'
       payload = { email: form.get('email') }
       successMessage = 'Invitation email sent.'
@@ -569,6 +655,7 @@ function App() {
       successMessage = 'Settlement recorded.'
     }
 
+    setBusy(true)
     try {
       const result = await request(url, {
         method: modal === 'members' ? 'PUT' : 'POST',
@@ -739,7 +826,7 @@ function App() {
           })}
         </div>
         <div className="sidebar-bottom">
-          <button className="nav-item" disabled={people.length < 2} onClick={() => setModal('settlement')}><ArrowLeftRight size={18} />Record settlement</button>
+          <button className="nav-item" disabled={people.length < 2} onClick={openManualSettlement}><ArrowLeftRight size={18} />Record settlement</button>
           <div className="profile">
             <div className="avatar me">{currentUser?.initials || 'ME'}</div>
             <div className="profile-copy"><b>{currentUser?.name || authUser.name}</b><small>{authUser.email}</small></div>
@@ -761,7 +848,7 @@ function App() {
               url={`${window.location.origin}${window.location.pathname}`}
               onInstagram={shareSiteOnInstagram}
             />
-            <button className="icon-button" aria-label="Record settlement" title="Record settlement" disabled={people.length < 2} onClick={() => setModal('settlement')}>
+            <button className="icon-button" aria-label="Record settlement" title="Record settlement" disabled={people.length < 2} onClick={openManualSettlement}>
               <ArrowLeftRight size={18} />
             </button>
             <button type="button" className="sign-out-top-button" onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>
@@ -975,7 +1062,13 @@ function App() {
               </div>
               {activityLoading
                 ? <div className="empty"><LoaderCircle className="loading-icon" size={20} />Loading expenses…</div>
-                : <ExpenseRows expenses={visibleActivity} currentUser={currentUser} onGroupClick={openGroup} />}
+                : <ExpenseRows
+                  expenses={visibleActivity}
+                  currentUser={currentUser}
+                  onGroupClick={openGroup}
+                  onSettleExpense={openExpenseSettlement}
+                  showSettlement
+                />}
             </section>
             </>
           )}
@@ -984,13 +1077,19 @@ function App() {
             <section className="panel screen-panel">
               <div className="panel-heading screen-panel-heading">
                 <div><div className="section-title">People & balances <span className="title-count">{data.balances.length}</span></div><div className="section-subtitle">Net balance calculated from expenses, splits, and settlements.</div></div>
-                <button className="button button-light" onClick={() => setModal('person')}><Plus size={15} />Add user</button>
+                <div className="user-screen-actions">
+                  <button className="button button-light" disabled={!data.balances.some(person => Number(person.balance) !== 0)} onClick={openSettleAll}><Check size={15} />Settle all</button>
+                  <button className="button button-light" onClick={() => setModal('person')}><Plus size={15} />Add user</button>
+                </div>
               </div>
               {data.balances.length ? <div className="balance-table">
-                <div className="balance-table-header"><span>PERSON</span><span>NET BALANCE</span><span>STATUS</span></div>
+                <div className="balance-table-header"><span>PERSON</span><span>NET BALANCE</span><span>STATUS</span><span /></div>
                 {data.balances.map(person => {
                   const isCurrentUser = person.id === data.currentUserId
                   const balance = Number(person.balance)
+                  const userBalance = Number(currentUser?.balance || 0)
+                  const canSettle = !isCurrentUser && userBalance !== 0 && balance !== 0 &&
+                    Math.sign(userBalance) !== Math.sign(balance)
                   return (
                     <div className="balance-person-row" key={person.id}>
                       <div className="balance-person">
@@ -1003,11 +1102,14 @@ function App() {
                       <span className={`balance-status ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : ''}`}>
                         {balance < 0 ? 'Owed overall' : balance > 0 ? 'Owes overall' : 'Settled'}
                       </span>
+                      {canSettle
+                        ? <button className="button button-light balance-settle-button" onClick={() => openPersonSettlement(person)}>Settle</button>
+                        : <span />}
                     </div>
                   )
                 })}
               </div> : <div className="empty">No people yet. Add a person to start setting up your workspace.</div>}
-              {data.balances.length > 0 && <p className="balance-note">A positive sign means the person is owed money overall; a minus sign means they owe money overall.</p>}
+              {data.balances.length > 0 && <p className="balance-note">A positive balance means the person owes money overall; a negative balance means they are owed money overall.</p>}
             </section>
           )}
 
@@ -1019,12 +1121,47 @@ function App() {
         <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
           <form className="modal" onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : 'Record a settlement'}</h2></div>
+              <div><span className="eyebrow">LENDWISE</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Review all settlements' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
             {modal === 'person' && (
               <label>User's name<input required name="name" maxLength="255" autoFocus placeholder="Enter a name" /></label>
+            )}
+
+            {modal === 'expense-settlement' && expenseToSettle && (
+              <>
+                <p className="form-hint">Select who has paid their share of “{expenseToSettle.title}”. Payments are recorded to {expenseToSettle.payer}.</p>
+                <div className="expense-settlement-list">
+                  {expenseToSettle.shares
+                    .filter(share => share.person_id !== expenseToSettle.payer_id && share.outstanding_amount > 0)
+                    .map(share => (
+                      <label className="expense-settlement-person" key={share.person_id}>
+                        <input type="checkbox" name="personIds" value={share.person_id} />
+                        <span>{share.name}</span>
+                        <b>{money(share.outstanding_amount)}</b>
+                      </label>
+                    ))}
+                </div>
+              </>
+            )}
+
+            {modal === 'settle-all' && (
+              <>
+                <p className="form-hint">Review the suggested payments. Confirming records each payment and clears the current workspace balances.</p>
+                <div className="settlement-plan">
+                  {settlementPlan.map((payment, index) => (
+                    <div className="settlement-plan-row" key={`${payment.payerId}-${payment.payeeId}-${index}`}>
+                      <span><b>{payment.payer}</b> pays <b>{payment.payee}</b></span>
+                      <strong>{money(payment.amount)}</strong>
+                    </div>
+                  ))}
+                </div>
+                <div className="settlement-plan-total">
+                  <span>{settlementPlan.length} {settlementPlan.length === 1 ? 'payment' : 'payments'}</span>
+                  <b>{money(settlementPlan.reduce((total, payment) => total + payment.amount, 0))}</b>
+                </div>
+              </>
             )}
 
             {modal === 'invite' && (
@@ -1108,11 +1245,11 @@ function App() {
             {modal === 'settlement' && (
               <>
                 <div className="form-row">
-                  <label>Paid by<select name="payerId" required defaultValue={data.currentUserId}>{people.map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
-                  <label>Paid to<select name="payeeId" required defaultValue={people.find(person => person.id !== data.currentUserId)?.id || ''}>{people.filter(person => person.id !== data.currentUserId).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
+                  <label>Paid by<select name="payerId" required defaultValue={settlementDefaults?.payerId || data.currentUserId}>{people.map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
+                  <label>Paid to<select name="payeeId" required defaultValue={settlementDefaults?.payeeId || people.find(person => person.id !== data.currentUserId)?.id || ''}>{people.filter(person => person.id !== (settlementDefaults?.payerId || data.currentUserId)).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
                 </div>
                 <div className="form-row">
-                  <label>Amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" required /></label>
+                  <label>Amount<input name="amount" type="number" min="0.01" step="0.01" defaultValue={settlementDefaults?.amount || ''} placeholder="0.00" required /></label>
                   <label>Note<input name="note" maxLength="255" defaultValue="Settlement" required /></label>
                 </div>
               </>
@@ -1120,7 +1257,7 @@ function App() {
 
             {!(modal === 'invite' && manualInviteLink) && (
               <button className="button button-dark modal-submit" disabled={busy}>
-                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
+                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected shares paid' : modal === 'settle-all' ? 'Confirm & record all' : 'Save settlement'}
                 <ArrowRight size={15} />
               </button>
             )}

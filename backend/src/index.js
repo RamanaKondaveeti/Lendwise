@@ -60,6 +60,30 @@ const q = async (text, params = []) => {
   return result;
 };
 
+async function getWorkspaceBalances(workspaceId, executor = pool) {
+  const [balances] = await executor.execute(
+    `SELECT p.id, p.name, p.initials, p.color,
+            COALESCE((SELECT SUM(s.amount) FROM splits s
+                      JOIN expenses e ON e.id = s.expense_id
+                      JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = p.workspace_id
+                      WHERE s.person_id = p.id), 0)
+            - COALESCE((SELECT SUM(e.amount) FROM expenses e
+                        JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = p.workspace_id
+                        WHERE e.paid_by = p.id), 0)
+            + COALESCE((SELECT SUM(s.amount) FROM settlements s
+                        JOIN people payer ON payer.id = s.payer_id AND payer.workspace_id = p.workspace_id
+                        JOIN people payee ON payee.id = s.payee_id AND payee.workspace_id = p.workspace_id
+                        WHERE s.payee_id = p.id), 0)
+            - COALESCE((SELECT SUM(s.amount) FROM settlements s
+                        JOIN people payer ON payer.id = s.payer_id AND payer.workspace_id = p.workspace_id
+                        JOIN people payee ON payee.id = s.payee_id AND payee.workspace_id = p.workspace_id
+                        WHERE s.payer_id = p.id), 0) AS balance
+     FROM people p WHERE p.workspace_id = ? ORDER BY p.id`,
+    [workspaceId]
+  );
+  return balances;
+}
+
 function derivePasswordHash(password, salt) {
   return scrypt(password, salt, 64, passwordHashOptions);
 }
@@ -167,6 +191,26 @@ async function ensureWorkspaceForeignKey(table, name) {
 }
 
 async function migrateWorkspaceOwnership() {
+  await ensureColumn('settlements', 'expense_id', 'INT NULL');
+  const [expenseSettlementConstraint] = await pool.query(
+    `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'settlements'
+       AND CONSTRAINT_NAME = 'fk_settlements_expense'`
+  );
+  if (!expenseSettlementConstraint.length) {
+    await pool.query(
+      `ALTER TABLE settlements ADD CONSTRAINT fk_settlements_expense
+       FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE`
+    );
+  }
+  const [expenseSettlementIndex] = await pool.query(
+    `SELECT INDEX_NAME FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'settlements'
+       AND INDEX_NAME = 'idx_settlements_expense'`
+  );
+  if (!expenseSettlementIndex.length) {
+    await pool.query('ALTER TABLE settlements ADD INDEX idx_settlements_expense (expense_id)');
+  }
   await ensureColumn('people', 'workspace_id', 'INT NULL');
   await ensureColumn('groups', 'workspace_id', 'INT NULL');
   await ensureColumn('accounts', 'workspace_id', 'INT NULL');
@@ -876,28 +920,7 @@ app.get('/api/summary', async (req, res) => {
       'SELECT COUNT(*) AS count FROM expenses e JOIN `groups` g ON g.id = e.group_id WHERE g.workspace_id = ?',
       [workspaceId]
     );
-    const net = await q(
-      `SELECT p.id, p.name, p.initials, p.color,
-              COALESCE((SELECT SUM(s.amount) FROM splits s
-                        JOIN expenses e ON e.id = s.expense_id
-                        JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = p.workspace_id
-                        WHERE s.person_id = p.id), 0)
-              - COALESCE((SELECT SUM(e.amount) FROM expenses e
-                          JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = p.workspace_id
-                          WHERE e.paid_by = p.id), 0)
-              + COALESCE((SELECT SUM(s.amount) FROM settlements s
-                          JOIN people payer ON payer.id = s.payer_id AND payer.workspace_id = p.workspace_id
-                          JOIN people payee ON payee.id = s.payee_id AND payee.workspace_id = p.workspace_id
-                          WHERE s.payee_id = p.id), 0)
-              - COALESCE((SELECT SUM(s.amount) FROM settlements s
-                          JOIN people payer ON payer.id = s.payer_id AND payer.workspace_id = p.workspace_id
-                          JOIN people payee ON payee.id = s.payee_id AND payee.workspace_id = p.workspace_id
-                          WHERE s.payer_id = p.id), 0) AS balance
-       FROM people p
-       WHERE p.workspace_id = ?
-       ORDER BY p.id`,
-      [workspaceId]
-    );
+    const net = await getWorkspaceBalances(workspaceId);
     res.json({
       people,
       groups,
@@ -932,10 +955,198 @@ app.get('/api/expenses', async (req, res) => {
         ? [req.account.workspace_id, req.account.workspace_id]
         : [req.account.workspace_id, req.account.workspace_id, groupId]
     );
+    if (!expenses.length) return res.json([]);
+    const shares = await q(
+      `SELECT s.expense_id, s.person_id, p.name,
+              s.amount, COALESCE(SUM(st.amount), 0) AS settled_amount
+       FROM splits s
+       JOIN expenses e ON e.id = s.expense_id
+       JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+       JOIN people p ON p.id = s.person_id AND p.workspace_id = ?
+       LEFT JOIN settlements st
+         ON st.expense_id = s.expense_id AND st.payer_id = s.person_id AND st.payee_id = e.paid_by
+       WHERE g.workspace_id = ? ${groupId === null ? '' : 'AND e.group_id = ?'}
+       GROUP BY s.expense_id, s.person_id, p.name, s.amount
+       ORDER BY p.name, p.id`,
+      groupId === null
+        ? [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id]
+        : [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id, groupId]
+    );
+    const sharesByExpense = new Map();
+    for (const share of shares) {
+      const expenseShares = sharesByExpense.get(share.expense_id) || [];
+      const amount = Number(share.amount);
+      const settledAmount = Number(share.settled_amount);
+      expenseShares.push({
+        person_id: share.person_id,
+        name: share.name,
+        amount,
+        settled_amount: settledAmount,
+        outstanding_amount: Math.max(0, Math.round((amount - settledAmount) * 100) / 100)
+      });
+      sharesByExpense.set(share.expense_id, expenseShares);
+    }
+    for (const expense of expenses) {
+      expense.shares = sharesByExpense.get(expense.id) || [];
+      expense.outstanding_amount = expense.shares
+        .filter(share => share.person_id !== expense.payer_id)
+        .reduce((total, share) => total + share.outstanding_amount, 0);
+    }
     res.json(expenses);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Could not load expenses.' });
+  }
+});
+
+app.post('/api/expenses/:expenseId/settle', async (req, res) => {
+  const expenseId = Number(req.params.expenseId);
+  const personIds = Array.isArray(req.body?.personIds) ? req.body.personIds.map(Number) : [];
+  if (!Number.isInteger(expenseId) || expenseId <= 0 ||
+      !personIds.length || personIds.length > 500 ||
+      personIds.some(id => !Number.isInteger(id) || id <= 0) ||
+      new Set(personIds).size !== personIds.length) {
+    return res.status(400).json({ error: 'Select at least one valid expense share to settle.' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [expenses] = await connection.execute(
+      `SELECT e.id, e.paid_by
+       FROM expenses e
+       JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+       JOIN people payer ON payer.id = e.paid_by AND payer.workspace_id = g.workspace_id
+       WHERE e.id = ? FOR UPDATE`,
+      [req.account.workspace_id, expenseId]
+    );
+    const expense = expenses[0];
+    if (!expense) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Expense not found.' });
+    }
+    if (personIds.includes(expense.paid_by)) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'The person who paid the expense has no share to settle with themselves.' });
+    }
+
+    const [shares] = await connection.execute(
+      `SELECT s.person_id, s.amount,
+              COALESCE((SELECT SUM(st.amount) FROM settlements st
+                        WHERE st.expense_id = s.expense_id
+                          AND st.payer_id = s.person_id AND st.payee_id = ?), 0) AS settled_amount
+       FROM splits s
+       JOIN people p ON p.id = s.person_id AND p.workspace_id = ?
+       WHERE s.expense_id = ? AND s.person_id IN (${personIds.map(() => '?').join(',')})
+       FOR UPDATE`,
+      [expense.paid_by, req.account.workspace_id, expenseId, ...personIds]
+    );
+    if (shares.length !== personIds.length) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'One or more selected users do not share this expense.' });
+    }
+
+    const amounts = shares.map(share => ({
+      personId: share.person_id,
+      cents: Math.round((Number(share.amount) - Number(share.settled_amount)) * 100)
+    }));
+    if (amounts.some(share => share.cents <= 0)) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'One or more selected expense shares have already been settled.' });
+    }
+    const balances = await getWorkspaceBalances(req.account.workspace_id, connection);
+    const balanceCents = new Map(balances.map(person => [person.id, Math.round(Number(person.balance) * 100)]));
+    const totalCents = amounts.reduce((total, share) => total + share.cents, 0);
+    if (amounts.some(share => (balanceCents.get(share.personId) || 0) < share.cents) ||
+        (balanceCents.get(expense.paid_by) || 0) > -totalCents) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'One or more shares are already covered by recorded settlements. Refresh your balances and try again.' });
+    }
+
+    for (const share of amounts) {
+      await connection.execute(
+        `INSERT INTO settlements(payer_id, payee_id, expense_id, amount, note)
+         VALUES(?, ?, ?, ?, 'Expense settlement')`,
+        [share.personId, expense.paid_by, expenseId, share.cents / 100]
+      );
+    }
+    await connection.commit();
+    res.status(201).json({ ok: true, count: amounts.length });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error(error);
+    res.status(500).json({ error: 'Could not settle the selected expense shares.' });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.post('/api/settlements/bulk', async (req, res) => {
+  const payments = Array.isArray(req.body?.payments) ? req.body.payments : [];
+  if (!payments.length || payments.length > 500) {
+    return res.status(400).json({ error: 'No valid suggested payments were provided.' });
+  }
+  const normalizedPayments = payments.map(payment => {
+    const payerId = Number(payment?.payerId);
+    const payeeId = Number(payment?.payeeId);
+    const amountCents = Math.round(Number(payment?.amount) * 100);
+    return { payerId, payeeId, amountCents };
+  });
+  const paymentPairs = normalizedPayments.map(payment => `${payment.payerId}:${payment.payeeId}`);
+  if (normalizedPayments.some(payment =>
+    !Number.isInteger(payment.payerId) || payment.payerId <= 0 ||
+    !Number.isInteger(payment.payeeId) || payment.payeeId <= 0 ||
+    payment.payerId === payment.payeeId ||
+    !Number.isSafeInteger(payment.amountCents) || payment.amountCents <= 0 ||
+    payment.amountCents > 999999999999
+  ) || new Set(paymentPairs).size !== paymentPairs.length) {
+    return res.status(400).json({ error: 'Suggested payments must contain unique pairs of users and positive amounts.' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    await connection.execute(
+      'SELECT id FROM people WHERE workspace_id = ? FOR UPDATE',
+      [req.account.workspace_id]
+    );
+    const balances = await getWorkspaceBalances(req.account.workspace_id, connection);
+    const netCents = new Map(balances.map(person => [person.id, Math.round(Number(person.balance) * 100)]));
+    for (const payment of normalizedPayments) {
+      if (!netCents.has(payment.payerId) || !netCents.has(payment.payeeId)) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'All suggested payments must be between users in your workspace.' });
+      }
+      if (netCents.get(payment.payerId) <= 0 || netCents.get(payment.payeeId) >= 0 ||
+          payment.amountCents > Math.min(netCents.get(payment.payerId), -netCents.get(payment.payeeId))) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'Balances changed. Refresh the suggested payments and try again.' });
+      }
+      netCents.set(payment.payerId, netCents.get(payment.payerId) - payment.amountCents);
+      netCents.set(payment.payeeId, netCents.get(payment.payeeId) + payment.amountCents);
+    }
+    if ([...netCents.values()].some(balance => balance !== 0)) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Balances changed. Refresh the suggested payments and try again.' });
+    }
+
+    for (const payment of normalizedPayments) {
+      await connection.execute(
+        `INSERT INTO settlements(payer_id, payee_id, amount, note)
+         VALUES(?, ?, ?, 'Workspace settlement')`,
+        [payment.payerId, payment.payeeId, payment.amountCents / 100]
+      );
+    }
+    await connection.commit();
+    res.status(201).json({ ok: true, count: normalizedPayments.length });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error(error);
+    res.status(500).json({ error: 'Could not record all suggested settlements.' });
+  } finally {
+    connection?.release();
   }
 });
 

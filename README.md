@@ -48,6 +48,7 @@ For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and
 - Rate limiting, security headers, and request body limits; secure cookies when `COOKIE_SECURE=true`
 - Manual creation of people and groups; no generated sample or dummy records
 - MySQL persistence for groups, group members, expenses, splits, and settlements
+- Record expense-share payments individually, or review and confirm suggested workspace-wide settlements
 
 ## Before customer release
 

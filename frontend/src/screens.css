@@ -7,13 +7,29 @@
 .screen-panel{padding:20px;background:#fff;border:1px solid #e9ebe5;border-radius:11px}
 .screen-panel-heading{padding-bottom:18px;border-bottom:1px solid #f0f1ed}
 .activity-screen{padding-bottom:0}
-.data-list .activity-row{grid-template-columns:34px minmax(120px,1fr) minmax(90px,.55fr) 75px;gap:12px;height:64px}
+.data-list .activity-row{grid-template-columns:34px minmax(120px,1fr) minmax(90px,.55fr) 75px auto;gap:12px;height:64px}
 .data-list .activity-copy b{font-size:11px}
 .data-list .activity-copy span{font-size:9px}
 .data-list .activity-payer span{font-size:9px}
 .data-list .activity-amount b{font-size:11px}
 .inline-link{border:0;background:transparent;padding:0;color:inherit;font-size:inherit}
 .inline-link:hover{color:#426a49;text-decoration:underline}
+.settle-expense-button{height:28px;padding:0 9px;border:1px solid #dfe9df;border-radius:6px;background:#f7faf6;color:#426a49;font-size:9px;font-weight:700}
+.settle-expense-button:hover{border-color:#9cbd9d;background:#edf5ec}
+.expense-settled{display:grid;place-items:center;color:#4f8057}
+.expense-settlement-list{display:grid;max-height:260px;overflow:auto;border:1px solid #e8eee9;border-radius:8px}
+.expense-settlement-person{display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid #eef2ef;font-size:11px}
+.expense-settlement-person:last-child{border-bottom:0}
+.expense-settlement-person input{width:15px;height:15px;margin:0;accent-color:#426a49}
+.expense-settlement-person span{flex:1}
+.expense-settlement-person b{font-size:11px}
+.settlement-plan{display:grid;max-height:280px;overflow:auto;border:1px solid #e8eee9;border-radius:8px}
+.settlement-plan-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px;border-bottom:1px solid #eef2ef;font-size:10px}
+.settlement-plan-row:last-child{border-bottom:0}
+.settlement-plan-row strong{white-space:nowrap;font-size:11px}
+.settlement-plan-total{display:flex;justify-content:space-between;padding-top:12px;color:#788a80;font-size:11px}
+.settlement-plan-total b{color:#27352b;font-size:13px}
+.balance-settle-button{height:30px;padding:0 10px;font-size:10px}
 .workspace-switcher{position:relative;margin-bottom:29px}
 .workspace-switcher .workspace{width:100%;margin:0;text-align:left;cursor:pointer;color:inherit}
 .workspace-switcher .workspace>div:nth-child(2){min-width:0;flex:1}
@@ -86,7 +102,7 @@
 .group-card-link svg{transition:transform .15s}
 .group-card:hover .group-card-link svg{transform:translateX(3px)}
 .balance-table{width:100%}
-.balance-table-header,.balance-person-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(120px,.5fr) minmax(120px,.5fr);align-items:center;gap:14px}
+.balance-table-header,.balance-person-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(120px,.5fr) minmax(120px,.5fr) 75px;align-items:center;gap:14px}
 .balance-table-header{padding:13px 8px;color:#92998f;font-size:8px;font-weight:700;letter-spacing:.7px}
 .balance-person-row{min-height:67px;padding:10px 8px;border-top:1px solid #f0f1ed}
 .balance-person{display:flex;align-items:center;gap:10px;min-width:0}
@@ -114,8 +130,8 @@ footer svg{vertical-align:middle}
   .screen-panel{padding:16px}
   .top-actions{gap:8px}
   .search{width:clamp(90px,18vw,160px)}
-  .data-list .activity-row{grid-template-columns:30px minmax(90px,1fr) minmax(68px,.55fr) 63px;gap:7px}
-  .balance-table-header,.balance-person-row{grid-template-columns:minmax(135px,1fr) minmax(85px,.6fr) minmax(74px,.5fr);gap:8px}
+  .data-list .activity-row{grid-template-columns:30px minmax(90px,1fr) minmax(68px,.55fr) 63px auto;gap:7px}
+  .balance-table-header,.balance-person-row{grid-template-columns:minmax(135px,1fr) minmax(85px,.6fr) minmax(74px,.5fr) 60px;gap:8px}
   .group-grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
   .sign-out-button{display:none}
 }
@@ -131,15 +147,26 @@ footer svg{vertical-align:middle}
   .workspace-user-row{gap:8px;padding-right:2px;padding-left:2px}
   .workspace-user-balance{min-width:68px}
   .user-delete-button{width:30px;height:30px}
-  .data-list .activity-row{grid-template-columns:28px minmax(70px,1fr) 52px;gap:6px;height:60px}
+  .data-list .activity-row{grid-template-columns:28px minmax(70px,1fr) 52px auto;gap:6px;height:60px}
   .data-list .activity-payer{display:none}
+  .data-list .settle-expense-button{height:26px;padding:0 7px;font-size:8px}
+  .balance-table-header{display:none}
+  .balance-person-row{grid-template-columns:minmax(0,1fr) auto;gap:5px 8px;padding:10px 4px}
+  .balance-person{grid-column:1}
+  .balance-value{grid-column:2;grid-row:1}
+  .balance-status{grid-column:1;grid-row:2}
+  .balance-settle-button{grid-column:2;grid-row:2;justify-self:end}
   .data-list .activity-amount b{font-size:9px}
   .data-list .activity-copy b{font-size:9px}
   .data-list .activity-copy span{font-size:8px}
   .group-grid{grid-template-columns:1fr}
   .group-card{min-height:165px}
-  .balance-table-header,.balance-person-row{grid-template-columns:minmax(105px,1fr) minmax(77px,.6fr)}
-  .balance-table-header span:last-child,.balance-status{display:none}
+  .balance-table-header{display:none}
+  .balance-person-row{grid-template-columns:minmax(0,1fr) auto;gap:5px 8px;padding:10px 4px}
+  .balance-person{grid-column:1}
+  .balance-value{grid-column:2;grid-row:1}
+  .balance-status{grid-column:1;grid-row:2;display:block}
+  .balance-settle-button{grid-column:2;grid-row:2;justify-self:end}
   .balance-person .avatar{width:27px;height:27px}
   .balance-person b{font-size:9px}
   .balance-value{font-size:9px}
