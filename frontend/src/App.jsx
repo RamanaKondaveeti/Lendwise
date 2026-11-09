@@ -937,22 +937,27 @@ function App() {
 
             {modal === 'invite' && (
               <>
-                <label>Search Lendwise users<input value={globalUserQuery} onChange={event => setGlobalUserQuery(event.target.value)} maxLength="80" autoFocus placeholder="Type a name (2 characters minimum)" /></label>
-                <div className="global-user-results" aria-live="polite">
-                  {globalSearchLoading && <span className="form-hint">Searching…</span>}
-                  {!globalSearchLoading && globalUserQuery.trim().length >= 2 && !globalUserResults.length && <span className="form-hint">No matching users available to invite.</span>}
-                  {globalUserResults.map(user => (
-                    <div className="global-user-result" key={user.account_id}>
-                      <span className="avatar tiny">{user.name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase()}</span>
-                      <b>{user.name}</b>
-                      <button type="button" className="button button-light" disabled={busy} onClick={() => inviteGlobalUser(user.account_id)}>Invite</button>
+                {!manualInviteLink && (
+                  <>
+                    <label>Search Lendwise users<input value={globalUserQuery} onChange={event => setGlobalUserQuery(event.target.value)} maxLength="80" autoFocus placeholder="Type a name (2 characters minimum)" /></label>
+                    <div className="global-user-results" aria-live="polite">
+                      {globalSearchLoading && <span className="form-hint">Searching…</span>}
+                      {!globalSearchLoading && globalUserQuery.trim().length >= 2 && !globalUserResults.length && <span className="form-hint">No matching users available to invite.</span>}
+                      {globalUserResults.map(user => (
+                        <div className="global-user-result" key={user.account_id}>
+                          <span className="avatar tiny">{user.name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase()}</span>
+                          <b>{user.name}</b>
+                          <button type="button" className="button button-light" disabled={busy} onClick={() => inviteGlobalUser(user.account_id)}>Invite</button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <label>Or invite by email<input name="email" type="email" maxLength="254" placeholder="person@example.com" required /></label>
-                <p className="form-hint">Existing Lendwise users are searchable by name. Email invitations are for people who have not registered yet.</p>
+                    <label>Or invite by email<input name="email" type="email" maxLength="254" placeholder="person@example.com" required /></label>
+                    <p className="form-hint">Send an invitation to generate a link you can also share on Facebook, Instagram, WhatsApp, or Gmail.</p>
+                  </>
+                )}
                 {manualInviteLink && (
                   <>
+                    <p className="form-hint">Your invitation is ready to share.</p>
                     <div className="manual-invite">
                       <label>Share this invitation link<input readOnly value={manualInviteLink} onFocus={event => event.target.select()} /></label>
                       <button type="button" className="button button-light" onClick={copyInviteLink}>Copy link</button>
@@ -1021,10 +1026,12 @@ function App() {
               </>
             )}
 
-            <button className="button button-dark modal-submit" disabled={busy}>
-              {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Send email invitation' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
-              <ArrowRight size={15} />
-            </button>
+            {!(modal === 'invite' && manualInviteLink) && (
+              <button className="button button-dark modal-submit" disabled={busy}>
+                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : 'Save settlement'}
+                <ArrowRight size={15} />
+              </button>
+            )}
           </form>
         </div>
       )}

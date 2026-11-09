@@ -741,7 +741,11 @@ app.post('/api/invitations', async (req, res) => {
         invitationUrl: inviteUrl
       });
     }
-    res.status(201).json({ message: 'Invitation email sent.' });
+    res.status(201).json({
+      message: 'Invitation email sent. You can also share the invitation link.',
+      emailSent: true,
+      invitationUrl: inviteUrl
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Could not create this invitation.' });
