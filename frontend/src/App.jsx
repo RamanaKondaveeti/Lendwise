@@ -129,6 +129,51 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, sho
   )
 }
 
+function SettlementSuggestions({ suggestions, formatMoney, onRecordSettlement, disabled }) {
+  return (
+    <section className="panel settlement-suggestions">
+      <div className="panel-heading">
+        <div>
+          <div className="section-title">Suggested Settlements <span className="title-count">{suggestions.length}</span></div>
+          <div className="section-subtitle">Minimum payments per group, based on current net balances.</div>
+        </div>
+      </div>
+      {suggestions.length ? (
+        <div className="suggested-settlement-list">
+          {suggestions.map((payment, index) => (
+            <article className="suggested-settlement-row" key={`${payment.groupId}-${payment.payerId}-${payment.payeeId}-${index}`}>
+              <div className="suggested-settlement-flow">
+                <span className="suggested-settlement-group">{payment.groupName}</span>
+                <b>{payment.payer}</b><span>pays</span><b>{payment.payee}</b>
+                <strong>{formatMoney(payment.amount)}</strong>
+                <small>
+                  After: {payment.payerRemaining > 0
+                    ? `${payment.payer} owes ${formatMoney(payment.payerRemaining)}`
+                    : `${payment.payer} is settled`}
+                  {' · '}
+                  {payment.payeeRemaining > 0
+                    ? `${payment.payee} is still owed ${formatMoney(payment.payeeRemaining)}`
+                    : `${payment.payee} is settled`}
+                </small>
+              </div>
+              <button
+                type="button"
+                className="button button-light suggested-settlement-action"
+                disabled={disabled}
+                onClick={() => onRecordSettlement(payment)}
+              >
+                Record settlement
+              </button>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="empty settlement-suggestions-empty">All group balances are settled.</div>
+      )}
+    </section>
+  )
+}
+
 function ShareServiceIcon({ service }) {
   if (service === 'facebook') {
     return (
@@ -411,6 +456,7 @@ function App() {
   const selectedExpenseGroup = groups.find(group => group.id === Number(expenseGroupId))
   const settlementGroup = groups.find(group => group.id === Number(settlementDefaults?.groupId))
   const settlementPeople = settlementGroup ? settlementGroup.balance_people || [] : people
+  const suggestedSettlements = groups.flatMap(group => group.settlement_suggestions || [])
   const normalizedSearch = search.trim().toLowerCase()
   const currentMonth = monthValue(new Date())
   const formatMoney = amount => {
@@ -461,8 +507,7 @@ function App() {
     setModal('settlement')
   }
 
-  function openGroupSettlement(group) {
-    const suggestion = group.settlement_suggestion
+  function openGroupSettlement(group, suggestion = group.settlement_suggestion) {
     if (!suggestion || !Number.isFinite(exchangeRate)) return
     setSettlementDefaults({
       payerId: suggestion.payerId,
@@ -1059,6 +1104,16 @@ function App() {
                 </article>
               </section>
 
+              <SettlementSuggestions
+                suggestions={suggestedSettlements}
+                formatMoney={formatMoney}
+                disabled={!Number.isFinite(exchangeRate)}
+                onRecordSettlement={payment => {
+                  const group = groups.find(item => item.id === payment.groupId)
+                  if (group) openGroupSettlement(group, payment)
+                }}
+              />
+
               <section className="lower-grid">
                 <div className="panel activity-panel">
                   <div className="panel-heading">
@@ -1219,6 +1274,13 @@ function App() {
           {(tab === 'Activity' || tab === 'Group') && (
             <>
             {tab === 'Group' && selectedGroup && (
+              <>
+              <SettlementSuggestions
+                suggestions={selectedGroup.settlement_suggestions || []}
+                formatMoney={formatMoney}
+                disabled={!Number.isFinite(exchangeRate)}
+                onRecordSettlement={payment => openGroupSettlement(selectedGroup, payment)}
+              />
               <section className="panel screen-panel group-members-panel">
                 <div className="panel-heading screen-panel-heading">
                   <div>
@@ -1240,6 +1302,7 @@ function App() {
                   <div className="empty">No users in this group yet. Manage members to add users before recording expenses.</div>
                 )}
               </section>
+              </>
             )}
             <section className="panel screen-panel activity-screen">
               <div className="panel-heading screen-panel-heading">

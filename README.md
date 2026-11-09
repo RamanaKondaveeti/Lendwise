@@ -49,6 +49,7 @@ For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME` (normally `lend
 - Manual creation of people and groups; no generated sample or dummy records
 - MySQL persistence for groups, group members, expenses, splits, and settlements
 - Group-level net balances use expense shares and linked or group-assigned settlements; amounts are stored in INR and can be displayed in INR or converted to USD using the latest available rate from Frankfurter
+- Suggested settlements are calculated independently per group in stored INR using an exact minimum-transfer search; the currency selector affects display and form input conversion, not the underlying balance calculation
 - Record full or custom partial expense-share payments individually, or review and confirm suggested payments to clear your own balance
 
 ## Before customer release

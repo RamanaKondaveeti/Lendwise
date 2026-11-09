@@ -7,6 +7,7 @@ const { promisify } = require('util');
 const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
+const { calculateMinimalSettlements, validateGroupSettlement } = require('./settlements');
 const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
@@ -983,26 +984,15 @@ app.get('/api/summary', async (req, res) => {
       group.balance_people = balances;
       const userBalance = balances.find(person => person.id === req.account.person_id);
       group.user_balance = Number(userBalance?.balance || 0);
-      const userBalanceCents = Math.round(group.user_balance * 100);
-      group.settlement_suggestion = userBalanceCents
-        ? balances
-          .filter(person => person.id !== req.account.person_id &&
-            (userBalanceCents > 0 ? Number(person.balance) < 0 : Number(person.balance) > 0))
-          .map(person => {
-            const otherBalanceCents = Math.round(Number(person.balance) * 100);
-            const payer = userBalanceCents > 0 ? userBalance : person;
-            const payee = userBalanceCents > 0 ? person : userBalance;
-            return {
-              payerId: payer.id,
-              payer: payer.name,
-              payeeId: payee.id,
-              payee: payee.name,
-              amount: Math.min(Math.abs(userBalanceCents), Math.abs(otherBalanceCents)) / 100
-            };
-          })
-          .filter(payment => payment.amount > 0)
-          .sort((left, right) => right.amount - left.amount)[0] || null
-        : null;
+      group.settlement_suggestions = calculateMinimalSettlements(balances)
+        .map(payment => ({
+          ...payment,
+          groupId: group.id,
+          groupName: group.name
+        }));
+      group.settlement_suggestion = group.settlement_suggestions.find(payment =>
+        payment.payerId === req.account.person_id || payment.payeeId === req.account.person_id
+      ) || null;
     }
     const activity = await q(
       `SELECT e.id, e.title, e.amount, e.category, e.created_at, p.name AS payer,
@@ -1646,7 +1636,7 @@ app.post('/api/settlements', async (req, res) => {
       }
       const payerCents = Math.round(Number(payerBalance.balance) * 100);
       const payeeCents = Math.round(Number(payeeBalance.balance) * 100);
-      if (payerCents <= 0 || payeeCents >= 0 || amountCents > Math.min(payerCents, -payeeCents)) {
+      if (!validateGroupSettlement(payerCents, payeeCents, amountCents)) {
         await connection.rollback();
         return res.status(409).json({ error: 'The group balance changed. Refresh and try again.' });
       }

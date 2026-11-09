@@ -31,6 +31,18 @@
 .settlement-plan-row strong{white-space:nowrap;font-size:11px}
 .settlement-plan-total{display:flex;justify-content:space-between;padding-top:12px;color:#788a80;font-size:11px}
 .settlement-plan-total b{color:#27352b;font-size:13px}
+.settlement-suggestions{margin-bottom:18px;padding:18px}
+.settlement-suggestions .panel-heading{margin-bottom:8px}
+.suggested-settlement-list{display:grid}
+.suggested-settlement-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid #edf2ee}
+.suggested-settlement-row:last-child{border-bottom:0}
+.suggested-settlement-flow{display:flex;align-items:center;flex-wrap:wrap;gap:5px 8px;min-width:0;color:#788a80;font-size:10px}
+.suggested-settlement-flow b{color:#304338}
+.suggested-settlement-flow strong{margin-left:auto;color:#20805c;font-size:12px;white-space:nowrap}
+.suggested-settlement-group{width:100%;color:#74877b;font-size:9px;font-weight:700}
+.suggested-settlement-flow small{width:100%;color:#819087;font-size:9px;line-height:1.5}
+.suggested-settlement-action{min-height:31px;padding:0 10px;font-size:9px;white-space:nowrap}
+.settlement-suggestions-empty{padding:16px 0}
 .balance-settle-button{height:30px;padding:0 10px;font-size:10px}
 .workspace-switcher{position:relative;margin-bottom:29px}
 .workspace-switcher .workspace{width:100%;margin:0;text-align:left;cursor:pointer;color:inherit}
@@ -353,6 +365,9 @@ footer a{color:#668575}
   .currency-switcher select{min-width:45px;padding:2px}
 }
 @media(max-width:480px){
+  .suggested-settlement-row{grid-template-columns:1fr;gap:8px}
+  .suggested-settlement-action{justify-self:start}
+  .suggested-settlement-flow strong{margin-left:auto}
   .top-actions{gap:6px}
   .top-actions .search{width:clamp(90px,31vw,142px)}
   .currency-switcher{padding:4px}
