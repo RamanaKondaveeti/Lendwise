@@ -1001,11 +1001,23 @@ app.get('/api/expenses', async (req, res) => {
 
 app.post('/api/expenses/:expenseId/settle', async (req, res) => {
   const expenseId = Number(req.params.expenseId);
-  const personIds = Array.isArray(req.body?.personIds) ? req.body.personIds.map(Number) : [];
+  const legacyPersonIds = Array.isArray(req.body?.personIds) ? req.body.personIds.map(Number) : null;
+  const requestedPayments = Array.isArray(req.body?.payments)
+    ? req.body.payments.map(payment => ({
+      personId: Number(payment?.personId),
+      amountCents: Math.round(Number(payment?.amount) * 100)
+    }))
+    : null;
+  const personIds = requestedPayments
+    ? requestedPayments.map(payment => payment.personId)
+    : legacyPersonIds || [];
   if (!Number.isInteger(expenseId) || expenseId <= 0 ||
       !personIds.length || personIds.length > 500 ||
       personIds.some(id => !Number.isInteger(id) || id <= 0) ||
-      new Set(personIds).size !== personIds.length) {
+      new Set(personIds).size !== personIds.length ||
+      (requestedPayments && requestedPayments.some(payment =>
+        !Number.isSafeInteger(payment.amountCents) || payment.amountCents <= 0 || payment.amountCents > 999999999999
+      ))) {
     return res.status(400).json({ error: 'Select at least one valid expense share to settle.' });
   }
 
@@ -1047,13 +1059,19 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
       return res.status(400).json({ error: 'One or more selected users do not share this expense.' });
     }
 
-    const amounts = shares.map(share => ({
-      personId: share.person_id,
-      cents: Math.round((Number(share.amount) - Number(share.settled_amount)) * 100)
-    }));
-    if (amounts.some(share => share.cents <= 0)) {
+    const amounts = shares.map(share => {
+      const personId = Number(share.person_id);
+      const outstandingCents = Math.round((Number(share.amount) - Number(share.settled_amount)) * 100);
+      const payment = requestedPayments?.find(item => item.personId === personId);
+      return {
+        personId,
+        outstandingCents,
+        cents: payment ? payment.amountCents : outstandingCents
+      };
+    });
+    if (amounts.some(share => share.outstandingCents <= 0 || share.cents > share.outstandingCents)) {
       await connection.rollback();
-      return res.status(409).json({ error: 'One or more selected expense shares have already been settled.' });
+      return res.status(409).json({ error: 'A payment exceeds the remaining amount for an expense share. Refresh and try again.' });
     }
     const balances = await getWorkspaceBalances(req.account.workspace_id, connection);
     const balanceCents = new Map(balances.map(person => [person.id, Math.round(Number(person.balance) * 100)]));

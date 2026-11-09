@@ -597,9 +597,17 @@ function App() {
         notify('Select at least one expense share to settle.')
         return
       }
+      const payments = personIds.map(personId => ({
+        personId,
+        amount: Number(form.get(`amount-${personId}`)),
+      }))
+      if (payments.some(payment => !Number.isFinite(payment.amount) || payment.amount <= 0)) {
+        notify('Enter a valid payment amount for each selected share.')
+        return
+      }
       url = `/api/expenses/${expenseToSettle.id}/settle`
-      payload = { personIds }
-      successMessage = 'Selected expense shares settled.'
+      payload = { payments }
+      successMessage = 'Selected expense payments recorded.'
     } else if (modal === 'settle-all') {
       url = '/api/settlements/bulk'
       payload = { payments: settlementPlan.map(({ payerId, payeeId, amount }) => ({ payerId, payeeId, amount })) }
@@ -1125,16 +1133,19 @@ function App() {
 
             {modal === 'expense-settlement' && expenseToSettle && (
               <>
-                <p className="form-hint">Select who has paid their share of “{expenseToSettle.title}”. Payments are recorded to {expenseToSettle.payer}.</p>
+                <p className="form-hint">Select who is paying toward “{expenseToSettle.title}”. Adjust each amount to record a partial payment. Payments are recorded to {expenseToSettle.payer}.</p>
                 <div className="expense-settlement-list">
                   {expenseToSettle.shares
                     .filter(share => share.person_id !== expenseToSettle.payer_id && share.outstanding_amount > 0)
                     .map(share => (
-                      <label className="expense-settlement-person" key={share.person_id}>
-                        <input type="checkbox" name="personIds" value={share.person_id} />
+                      <div className="expense-settlement-person" key={share.person_id}>
+                        <input type="checkbox" name="personIds" value={share.person_id} aria-label={`Select ${share.name}`} />
                         <span>{share.name}</span>
-                        <b>{money(share.outstanding_amount)}</b>
-                      </label>
+                        <label className="expense-settlement-amount">
+                          <span className="sr-only">Payment amount for {share.name}, up to {money(share.outstanding_amount)}</span>
+                          <input name={`amount-${share.person_id}`} type="number" min="0.01" max={share.outstanding_amount} step="0.01" defaultValue={share.outstanding_amount.toFixed(2)} required />
+                        </label>
+                      </div>
                     ))}
                 </div>
               </>
@@ -1251,7 +1262,7 @@ function App() {
 
             {!(modal === 'invite' && manualInviteLink) && (
               <button className="button button-dark modal-submit" disabled={busy}>
-                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected shares paid' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
+                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
                 <ArrowRight size={15} />
               </button>
             )}
