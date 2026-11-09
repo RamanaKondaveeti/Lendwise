@@ -1114,10 +1114,25 @@ app.post('/api/settlements/bulk', async (req, res) => {
     );
     const balances = await getWorkspaceBalances(req.account.workspace_id, connection);
     const netCents = new Map(balances.map(person => [person.id, Math.round(Number(person.balance) * 100)]));
+    const userBalance = netCents.get(req.account.person_id);
+    if (!userBalance) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Your balance is already clear. Refresh and try again.' });
+    }
     for (const payment of normalizedPayments) {
       if (!netCents.has(payment.payerId) || !netCents.has(payment.payeeId)) {
         await connection.rollback();
         return res.status(400).json({ error: 'All suggested payments must be between users in your workspace.' });
+      }
+      if (payment.payerId !== req.account.person_id && payment.payeeId !== req.account.person_id) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'Each suggested payment must be part of clearing your balance.' });
+      }
+      if (userBalance > 0
+        ? payment.payerId !== req.account.person_id || payment.payeeId === req.account.person_id
+        : payment.payeeId !== req.account.person_id || payment.payerId === req.account.person_id) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'Balances changed. Refresh the suggested payments and try again.' });
       }
       if (netCents.get(payment.payerId) <= 0 || netCents.get(payment.payeeId) >= 0 ||
           payment.amountCents > Math.min(netCents.get(payment.payerId), -netCents.get(payment.payeeId))) {
@@ -1127,15 +1142,15 @@ app.post('/api/settlements/bulk', async (req, res) => {
       netCents.set(payment.payerId, netCents.get(payment.payerId) - payment.amountCents);
       netCents.set(payment.payeeId, netCents.get(payment.payeeId) + payment.amountCents);
     }
-    if ([...netCents.values()].some(balance => balance !== 0)) {
+    if (netCents.get(req.account.person_id) !== 0) {
       await connection.rollback();
-      return res.status(409).json({ error: 'Balances changed. Refresh the suggested payments and try again.' });
+      return res.status(409).json({ error: 'Suggested payments do not clear your full balance. Refresh and try again.' });
     }
 
     for (const payment of normalizedPayments) {
       await connection.execute(
         `INSERT INTO settlements(payer_id, payee_id, amount, note)
-         VALUES(?, ?, ?, 'Workspace settlement')`,
+         VALUES(?, ?, ?, 'Personal balance settlement')`,
         [payment.payerId, payment.payeeId, payment.amountCents / 100]
       );
     }
@@ -1144,7 +1159,7 @@ app.post('/api/settlements/bulk', async (req, res) => {
   } catch (error) {
     if (connection) await connection.rollback();
     console.error(error);
-    res.status(500).json({ error: 'Could not record all suggested settlements.' });
+    res.status(500).json({ error: 'Could not record payments to clear your balance.' });
   } finally {
     connection?.release();
   }
