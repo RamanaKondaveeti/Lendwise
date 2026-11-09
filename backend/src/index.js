@@ -86,7 +86,7 @@ async function getWorkspaceBalances(workspaceId, executor = pool) {
 
 async function getWorkspaceGroupBalances(workspaceId, executor = pool) {
   const [balances] = await executor.execute(
-    `SELECT gm.group_id, p.id, p.name, p.initials, p.color,
+    `SELECT g.id AS group_id, p.id, p.name, p.initials, p.color,
             COALESCE(split_totals.amount, 0) - COALESCE(paid_totals.amount, 0)
               + COALESCE(settlement_received.amount, 0) - COALESCE(settlement_paid.amount, 0) AS balance
      FROM \`groups\` g
@@ -1030,7 +1030,23 @@ app.get('/api/summary', async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Could not load your expense data.' });
+    const schemaErrors = ['ER_NO_SUCH_TABLE', 'ER_VIEW_INVALID'];
+    const connectionErrors = [
+      'ECONNREFUSED',
+      'ER_ACCESS_DENIED_ERROR',
+      'ER_BAD_DB_ERROR',
+      'PROTOCOL_CONNECTION_LOST',
+      'ETIMEDOUT'
+    ];
+    let message = 'Could not load your expense data. Check the backend logs for the database error.';
+    if (schemaErrors.includes(error.code)) {
+      message = 'The expense database schema is missing or out of date. Restart the backend to run its startup migrations, then retry.';
+    } else if (error.code === 'ER_BAD_FIELD_ERROR') {
+      message = 'The backend query references a database column that is unavailable. Check the backend logs and confirm the running backend and database schema are compatible.';
+    } else if (connectionErrors.includes(error.code)) {
+      message = 'The backend could not connect to its configured database. Check the database settings and availability.';
+    }
+    res.status(500).json({ error: message });
   }
 });
 
