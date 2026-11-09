@@ -92,6 +92,32 @@ function ExpenseRows({ expenses, currentUser, onGroupClick }) {
   )
 }
 
+function InvitationShareButtons({ url, workspaceName, onInstagram }) {
+  const message = `Join my ${workspaceName} workspace on Lendwise: ${url}`
+  const encodedMessage = encodeURIComponent(message)
+
+  return (
+    <div className="invitation-share">
+      <span className="form-hint">Share this invite with</span>
+      <div className="share-buttons" aria-label="Share invitation">
+        <a className="share-button share-facebook" href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`} target="_blank" rel="noopener noreferrer">
+          <span className="share-brand" aria-hidden="true">f</span>Facebook
+        </a>
+        <button className="share-button share-instagram" type="button" onClick={onInstagram} title="Copy the invitation link and open Instagram">
+          <span className="share-brand" aria-hidden="true">IG</span>Instagram
+        </button>
+        <a className="share-button share-whatsapp" href={`https://wa.me/?text=${encodedMessage}`} target="_blank" rel="noopener noreferrer">
+          <span className="share-brand" aria-hidden="true">WA</span>WhatsApp
+        </a>
+        <a className="share-button share-gmail" href={`https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent('Join my Lendwise workspace')}&body=${encodedMessage}`} target="_blank" rel="noopener noreferrer">
+          <span className="share-brand" aria-hidden="true">M</span>Gmail
+        </a>
+      </div>
+      <span className="share-note">Instagram does not support prefilled web shares, so the link is copied for you to paste.</span>
+    </div>
+  )
+}
+
 function App() {
   const [data, setData] = useState(null)
   const [authUser, setAuthUser] = useState(null)
@@ -379,6 +405,16 @@ function App() {
       notify('Invitation link copied.')
     } catch (error) {
       notify('Copy was blocked. Select and copy the invitation link manually.')
+    }
+  }
+
+  async function shareInviteOnInstagram() {
+    window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer')
+    try {
+      await navigator.clipboard.writeText(manualInviteLink)
+      notify('Invitation link copied. Paste it into Instagram to share.')
+    } catch (error) {
+      notify('Instagram opened. Copy the invitation link above to share it.')
     }
   }
 
@@ -916,10 +952,13 @@ function App() {
                 <label>Or invite by email<input name="email" type="email" maxLength="254" placeholder="person@example.com" required /></label>
                 <p className="form-hint">Existing Lendwise users are searchable by name. Email invitations are for people who have not registered yet.</p>
                 {manualInviteLink && (
-                  <div className="manual-invite">
-                    <label>Share this invitation link<input readOnly value={manualInviteLink} onFocus={event => event.target.select()} /></label>
-                    <button type="button" className="button button-light" onClick={copyInviteLink}>Copy link</button>
-                  </div>
+                  <>
+                    <div className="manual-invite">
+                      <label>Share this invitation link<input readOnly value={manualInviteLink} onFocus={event => event.target.select()} /></label>
+                      <button type="button" className="button button-light" onClick={copyInviteLink}>Copy link</button>
+                    </div>
+                    <InvitationShareButtons url={manualInviteLink} workspaceName={authUser.workspaceName || 'Lendwise'} onInstagram={shareInviteOnInstagram} />
+                  </>
                 )}
               </>
             )}

@@ -31,6 +31,18 @@
 .manual-invite label{min-width:0}
 .manual-invite input{font-size:10px!important}
 .manual-invite .button{height:37px;padding:0 10px;font-size:10px}
+.invitation-share{display:grid;gap:7px;margin-top:10px}
+.invitation-share>.form-hint{margin:0}
+.share-buttons{display:flex;flex-wrap:wrap;gap:7px}
+.share-button{display:inline-flex;min-height:34px;align-items:center;gap:7px;padding:0 10px;border:1px solid #e4e9e4;border-radius:7px;background:#fff;color:#4b554b;text-decoration:none;font:600 10px 'DM Sans',sans-serif;cursor:pointer}
+.share-button:hover{border-color:#b9cbb8;background:#f7faf6}
+.share-button:focus-visible{outline:2px solid #719978;outline-offset:2px}
+.share-brand{display:grid;width:19px;height:19px;place-items:center;border-radius:5px;font-size:10px;font-weight:700}
+.share-facebook .share-brand{background:#edf2fc;color:#1877f2}
+.share-instagram .share-brand{background:#f8edf4;color:#c13584}
+.share-whatsapp .share-brand{background:#e8f6ed;color:#25a35a;font-size:8px}
+.share-gmail .share-brand{background:#fceeed;color:#d14836}
+.share-note{color:#788a80;font-size:9px;line-height:1.45}
 .user-screen-actions{display:flex;gap:8px}
 .workspace-user-list{display:grid}
 .workspace-user-row{display:flex;align-items:center;gap:12px;min-height:68px;padding:10px 8px;border-bottom:1px solid #eef2ef}
