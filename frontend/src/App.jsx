@@ -92,6 +92,50 @@ function ExpenseRows({ expenses, currentUser, onGroupClick }) {
   )
 }
 
+function ShareServiceIcon({ service }) {
+  if (service === 'facebook') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="currentColor" d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.093 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.023 1.792-4.697 4.533-4.697 1.312 0 2.686.235 2.686.235v2.973h-1.513c-1.491 0-1.956.93-1.956 1.886v2.266h3.328l-.532 3.49h-2.796V24C19.612 23.093 24 18.1 24 12.073Z" />
+      </svg>
+    )
+  }
+
+  if (service === 'instagram') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <defs>
+          <linearGradient id="instagram-gradient" x1="0" x2="1" y1="1" y2="0">
+            <stop offset="0%" stopColor="#feda75" />
+            <stop offset="50%" stopColor="#d62976" />
+            <stop offset="100%" stopColor="#4f5bd5" />
+          </linearGradient>
+        </defs>
+        <rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="url(#instagram-gradient)" strokeWidth="2" />
+        <circle cx="12" cy="12" r="4" fill="none" stroke="url(#instagram-gradient)" strokeWidth="2" />
+        <circle cx="17.5" cy="6.8" r="1.2" fill="#d62976" />
+      </svg>
+    )
+  }
+
+  if (service === 'whatsapp') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="currentColor" d="M20.52 3.48A11.86 11.86 0 0 0 12.08 0C5.48 0 .11 5.36.1 11.96c0 2.11.55 4.17 1.6 5.99L0 24l6.2-1.63a11.98 11.98 0 0 0 5.87 1.5h.01c6.6 0 11.97-5.37 11.98-11.97a11.9 11.9 0 0 0-3.54-8.42ZM12.08 21.83h-.01a9.9 9.9 0 0 1-5.04-1.38l-.36-.21-3.68.97.98-3.59-.23-.37a9.86 9.86 0 0 1-1.52-5.29c0-5.43 4.43-9.85 9.87-9.85a9.8 9.8 0 0 1 6.98 2.9 9.8 9.8 0 0 1 2.89 6.99c0 5.44-4.43 9.86-9.88 9.86Zm5.42-7.39c-.3-.15-1.77-.87-2.05-.97-.28-.1-.48-.15-.68.15-.2.3-.78.97-.95 1.17-.17.2-.35.22-.65.07-.3-.15-1.27-.47-2.42-1.5-.9-.8-1.5-1.78-1.68-2.08-.18-.3-.02-.46.13-.61.13-.13.3-.35.45-.53.15-.18.2-.3.3-.5.1-.2.05-.38-.02-.53-.08-.15-.68-1.63-.93-2.23-.24-.58-.49-.5-.68-.51l-.58-.01c-.2 0-.53.08-.81.38-.28.3-1.06 1.03-1.06 2.5s1.09 2.9 1.24 3.1c.15.2 2.14 3.27 5.19 4.58.72.31 1.28.5 1.72.64.72.23 1.38.2 1.9.12.58-.09 1.77-.73 2.02-1.43.25-.7.25-1.3.18-1.43-.08-.13-.28-.2-.58-.35Z" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#4285f4" d="M3 5.2v13.6h3.6V8.2L12 12.3l5.4-4.1v10.6H21V5.2l-3.6 2.7L12 12 6.6 7.9 3 5.2Z" />
+      <path fill="#34a853" d="M3 18.8h3.6V8.2L3 5.2v13.6Z" />
+      <path fill="#fbbc04" d="M17.4 8.2v10.6H21V5.2l-3.6 3Z" />
+      <path fill="#ea4335" d="M3 5.2 6.6 8 12 12l5.4-4.1L21 5.2V4.5c0-1-.8-1.8-1.8-1.8h-.4L12 8.1 5.2 2.7h-.4C3.8 2.7 3 3.5 3 4.5v.7Z" />
+    </svg>
+  )
+}
+
 function InvitationShareButtons({ url, workspaceName, onInstagram }) {
   const message = `Join my ${workspaceName} workspace on Lendwise: ${url}`
   const encodedMessage = encodeURIComponent(message)
@@ -101,19 +145,19 @@ function InvitationShareButtons({ url, workspaceName, onInstagram }) {
       <span className="form-hint">Share this invite with</span>
       <div className="share-buttons" aria-label="Share invitation">
         <a className="share-button share-facebook" href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`} target="_blank" rel="noopener noreferrer">
-          <span className="share-brand" aria-hidden="true">f</span>Facebook
+          <span className="share-brand"><ShareServiceIcon service="facebook" /></span>Facebook
         </a>
         <button className="share-button share-instagram" type="button" onClick={onInstagram} title="Copy the invitation link and open Instagram">
-          <span className="share-brand" aria-hidden="true">IG</span>Instagram
+          <span className="share-brand"><ShareServiceIcon service="instagram" /></span>Instagram
         </button>
         <a className="share-button share-whatsapp" href={`https://wa.me/?text=${encodedMessage}`} target="_blank" rel="noopener noreferrer">
-          <span className="share-brand" aria-hidden="true">WA</span>WhatsApp
+          <span className="share-brand"><ShareServiceIcon service="whatsapp" /></span>WhatsApp
         </a>
         <a className="share-button share-gmail" href={`https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent('Join my Lendwise workspace')}&body=${encodedMessage}`} target="_blank" rel="noopener noreferrer">
-          <span className="share-brand" aria-hidden="true">M</span>Gmail
+          <span className="share-brand"><ShareServiceIcon service="gmail" /></span>Gmail
         </a>
       </div>
-      <span className="share-note">Instagram does not support prefilled web shares, so the link is copied for you to paste.</span>
+      <span className="share-note">Instagram uses your device’s share sheet when available; otherwise, copy and paste the link.</span>
     </div>
   )
 }
@@ -125,16 +169,16 @@ function SiteShareButtons({ url, onInstagram, className = '' }) {
   return (
     <div className={`site-share-buttons ${className}`} aria-label="Share Lendwise">
       <a className="site-share-button share-facebook" href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`} target="_blank" rel="noopener noreferrer" aria-label="Share on Facebook" title="Facebook">
-        <span aria-hidden="true">f</span>
+        <ShareServiceIcon service="facebook" />
       </a>
       <button className="site-share-button share-instagram" type="button" onClick={() => onInstagram(url)} aria-label="Share on Instagram" title="Instagram">
-        <span aria-hidden="true">IG</span>
+        <ShareServiceIcon service="instagram" />
       </button>
       <a className="site-share-button share-whatsapp" href={`https://wa.me/?text=${encodedMessage}`} target="_blank" rel="noopener noreferrer" aria-label="Share on WhatsApp" title="WhatsApp">
-        <span aria-hidden="true">WA</span>
+        <ShareServiceIcon service="whatsapp" />
       </a>
       <a className="site-share-button share-gmail" href={`https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent('Check out Lendwise')}&body=${encodedMessage}`} target="_blank" rel="noopener noreferrer" aria-label="Share by Gmail" title="Gmail">
-        <span aria-hidden="true">M</span>
+        <ShareServiceIcon service="gmail" />
       </a>
     </div>
   )
@@ -430,24 +474,31 @@ function App() {
     }
   }
 
-  async function shareInviteOnInstagram() {
+  async function shareOnInstagram(url, message) {
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title: 'Lendwise', text: message, url })
+        return
+      } catch (error) {
+        if (error.name === 'AbortError') return
+      }
+    }
+
     window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer')
     try {
-      await navigator.clipboard.writeText(manualInviteLink)
-      notify('Invitation link copied. Paste it into Instagram to share.')
+      await navigator.clipboard.writeText(`${message} ${url}`)
+      notify('Lendwise link copied. Paste it into Instagram to share.')
     } catch (error) {
-      notify('Instagram opened. Copy the invitation link above to share it.')
+      notify('Instagram opened. Copy the invitation link to share it.')
     }
   }
 
+  async function shareInviteOnInstagram() {
+    return shareOnInstagram(manualInviteLink, `Join my ${authUser.workspaceName || 'Lendwise'} workspace on Lendwise:`)
+  }
+
   async function shareSiteOnInstagram(url) {
-    window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer')
-    try {
-      await navigator.clipboard.writeText(`Check out Lendwise, shared expenses made simple: ${url}`)
-      notify('Lendwise link copied. Paste it into Instagram to share.')
-    } catch (error) {
-      notify('Instagram opened. Copy the website address to share it.')
-    }
+    return shareOnInstagram(url, 'Check out Lendwise, shared expenses made simple:')
   }
 
   async function deletePerson(person) {

@@ -37,19 +37,21 @@
 .share-button{display:inline-flex;min-height:34px;align-items:center;gap:7px;padding:0 10px;border:1px solid #e4e9e4;border-radius:7px;background:#fff;color:#4b554b;text-decoration:none;font:600 10px 'DM Sans',sans-serif;cursor:pointer}
 .share-button:hover{border-color:#b9cbb8;background:#f7faf6}
 .share-button:focus-visible{outline:2px solid #719978;outline-offset:2px}
-.share-brand{display:grid;width:19px;height:19px;place-items:center;border-radius:5px;font-size:10px;font-weight:700}
-.share-facebook .share-brand{background:#edf2fc;color:#1877f2}
-.share-instagram .share-brand{background:#f8edf4;color:#c13584}
-.share-whatsapp .share-brand{background:#e8f6ed;color:#25a35a;font-size:8px}
-.share-gmail .share-brand{background:#fceeed;color:#d14836}
+.share-brand{display:grid;width:19px;height:19px;place-items:center;flex:none}
+.share-brand svg{width:18px;height:18px}
+.share-facebook .share-brand{color:#1877f2}
+.share-instagram .share-brand{color:#c13584}
+.share-whatsapp .share-brand{color:#25a35a}
+.share-gmail .share-brand{color:#4285f4}
 .share-note{color:#788a80;font-size:9px;line-height:1.45}
 .site-share-buttons{display:flex;flex:none;align-items:center;gap:4px}
-.site-share-button{display:grid;width:29px;height:29px;place-items:center;border:1px solid #e8ece7;border-radius:8px;background:#fff;text-decoration:none;font:700 11px 'DM Sans',sans-serif;cursor:pointer}
+.site-share-button{display:grid;width:29px;height:29px;place-items:center;border:1px solid #e8ece7;border-radius:8px;background:#fff;text-decoration:none;cursor:pointer}
+.site-share-button svg{width:17px;height:17px}
 .site-share-button:hover{border-color:#b9cbb8;background:#f7faf6}
 .site-share-button:focus-visible{outline:2px solid #719978;outline-offset:2px}
 .site-share-button.share-facebook{color:#1877f2}
 .site-share-button.share-instagram{color:#c13584}
-.site-share-button.share-whatsapp{color:#25a35a;font-size:8px}
+.site-share-button.share-whatsapp{color:#25a35a}
 .site-share-button.share-gmail{color:#d14836}
 .auth-page{position:relative}
 .auth-site-share{position:absolute;top:18px;right:22px;z-index:2}
