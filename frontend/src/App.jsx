@@ -55,7 +55,7 @@ async function request(url, options) {
   return body
 }
 
-function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, showSettlement = false }) {
+function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, showSettlement = false, showShare = false }) {
   if (!expenses.length) return <div className="empty">No expenses to show yet.</div>
 
   return (
@@ -85,7 +85,9 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, sho
               <b>{money(expense.amount)}</b>
               <span>{showSettlement
                 ? expense.outstanding_amount > 0 ? `${money(expense.outstanding_amount)} unpaid` : 'settled'
-                : 'total'}</span>
+                : showShare
+                  ? `Your share ${money(expense.shares?.find(share => share.person_id === currentUser?.id)?.amount || 0)}`
+                  : 'total'}</span>
             </div>
             {showSettlement && (
               expense.outstanding_amount > 0
@@ -220,6 +222,7 @@ function App() {
   const [notice, setNotice] = useState('')
   const [activity, setActivity] = useState([])
   const [activityLoading, setActivityLoading] = useState(false)
+  const [activityLoaded, setActivityLoaded] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
 
   const refresh = async () => {
@@ -307,7 +310,7 @@ function App() {
   }, [modal, globalUserQuery])
 
   useEffect(() => {
-    if (tab !== 'Activity' && tab !== 'Group') return undefined
+    if (tab !== 'Overview' && tab !== 'Activity' && tab !== 'Group') return undefined
 
     let active = true
     const query = tab === 'Group' && selectedGroupId
@@ -316,7 +319,10 @@ function App() {
     setActivityLoading(true)
     request(`/api/expenses${query}`)
       .then(rows => {
-        if (active) setActivity(rows)
+        if (active) {
+          setActivity(rows)
+          setActivityLoaded(true)
+        }
       })
       .catch(error => {
         if (active) setNotice(error.message)
@@ -336,9 +342,16 @@ function App() {
   const selectedGroup = groups.find(group => group.id === Number(selectedGroupId))
   const selectedExpenseGroup = groups.find(group => group.id === Number(expenseGroupId))
   const normalizedSearch = search.trim().toLowerCase()
+  const monthLabel = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date())
+  const monthlyExpenses = activity.filter(expense => {
+    const expenseDate = new Date(expense.created_at)
+    const now = new Date()
+    return expenseDate.getMonth() === now.getMonth() && expenseDate.getFullYear() === now.getFullYear()
+  })
+  const monthlyTotal = monthlyExpenses.reduce((total, expense) => total + Number(expense.amount || 0), 0)
 
   const visibleActivity = useMemo(() => {
-    const source = tab === 'Overview' ? data?.activity || [] : activity
+    const source = tab === 'Overview' && !activityLoaded ? data?.activity || [] : activity
     const cutoff = dateRange === 'all' ? 0 : Date.now() - Number(dateRange) * 24 * 60 * 60 * 1000
     return source.filter(expense => {
       const matchesSearch = `${expense.title} ${expense.group_name} ${expense.payer}`
@@ -346,7 +359,7 @@ function App() {
         .includes(normalizedSearch)
       return matchesSearch && new Date(expense.created_at).getTime() >= cutoff
     })
-  }, [activity, data, dateRange, normalizedSearch, tab])
+  }, [activity, activityLoaded, data, dateRange, normalizedSearch, tab])
 
   function openGroup(groupId) {
     setSelectedGroupId(Number(groupId))
@@ -504,6 +517,9 @@ function App() {
       setTab('Overview')
       setSelectedGroupId(null)
       setWorkspaceMenuOpen(false)
+      setActivity([])
+      setActivityLoaded(false)
+      setReloadKey(key => key + 1)
       notify(`Switched to ${account.workspaceName}.`)
     } catch (error) {
       notify(error.message)
@@ -884,8 +900,23 @@ function App() {
 
           {tab === 'Overview' && (
             <>
-              <section className="balance-grid">
-                <article className="balance-card total-card">
+          <section className="monthly-summary" aria-label="Monthly expense summary">
+            <div className="monthly-summary-icon"><CalendarDays size={19} /></div>
+            <div className="monthly-summary-copy">
+              <span className="monthly-summary-label">MONTHLY SPENDING</span>
+              <b>{monthLabel}</b>
+            </div>
+            <div className="monthly-summary-stat">
+              <span>Total expenses</span>
+              <b>{activityLoading && !activityLoaded ? 'Loading…' : money(monthlyTotal)}</b>
+            </div>
+            <div className="monthly-summary-stat">
+              <span>Recorded expenses</span>
+              <b>{activityLoading && !activityLoaded ? '—' : monthlyExpenses.length}</b>
+            </div>
+          </section>
+          <section className="balance-grid">
+                <article className={`balance-card total-card ${myBalance > 0 ? 'owes-card' : ''}`}>
                   <div className="card-top">
                     <span className="card-title">YOUR NET BALANCE</span>
                     <span className="card-symbol dark-symbol"><ArrowLeftRight size={17} /></span>
@@ -917,7 +948,7 @@ function App() {
                     <div><div className="section-title">Recent activity <span className="title-count">{visibleActivity.length}</span></div><div className="section-subtitle">Latest expenses from your groups</div></div>
                     <button className="select-button" onClick={() => setTab('Activity')}>View all <ArrowRight size={14} /></button>
                   </div>
-                  <ExpenseRows expenses={visibleActivity.slice(0, 6)} currentUser={currentUser} onGroupClick={openGroup} />
+                  <ExpenseRows expenses={visibleActivity.slice(0, 6)} currentUser={currentUser} onGroupClick={openGroup} showShare />
                   <button className="view-all" onClick={() => setTab('Activity')}>View all activity <ArrowRight size={14} /></button>
                 </div>
                 <div className="right-column">
@@ -933,7 +964,7 @@ function App() {
                           <button className="group-row group-row-button" key={group.id} onClick={() => openGroup(group.id)}>
                             <span className="group-icon" style={{ background: group.color }}><Icon size={17} /></span>
                             <span className="group-name"><b>{group.name}</b><span>{group.members?.length || 0} members · {group.expenses} expenses</span></span>
-                            <span className="group-total"><b>{money(group.total)}</b><span>total</span></span>
+                            <span className="group-total"><b>{money(group.total)}</b><span>total spend</span></span>
                           </button>
                         )
                       })}
