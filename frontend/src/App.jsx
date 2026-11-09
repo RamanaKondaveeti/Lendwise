@@ -118,6 +118,28 @@ function InvitationShareButtons({ url, workspaceName, onInstagram }) {
   )
 }
 
+function SiteShareButtons({ url, onInstagram, className = '' }) {
+  const message = `Check out Lendwise, shared expenses made simple: ${url}`
+  const encodedMessage = encodeURIComponent(message)
+
+  return (
+    <div className={`site-share-buttons ${className}`} aria-label="Share Lendwise">
+      <a className="site-share-button share-facebook" href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`} target="_blank" rel="noopener noreferrer" aria-label="Share on Facebook" title="Facebook">
+        <span aria-hidden="true">f</span>
+      </a>
+      <button className="site-share-button share-instagram" type="button" onClick={() => onInstagram(url)} aria-label="Share on Instagram" title="Instagram">
+        <span aria-hidden="true">IG</span>
+      </button>
+      <a className="site-share-button share-whatsapp" href={`https://wa.me/?text=${encodedMessage}`} target="_blank" rel="noopener noreferrer" aria-label="Share on WhatsApp" title="WhatsApp">
+        <span aria-hidden="true">WA</span>
+      </a>
+      <a className="site-share-button share-gmail" href={`https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent('Check out Lendwise')}&body=${encodedMessage}`} target="_blank" rel="noopener noreferrer" aria-label="Share by Gmail" title="Gmail">
+        <span aria-hidden="true">M</span>
+      </a>
+    </div>
+  )
+}
+
 function App() {
   const [data, setData] = useState(null)
   const [authUser, setAuthUser] = useState(null)
@@ -418,6 +440,16 @@ function App() {
     }
   }
 
+  async function shareSiteOnInstagram(url) {
+    window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer')
+    try {
+      await navigator.clipboard.writeText(`Check out Lendwise, shared expenses made simple: ${url}`)
+      notify('Lendwise link copied. Paste it into Instagram to share.')
+    } catch (error) {
+      notify('Instagram opened. Copy the website address to share it.')
+    }
+  }
+
   async function deletePerson(person) {
     if (!window.confirm(`Delete ${person.name} from this workspace? Users with expense or settlement history cannot be deleted.`)) {
       return
@@ -516,6 +548,11 @@ function App() {
   if (!authUser) {
     return (
       <main className="auth-page">
+        <SiteShareButtons
+          url={`${window.location.origin}${window.location.pathname}`}
+          onInstagram={shareSiteOnInstagram}
+          className="auth-site-share"
+        />
         <section className="auth-showcase">
           <a className="brand auth-brand" href="#" onClick={event => event.preventDefault()}>
             <span className="brand-mark"><ArrowLeftRight size={19} /></span>
@@ -669,6 +706,10 @@ function App() {
               <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search expenses..." />
               <kbd>/</kbd>
             </label>
+            <SiteShareButtons
+              url={`${window.location.origin}${window.location.pathname}`}
+              onInstagram={shareSiteOnInstagram}
+            />
             <button className="icon-button" aria-label="Record settlement" title="Record settlement" disabled={people.length < 2} onClick={() => setModal('settlement')}>
               <ArrowLeftRight size={18} />
             </button>
