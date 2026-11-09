@@ -7,7 +7,7 @@ A responsive shared-expense app with private workspaces, database-backed account
 The Docker Compose setup expects MySQL to be reachable from the backend container at `host.docker.internal:3306`. Create the database and a dedicated MySQL user with only the permissions required by GroupBuk; do not use the MySQL root account. Configure these values in the ignored `.env` file:
 
 ```dotenv
-DB_NAME=groupbuk
+DB_NAME=lendwise
 DB_USER=lendwiseuser
 DB_PASSWORD=use-a-unique-strong-password
 APP_URL=https://your-domain.example
@@ -24,12 +24,6 @@ Use the SMTP provider's required port and TLS settings. `APP_URL` must be the ex
 
 Back up the MySQL database and test restoring that backup before deployment or upgrades. The backend applies schema updates at startup. The workspace ownership migration gives each existing account its own workspace and account-linked person; previously shared, unowned people and groups are preserved in a separate `Legacy workspace` so they are not exposed to an arbitrary account. Those records are not visible through account workspaces and need a deliberate manual reassignment if they should remain in use. Run migrations on a restored copy first and verify the resulting data before deploying them to customer data.
 
-### Existing database migration
-
-For an existing installation using the default `lendwise` database, stop the app and back up the database before migrating. Run [`backend/db/migrate-lendwise-to-groupbuk.sql`](./backend/db/migrate-lendwise-to-groupbuk.sql) once with a MySQL administrative account. If the source database is named differently, replace the `lendwise` identifiers in that script with the configured source database name first. The script moves the existing tables and their data into `groupbuk`, renames them with the `groupbuk_` prefix, and leaves the source database itself in place. It does not drop the source database. The migration fails if a source table is missing or a destination table already exists; investigate rather than dropping or overwriting data.
-
-Keep the configured MySQL login unchanged (`DB_USER` and `DB_PASSWORD`); grant that same user the privileges it needs on `groupbuk.*` using your MySQL administrator, then set `DB_NAME=groupbuk` in `.env`. Start the app only after both steps are complete. At startup, the backend applies any remaining schema updates and creates simple legacy-name views so existing application queries continue to work. Verify app data and functionality before retiring the backup.
-
 After HTTPS is configured at a reverse proxy or load balancer, run:
 
 ```powershell
@@ -42,7 +36,7 @@ The frontend is published on port 3000 for the HTTPS proxy. The backend is only 
 
 ## Local development
 
-For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME` (normally `groupbuk`), `DB_USER`, and `DB_PASSWORD` in `.env`, then run `npm install` and `npm run dev` in `backend`, and `npm install` and `npm run dev` in `frontend` in separate terminals. Account signup and login do not require email delivery. Password recovery requires SMTP; invitation links can be shared manually when SMTP is unavailable.
+For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME` (normally `lendwise`), `DB_USER`, and `DB_PASSWORD` in `.env`, then run `npm install` and `npm run dev` in `backend`, and `npm install` and `npm run dev` in `frontend` in separate terminals. Account signup and login do not require email delivery. Password recovery requires SMTP; invitation links can be shared manually when SMTP is unavailable.
 
 ## Included
 

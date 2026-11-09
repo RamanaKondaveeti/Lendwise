@@ -22,7 +22,7 @@ app.set('trust proxy', 1);
 const pool = mysql.createPool({
   host: process.env.DB_HOST || '127.0.0.1',
   port: Number(process.env.DB_PORT || 3306),
-  database: process.env.DB_NAME || 'groupbuk',
+  database: process.env.DB_NAME || 'lendwise',
   user: process.env.DB_USER || 'lendwiseuser',
   password: process.env.DB_PASSWORD,
   waitForConnections: true,
@@ -185,37 +185,37 @@ async function ensureWorkspaceForeignKey(table, name) {
   if (!constraints.length) {
     await pool.query(
       `ALTER TABLE \`${table}\` ADD CONSTRAINT \`${name}\`
-       FOREIGN KEY (workspace_id) REFERENCES groupbuk_workspaces(id) ON DELETE CASCADE`
+       FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE`
     );
   }
 }
 
 async function migrateWorkspaceOwnership() {
-  await ensureColumn('groupbuk_settlements', 'expense_id', 'INT NULL');
+  await ensureColumn('settlements', 'expense_id', 'INT NULL');
   const [expenseSettlementConstraint] = await pool.query(
     `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'groupbuk_settlements'
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'settlements'
        AND CONSTRAINT_NAME = 'fk_settlements_expense'`
   );
   if (!expenseSettlementConstraint.length) {
     await pool.query(
-      `ALTER TABLE groupbuk_settlements ADD CONSTRAINT fk_settlements_expense
-       FOREIGN KEY (expense_id) REFERENCES groupbuk_expenses(id) ON DELETE CASCADE`
+      `ALTER TABLE settlements ADD CONSTRAINT fk_settlements_expense
+       FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE`
     );
   }
   const [expenseSettlementIndex] = await pool.query(
     `SELECT INDEX_NAME FROM information_schema.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'groupbuk_settlements'
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'settlements'
        AND INDEX_NAME = 'idx_settlements_expense'`
   );
   if (!expenseSettlementIndex.length) {
-    await pool.query('ALTER TABLE groupbuk_settlements ADD INDEX idx_settlements_expense (expense_id)');
+    await pool.query('ALTER TABLE settlements ADD INDEX idx_settlements_expense (expense_id)');
   }
-  await ensureColumn('groupbuk_people', 'workspace_id', 'INT NULL');
-  await ensureColumn('groupbuk_groups', 'workspace_id', 'INT NULL');
-  await ensureColumn('groupbuk_accounts', 'workspace_id', 'INT NULL');
-  await ensureColumn('groupbuk_auth_sessions', 'workspace_id', 'INT NULL');
-  await ensureColumn('groupbuk_workspace_invitations', 'invitee_account_id', 'INT NULL');
+  await ensureColumn('people', 'workspace_id', 'INT NULL');
+  await ensureColumn('groups', 'workspace_id', 'INT NULL');
+  await ensureColumn('accounts', 'workspace_id', 'INT NULL');
+  await ensureColumn('auth_sessions', 'workspace_id', 'INT NULL');
+  await ensureColumn('workspace_invitations', 'invitee_account_id', 'INT NULL');
 
   const legacyAccounts = await q(
     `SELECT a.id, a.person_id, p.name, p.initials, p.color
@@ -272,13 +272,13 @@ async function migrateWorkspaceOwnership() {
   );
   const [inviteeConstraints] = await pool.query(
     `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'groupbuk_workspace_invitations'
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'workspace_invitations'
        AND CONSTRAINT_NAME = 'fk_workspace_invitations_invitee'`
   );
   if (!inviteeConstraints.length) {
     await pool.query(
-      `ALTER TABLE groupbuk_workspace_invitations ADD CONSTRAINT fk_workspace_invitations_invitee
-       FOREIGN KEY (invitee_account_id) REFERENCES groupbuk_accounts(id) ON DELETE CASCADE`
+      `ALTER TABLE workspace_invitations ADD CONSTRAINT fk_workspace_invitations_invitee
+       FOREIGN KEY (invitee_account_id) REFERENCES accounts(id) ON DELETE CASCADE`
     );
   }
 
@@ -292,10 +292,10 @@ async function migrateWorkspaceOwnership() {
   if (Number(unmigrated.total)) throw new Error('Workspace migration left records without workspace ownership.');
 
   const indexes = [
-    ['groupbuk_people', 'idx_people_workspace'],
-    ['groupbuk_groups', 'idx_groups_workspace'],
-    ['groupbuk_accounts', 'idx_accounts_workspace'],
-    ['groupbuk_auth_sessions', 'idx_auth_sessions_workspace']
+    ['people', 'idx_people_workspace'],
+    ['groups', 'idx_groups_workspace'],
+    ['accounts', 'idx_accounts_workspace'],
+    ['auth_sessions', 'idx_auth_sessions_workspace']
   ];
   for (const [table, index] of indexes) {
     const [rows] = await pool.query(
@@ -305,14 +305,14 @@ async function migrateWorkspaceOwnership() {
     );
     if (!rows.length) await pool.query(`ALTER TABLE \`${table}\` ADD INDEX \`${index}\` (workspace_id)`);
   }
-  await ensureWorkspaceForeignKey('groupbuk_people', 'fk_people_workspace');
-  await ensureWorkspaceForeignKey('groupbuk_groups', 'fk_groups_workspace');
-  await ensureWorkspaceForeignKey('groupbuk_accounts', 'fk_accounts_workspace');
-  await ensureWorkspaceForeignKey('groupbuk_auth_sessions', 'fk_auth_sessions_workspace');
-  await pool.query('ALTER TABLE groupbuk_people MODIFY workspace_id INT NOT NULL');
-  await pool.query('ALTER TABLE groupbuk_groups MODIFY workspace_id INT NOT NULL');
-  await pool.query('ALTER TABLE groupbuk_accounts MODIFY workspace_id INT NOT NULL');
-  await pool.query('ALTER TABLE groupbuk_auth_sessions MODIFY workspace_id INT NOT NULL');
+  await ensureWorkspaceForeignKey('people', 'fk_people_workspace');
+  await ensureWorkspaceForeignKey('groups', 'fk_groups_workspace');
+  await ensureWorkspaceForeignKey('accounts', 'fk_accounts_workspace');
+  await ensureWorkspaceForeignKey('auth_sessions', 'fk_auth_sessions_workspace');
+  await pool.query('ALTER TABLE people MODIFY workspace_id INT NOT NULL');
+  await pool.query('ALTER TABLE `groups` MODIFY workspace_id INT NOT NULL');
+  await pool.query('ALTER TABLE accounts MODIFY workspace_id INT NOT NULL');
+  await pool.query('ALTER TABLE auth_sessions MODIFY workspace_id INT NOT NULL');
 }
 
 async function init() {
