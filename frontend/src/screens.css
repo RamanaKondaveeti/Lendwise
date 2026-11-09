@@ -253,12 +253,17 @@ footer a{color:#668575}
 .monthly-summary-icon{display:grid;width:42px;height:42px;flex:none;place-items:center;border:1px solid #d5ebde;border-radius:13px;background:#e4f5ea;color:#23835a}
 .monthly-summary-copy{display:grid;min-width:0;gap:5px;margin-right:auto}
 .monthly-summary-label{color:#788a80;font-size:9px;font-weight:700;letter-spacing:1px}
-.monthly-summary-copy b{color:#20352e;font:700 15px Manrope,sans-serif}
+.monthly-summary-select{position:relative;display:flex;width:max-content;max-width:100%;align-items:center;color:#20352e}
+.monthly-summary-select select{max-width:100%;padding:0 20px 0 0;border:0;outline:0;appearance:none;background:transparent;color:inherit;font:700 15px Manrope,sans-serif;cursor:pointer}
+.monthly-summary-select svg{position:absolute;right:0;pointer-events:none;color:#668575}
 .monthly-summary-stat{display:grid;gap:5px;padding:0 16px;border-left:1px solid #e3eee7}
 .monthly-summary-stat span{color:#788a80;font-size:10px}
 .monthly-summary-stat b{color:#20352e;font:700 15px Manrope,sans-serif}
 .balance-card{min-height:174px;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
 .balance-card:hover{transform:translateY(-3px);border-color:#c8dfd0;box-shadow:0 12px 28px #204a3310}
+.total-card{height:160px;min-height:160px;padding:15px 17px}
+.total-card .amount{margin-top:10px;font-size:29px}
+.total-card .balance-foot{margin-top:6px}
 .total-card .amount{color:#23573d}
 .total-card.owes-card{background:linear-gradient(125deg,#fff5e8,#ffefdc);border-color:#f2e2ce}
 .total-card.owes-card .amount{color:#ad6837}
@@ -274,6 +279,17 @@ footer a{color:#668575}
 .activity-panel .activity-copy span,.activity-panel .activity-payer span,.activity-panel .activity-amount span{font-size:9px}
 .activity-panel .activity-amount{min-width:82px}
 .activity-panel .activity-amount span{white-space:normal}
+.activity-panel .activity-icon{color:#526b5b}
+.activity-panel .category-icon-food{background:#fff0df;color:#bc7137}
+.activity-panel .category-icon-transport{background:#e8f1fb;color:#4e76a9}
+.activity-panel .category-icon-shopping{background:#f2eafa;color:#8961a5}
+.activity-panel .category-icon-utilities{background:#fff5d9;color:#a9842d}
+.activity-panel .category-icon-other{background:#e7f4ec;color:#4c8060}
+.activity-panel .settlement-status{font-weight:700}
+.activity-panel .status-settled,.activity-panel .status-paid-by-you{color:#27805e}
+.activity-panel .status-partially-paid{color:#a87931}
+.activity-panel .status-unpaid{color:#b56c47}
+.activity-panel .status-loading-status{color:#87978d;font-weight:500}
 .group-row-button{min-height:66px;border-top:1px solid #edf2ee;border-radius:8px;transition:background .15s ease,transform .15s ease}
 .group-row-button:hover{transform:translateX(2px)}
 .group-icon{width:36px;height:36px;border:1px solid #e8eee8;border-radius:11px}
@@ -310,12 +326,21 @@ footer a{color:#668575}
   .balance-grid{grid-template-columns:1fr}
   .total-card{grid-column:auto}
   .balance-card{min-height:142px}
-  .activity-panel .activity-row{grid-template-columns:30px minmax(0,1fr) 80px;gap:7px}
-  .activity-panel .activity-payer{display:none}
+  .monthly-summary{gap:9px;padding:12px}
+  .monthly-summary-copy{flex-basis:calc(100% - 55px)}
+  .monthly-summary-select select{font-size:14px}
+  .monthly-summary-stat{min-width:calc(50% - 5px);padding-top:9px}
+  .monthly-summary-stat span{font-size:9px}
+  .monthly-summary-stat b{font-size:13px}
+  .activity-panel .activity-row{grid-template-columns:30px minmax(0,1fr) 78px;grid-template-rows:auto auto;gap:4px 7px;min-height:74px;padding:8px 0}
+  .activity-panel .activity-icon{grid-column:1;grid-row:1 / span 2;align-self:center}
+  .activity-panel .activity-copy{grid-column:2;grid-row:1;min-width:0}
+  .activity-panel .activity-payer{display:flex;grid-column:2;grid-row:2;min-width:0;align-self:start}
+  .activity-panel .activity-amount{grid-column:3;grid-row:1 / span 2;min-width:0;align-self:center}
   .activity-panel .activity-amount b{text-align:right;font-size:10px}
-  .activity-panel .activity-amount span{text-align:right}
+  .activity-panel .activity-amount span{text-align:right;font-size:8px}
   .activity-panel .activity-copy span{overflow:hidden;text-overflow:ellipsis}
-  .monthly-summary-stat{min-width:calc(50% - 5px)}
+  .activity-panel .activity-payer span{font-size:8px}
 }
 
 .auth-page{min-height:100vh;display:grid;grid-template-columns:minmax(320px,.9fr) 1.1fr;background:#fff}

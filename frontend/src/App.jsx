@@ -34,6 +34,21 @@ const categoryIcons = {
   Utilities: Zap,
   Other: ReceiptText,
 }
+const categoryStyles = {
+  'Food & drink': 'food',
+  Transport: 'transport',
+  Shopping: 'shopping',
+  Utilities: 'utilities',
+  Other: 'other',
+}
+const monthValue = value => {
+  const parsed = new Date(value)
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`
+}
+const monthName = value => new Intl.DateTimeFormat('en-US', {
+  month: 'long',
+  year: 'numeric',
+}).format(new Date(`${value}-01T12:00:00`))
 const money = amount => new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
@@ -60,11 +75,22 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, sho
 
   return (
     <div className="data-list">
-      {expenses.map((expense, index) => {
+      {expenses.map(expense => {
         const Icon = categoryIcons[expense.category] || ReceiptText
+        const categoryStyle = categoryStyles[expense.category] || 'other'
+        const userShare = expense.shares?.find(share => share.person_id === currentUser?.id)
+        const settlementStatus = !Array.isArray(expense.shares)
+          ? 'Loading status'
+          : expense.payer_id === currentUser?.id
+            ? 'Paid by you'
+            : !userShare || userShare.outstanding_amount <= 0
+              ? 'Settled'
+              : userShare.settled_amount > 0
+                ? 'Partially paid'
+                : 'Unpaid'
         return (
           <div className="activity-row" key={expense.id}>
-            <div className="activity-icon" style={{ background: ['#f3e9db', '#e6eee5', '#ece6f2'][index % 3] }}>
+            <div className={`activity-icon category-icon-${categoryStyle}`} title={expense.category || 'Other'}>
               <Icon size={17} />
             </div>
             <div className="activity-copy">
@@ -86,8 +112,9 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, sho
               <span>{showSettlement
                 ? expense.outstanding_amount > 0 ? `${money(expense.outstanding_amount)} unpaid` : 'settled'
                 : showShare
-                  ? `Your share ${money(expense.shares?.find(share => share.person_id === currentUser?.id)?.amount || 0)}`
+                  ? `Your share ${money(userShare?.amount || 0)}`
                   : 'total'}</span>
+              {showShare && <span className={`settlement-status status-${settlementStatus.toLowerCase().replace(/\s+/g, '-')}`}>{settlementStatus}</span>}
             </div>
             {showSettlement && (
               expense.outstanding_amount > 0
@@ -224,6 +251,7 @@ function App() {
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityLoaded, setActivityLoaded] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
+  const [selectedMonth, setSelectedMonth] = useState(() => monthValue(new Date()))
 
   const refresh = async () => {
     const summary = await request('/api/summary')
@@ -342,11 +370,11 @@ function App() {
   const selectedGroup = groups.find(group => group.id === Number(selectedGroupId))
   const selectedExpenseGroup = groups.find(group => group.id === Number(expenseGroupId))
   const normalizedSearch = search.trim().toLowerCase()
-  const monthLabel = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date())
+  const currentMonth = monthValue(new Date())
+  const monthOptions = [...new Set([currentMonth, ...activity.map(expense => monthValue(expense.created_at))])]
+    .sort((left, right) => right.localeCompare(left))
   const monthlyExpenses = activity.filter(expense => {
-    const expenseDate = new Date(expense.created_at)
-    const now = new Date()
-    return expenseDate.getMonth() === now.getMonth() && expenseDate.getFullYear() === now.getFullYear()
+    return monthValue(expense.created_at) === selectedMonth
   })
   const monthlyTotal = monthlyExpenses.reduce((total, expense) => total + Number(expense.amount || 0), 0)
 
@@ -904,7 +932,13 @@ function App() {
             <div className="monthly-summary-icon"><CalendarDays size={19} /></div>
             <div className="monthly-summary-copy">
               <span className="monthly-summary-label">MONTHLY SPENDING</span>
-              <b>{monthLabel}</b>
+              <label className="monthly-summary-select">
+                <span className="sr-only">Choose month for spending summary</span>
+                <select value={selectedMonth} onChange={event => setSelectedMonth(event.target.value)}>
+                  {monthOptions.map(month => <option value={month} key={month}>{monthName(month)}</option>)}
+                </select>
+                <ChevronDown size={14} aria-hidden="true" />
+              </label>
             </div>
             <div className="monthly-summary-stat">
               <span>Total expenses</span>
