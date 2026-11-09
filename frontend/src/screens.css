@@ -259,6 +259,11 @@ footer a{color:#668575}
 .monthly-summary-stat{display:grid;gap:5px;padding:0 16px;border-left:1px solid #e3eee7}
 .monthly-summary-stat span{color:#788a80;font-size:10px}
 .monthly-summary-stat b{color:#20352e;font:700 15px Manrope,sans-serif}
+.currency-switcher{display:grid;grid-template-columns:auto auto;align-items:center;gap:2px 6px;padding:5px 8px;border:1px solid #dfe9e3;border-radius:9px;background:#fff;color:#788a80;font-size:9px}
+.currency-switcher>span{font-weight:700}
+.currency-switcher select{min-width:52px;padding:0 2px 0 0;border:0;outline:0;appearance:auto;background:transparent;color:#20352e;font-size:10px;font-weight:700;cursor:pointer}
+.currency-switcher small{grid-column:1 / -1;color:#84958b;font-size:8px;text-align:right}
+.currency-switcher:focus-within{outline:2px solid #81c9a4;outline-offset:1px}
 .balance-card{min-height:174px;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
 .balance-card:hover{transform:translateY(-3px);border-color:#c8dfd0;box-shadow:0 12px 28px #204a3310}
 .total-card{height:160px;min-height:160px;padding:15px 17px}
@@ -300,6 +305,25 @@ footer a{color:#668575}
 .group-total{min-width:78px}
 .group-card{border-radius:14px;box-shadow:0 5px 18px #204a3306}
 .group-card:hover{box-shadow:0 12px 26px #204a3310}
+.group-summary-row{display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #edf2ee}
+.group-summary-row:last-child{border-bottom:0}
+.group-summary-row .group-name{display:grid;min-width:0;gap:4px}
+.group-summary-row .group-name>span{white-space:normal}
+.group-user-balance,.group-card-balance{font-size:10px;font-weight:700}
+.group-user-balance.is-owed,.group-card-balance.is-owed{color:#258a5e}
+.group-user-balance.is-owing,.group-card-balance.is-owing{color:#b46c35}
+.group-user-balance.is-settled,.group-card-balance.is-settled{color:#788a80}
+.group-row-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}
+.group-action-button{min-height:29px;padding:0 8px;border:1px solid #dfe9e3;border-radius:7px;background:#fff;color:#52675b;font-size:9px;font-weight:700;white-space:nowrap}
+.group-action-button:hover{border-color:#81c9a4;background:#f0f8f3}
+.group-settle-button{border-color:#cfe8d8;background:#eff8f2;color:#21805b}
+.group-card-shell{display:flex;min-width:0;flex-direction:column;gap:8px;padding:10px;border:1px solid #e3ede6;border-radius:16px;background:#fff;box-shadow:0 5px 18px #204a3306}
+.group-card-shell .group-card{width:100%;min-height:0;flex:1;padding:9px;border:0;border-radius:10px;box-shadow:none}
+.group-card-shell .group-card:hover{transform:none;box-shadow:none}
+.group-card-shell .group-card strong{margin-top:7px;font-size:14px}
+.group-card-shell .group-card-balance{margin-top:5px}
+.group-card-settle{align-self:flex-start;height:31px}
+.group-balance-note{margin:10px 0;padding:9px 10px;border:1px solid #e8eee9;border-radius:8px;background:#f8fbf9;color:#788a80;font-size:9px;line-height:1.5}
 
 @media(max-width:1000px){
   .welcome-row{align-items:flex-start;gap:18px}
@@ -319,8 +343,20 @@ footer a{color:#668575}
   .balance-card{height:auto;min-height:150px;padding:15px}
   .lower-grid{grid-template-columns:1fr}
   .activity-panel{padding-right:12px;padding-left:12px}
+  .group-summary-row{grid-template-columns:32px minmax(0,1fr);gap:8px}
+  .group-summary-row .group-icon{grid-column:1;grid-row:1}
+  .group-summary-row .group-name{grid-column:2;grid-row:1}
+  .group-row-actions{grid-column:2;justify-content:flex-start}
+  .group-grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+  .currency-switcher{grid-template-columns:auto;gap:0;padding:4px 6px;text-align:center}
+  .currency-switcher>span,.currency-switcher small{display:none}
+  .currency-switcher select{min-width:45px;padding:2px}
 }
 @media(max-width:480px){
+  .top-actions{gap:6px}
+  .top-actions .search{width:clamp(90px,31vw,142px)}
+  .currency-switcher{padding:4px}
+  .currency-switcher select{min-width:42px;font-size:9px}
   .welcome-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   .welcome-actions .button{width:100%;padding:0 8px;font-size:9px}
   .balance-grid{grid-template-columns:1fr}
@@ -341,6 +377,11 @@ footer a{color:#668575}
   .activity-panel .activity-amount span{text-align:right;font-size:8px}
   .activity-panel .activity-copy span{overflow:hidden;text-overflow:ellipsis}
   .activity-panel .activity-payer span{font-size:8px}
+  .group-grid{grid-template-columns:1fr}
+  .group-card-shell .group-card{padding:9px}
+  .group-card-shell .group-card strong{font-size:13px}
+  .group-row-actions{width:100%}
+  .group-action-button{flex:1}
 }
 
 .auth-page{min-height:100vh;display:grid;grid-template-columns:minmax(320px,.9fr) 1.1fr;background:#fff}

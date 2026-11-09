@@ -108,13 +108,16 @@ CREATE TABLE IF NOT EXISTS settlements (
   payer_id INT NOT NULL,
   payee_id INT NOT NULL,
   expense_id INT NULL,
+  group_id INT NULL,
   amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
   note VARCHAR(255) NOT NULL DEFAULT 'Settlement',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_settlements_payer FOREIGN KEY (payer_id) REFERENCES people(id),
   CONSTRAINT fk_settlements_payee FOREIGN KEY (payee_id) REFERENCES people(id),
   CONSTRAINT fk_settlements_expense FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,
-  INDEX idx_settlements_expense (expense_id)
+  CONSTRAINT fk_settlements_group FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE,
+  INDEX idx_settlements_expense (expense_id),
+  INDEX idx_settlements_group (group_id)
 );
 
 CREATE TABLE IF NOT EXISTS workspace_invitations (

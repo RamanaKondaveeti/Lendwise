@@ -49,10 +49,11 @@ const monthName = value => new Intl.DateTimeFormat('en-US', {
   month: 'long',
   year: 'numeric',
 }).format(new Date(`${value}-01T12:00:00`))
-const money = amount => new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-}).format(Math.abs(Number(amount) || 0))
+const groupBalanceLabel = (balance, formatMoney) => {
+  const amount = Number(balance || 0)
+  if (!amount) return 'Settled'
+  return amount > 0 ? `You owe ${formatMoney(amount)}` : `Owed to you ${formatMoney(amount)}`
+}
 const date = value => new Intl.DateTimeFormat('en-US', {
   month: 'short',
   day: 'numeric',
@@ -70,7 +71,7 @@ async function request(url, options) {
   return body
 }
 
-function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, showSettlement = false, showShare = false }) {
+function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, showSettlement = false, showShare = false, formatMoney }) {
   if (!expenses.length) return <div className="empty">No expenses to show yet.</div>
 
   return (
@@ -108,11 +109,11 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, sho
               <span>{expense.payer_id === currentUser?.id ? 'You' : expense.payer}</span>
             </div>
             <div className="activity-amount">
-              <b>{money(expense.amount)}</b>
+              <b>{formatMoney(expense.amount)}</b>
               <span>{showSettlement
-                ? expense.outstanding_amount > 0 ? `${money(expense.outstanding_amount)} unpaid` : 'settled'
+                ? expense.outstanding_amount > 0 ? `${formatMoney(expense.outstanding_amount)} unpaid` : 'settled'
                 : showShare
-                  ? `Your share ${money(userShare?.amount || 0)}`
+                  ? `Your share ${formatMoney(userShare?.amount || 0)}`
                   : 'total'}</span>
               {showShare && <span className={`settlement-status status-${settlementStatus.toLowerCase().replace(/\s+/g, '-')}`}>{settlementStatus}</span>}
             </div>
@@ -252,6 +253,9 @@ function App() {
   const [activityLoaded, setActivityLoaded] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [selectedMonth, setSelectedMonth] = useState(() => monthValue(new Date()))
+  const [currency, setCurrency] = useState(() => window.localStorage.getItem('groupbuk_currency') === 'USD' ? 'USD' : 'INR')
+  const [exchangeRate, setExchangeRate] = useState(() => currency === 'INR' ? 1 : null)
+  const [currencyLoading, setCurrencyLoading] = useState(false)
 
   const refresh = async () => {
     const summary = await request('/api/summary')
@@ -361,6 +365,42 @@ function App() {
     return () => { active = false }
   }, [tab, selectedGroupId, reloadKey])
 
+  useEffect(() => {
+    window.localStorage.setItem('groupbuk_currency', currency)
+    if (currency === 'INR') {
+      setExchangeRate(1)
+      setCurrencyLoading(false)
+      return undefined
+    }
+
+    const controller = new AbortController()
+    let active = true
+    setCurrencyLoading(true)
+    setExchangeRate(null)
+    fetch('https://api.frankfurter.dev/v1/latest?base=INR&symbols=USD', { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error('Could not load the latest exchange rate.')
+        const result = await response.json()
+        const rate = Number(result.rates?.USD)
+        if (!Number.isFinite(rate) || rate <= 0) throw new Error('The exchange-rate response was invalid.')
+        return rate
+      })
+      .then(rate => {
+        if (active) setExchangeRate(rate)
+      })
+      .catch(error => {
+        if (active && error.name !== 'AbortError') notify(`${error.message} Select INR or try again later.`)
+      })
+      .finally(() => {
+        if (active) setCurrencyLoading(false)
+      })
+
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [currency])
+
   const currentUser = data?.balances?.find(person => person.id === data.currentUserId)
   const groups = data?.groups || []
   const people = data?.people || []
@@ -369,10 +409,24 @@ function App() {
   const owedByMe = myBalance > 0 ? myBalance : 0
   const selectedGroup = groups.find(group => group.id === Number(selectedGroupId))
   const selectedExpenseGroup = groups.find(group => group.id === Number(expenseGroupId))
+  const settlementGroup = groups.find(group => group.id === Number(settlementDefaults?.groupId))
+  const settlementPeople = settlementGroup ? settlementGroup.balance_people || [] : people
   const normalizedSearch = search.trim().toLowerCase()
   const currentMonth = monthValue(new Date())
+  const formatMoney = amount => {
+    if (!Number.isFinite(exchangeRate)) return '—'
+    return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en-US', {
+      style: 'currency',
+      currency,
+    }).format(Math.abs(Number(amount) * exchangeRate || 0))
+  }
+  const toStoredAmount = amount => Math.round((Number(amount) / exchangeRate) * 100) / 100
   const monthOptions = [...new Set([currentMonth, ...activity.map(expense => monthValue(expense.created_at))])]
     .sort((left, right) => right.localeCompare(left))
+  const unassignedBalance = Math.round((myBalance - groups.reduce(
+    (total, group) => total + Number(group.user_balance || 0),
+    0
+  )) * 100) / 100
   const monthlyExpenses = activity.filter(expense => {
     return monthValue(expense.created_at) === selectedMonth
   })
@@ -404,6 +458,18 @@ function App() {
 
   function openManualSettlement() {
     setSettlementDefaults(null)
+    setModal('settlement')
+  }
+
+  function openGroupSettlement(group) {
+    const suggestion = group.settlement_suggestion
+    if (!suggestion || !Number.isFinite(exchangeRate)) return
+    setSettlementDefaults({
+      payerId: suggestion.payerId,
+      payeeId: suggestion.payeeId,
+      amount: (suggestion.amount * exchangeRate).toFixed(2),
+      groupId: group.id,
+    })
     setModal('settlement')
   }
 
@@ -447,13 +513,17 @@ function App() {
   }
 
   function openPersonSettlement(person) {
+    if (!Number.isFinite(exchangeRate)) {
+      notify('Wait for the currency rate to load before recording a settlement.')
+      return
+    }
     const personBalance = Number(person.balance)
     const userBalance = Number(currentUser?.balance || 0)
     if (!userBalance || !personBalance || Math.sign(personBalance) === Math.sign(userBalance)) return
     const payer = userBalance > 0 ? currentUser : person
     const payee = userBalance < 0 ? currentUser : person
     const amount = Math.min(Math.abs(userBalance), Math.abs(personBalance))
-    setSettlementDefaults({ payerId: payer.id, payeeId: payee.id, amount: (Math.round(amount * 100) / 100).toFixed(2) })
+    setSettlementDefaults({ payerId: payer.id, payeeId: payee.id, amount: (Math.round(amount * 100) / 100 * exchangeRate).toFixed(2) })
     setModal('settlement')
   }
 
@@ -630,6 +700,10 @@ function App() {
 
   async function submit(event) {
     event.preventDefault()
+    if (['expense', 'expense-settlement', 'settlement'].includes(modal) && !Number.isFinite(exchangeRate)) {
+      notify('A current currency rate is required before saving this amount.')
+      return
+    }
     const form = new FormData(event.currentTarget)
     let url
     let payload
@@ -643,7 +717,7 @@ function App() {
       }
       const payments = personIds.map(personId => ({
         personId,
-        amount: Number(form.get(`amount-${personId}`)),
+        amount: toStoredAmount(form.get(`amount-${personId}`)),
       }))
       if (payments.some(payment => !Number.isFinite(payment.amount) || payment.amount <= 0)) {
         notify('Enter a valid payment amount for each selected share.')
@@ -673,7 +747,7 @@ function App() {
       payload = {
         groupId: Number(form.get('groupId')),
         title: form.get('title'),
-        amount: Number(form.get('amount')),
+        amount: toStoredAmount(form.get('amount')),
         paidBy: Number(form.get('paidBy')),
         category: form.get('category'),
         participants: form.getAll('participants').map(Number),
@@ -692,8 +766,9 @@ function App() {
       payload = {
         payerId: Number(form.get('payerId')),
         payeeId: Number(form.get('payeeId')),
-        amount: Number(form.get('amount')),
+        amount: toStoredAmount(form.get('amount')),
         note: form.get('note'),
+        ...(settlementDefaults?.groupId ? { groupId: settlementDefaults.groupId } : {}),
       }
       successMessage = 'Settlement recorded.'
     }
@@ -890,6 +965,14 @@ function App() {
               <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search expenses..." />
               <kbd>/</kbd>
             </label>
+            <label className="currency-switcher" title="Choose the currency for displayed amounts">
+              <span>Currency</span>
+              <select value={currency} onChange={event => setCurrency(event.target.value)} aria-label="Currency">
+                <option value="INR">INR</option>
+                <option value="USD">USD</option>
+              </select>
+              <small aria-live="polite">{currencyLoading ? 'Updating rate…' : currency === 'INR' ? 'Base currency' : Number.isFinite(exchangeRate) ? 'Converted' : 'Rate unavailable'}</small>
+            </label>
             <SiteShareButtons
               url={`${window.location.origin}${window.location.pathname}`}
               onInstagram={shareSiteOnInstagram}
@@ -942,7 +1025,7 @@ function App() {
             </div>
             <div className="monthly-summary-stat">
               <span>Total expenses</span>
-              <b>{activityLoading && !activityLoaded ? 'Loading…' : money(monthlyTotal)}</b>
+              <b>{activityLoading && !activityLoaded ? 'Loading…' : formatMoney(monthlyTotal)}</b>
             </div>
             <div className="monthly-summary-stat">
               <span>Recorded expenses</span>
@@ -955,7 +1038,7 @@ function App() {
                     <span className="card-title">YOUR NET BALANCE</span>
                     <span className="card-symbol dark-symbol"><ArrowLeftRight size={17} /></span>
                   </div>
-                  <div className="amount">{myBalance < 0 ? '+' : myBalance > 0 ? '−' : ''}{money(myBalance)}</div>
+                  <div className="amount">{myBalance < 0 ? '+' : myBalance > 0 ? '−' : ''}{formatMoney(myBalance)}</div>
                   <div className="balance-foot">
                     <span className="balance-indicator">{myBalance < 0 ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}</span>
                     {myBalance < 0 ? 'You are owed overall' : myBalance > 0 ? 'You owe overall' : 'You are all settled up'}
@@ -964,13 +1047,13 @@ function App() {
                 </article>
                 <article className="balance-card positive-card">
                   <div className="card-top"><span className="card-title">YOU ARE OWED</span><span className="card-symbol green-symbol"><ArrowDownLeft size={17} /></span></div>
-                  <div className="amount">{money(owedToMe)}</div>
+                  <div className="amount">{formatMoney(owedToMe)}</div>
                   <div className="small-detail"><span>Net amount owed to you</span></div>
                   <div className="card-bottom-line"><span /><span /></div>
                 </article>
                 <article className="balance-card negative-card">
                   <div className="card-top"><span className="card-title">YOU OWE</span><span className="card-symbol orange-symbol"><ArrowUpRight size={17} /></span></div>
-                  <div className="amount">{money(owedByMe)}</div>
+                  <div className="amount">{formatMoney(owedByMe)}</div>
                   <div className="small-detail"><span>Net amount you owe</span></div>
                   <div className="card-bottom-line orange-line"><span /><span /></div>
                 </article>
@@ -982,28 +1065,50 @@ function App() {
                     <div><div className="section-title">Recent activity <span className="title-count">{visibleActivity.length}</span></div><div className="section-subtitle">Latest expenses from your groups</div></div>
                     <button className="select-button" onClick={() => setTab('Activity')}>View all <ArrowRight size={14} /></button>
                   </div>
-                  <ExpenseRows expenses={visibleActivity.slice(0, 6)} currentUser={currentUser} onGroupClick={openGroup} showShare />
+                  <ExpenseRows expenses={visibleActivity.slice(0, 6)} currentUser={currentUser} onGroupClick={openGroup} showShare formatMoney={formatMoney} />
                   <button className="view-all" onClick={() => setTab('Activity')}>View all activity <ArrowRight size={14} /></button>
                 </div>
                 <div className="right-column">
                   <div className="panel groups-panel">
                     <div className="panel-heading">
-                      <div><div className="section-title">Your groups <span className="title-count">{groups.length}</span></div><div className="section-subtitle">Shared circles, one place</div></div>
+                      <div>
+                        <div className="section-title">Your groups <span className="title-count">{groups.length}</span></div>
+                        <div className="section-subtitle">Shared circles, one place</div>
+                      </div>
                       <button className="more-button" aria-label="Create group" onClick={() => setModal('group')}><Plus size={17} /></button>
                     </div>
                     <div className="group-list">
-                      {groups.slice(0, 5).map(group => {
+                      {groups.map(group => {
                         const Icon = groupIcons[group.icon] || Users
+                        const balance = Number(group.user_balance || 0)
                         return (
-                          <button className="group-row group-row-button" key={group.id} onClick={() => openGroup(group.id)}>
+                          <article className="group-row group-summary-row" key={group.id}>
                             <span className="group-icon" style={{ background: group.color }}><Icon size={17} /></span>
-                            <span className="group-name"><b>{group.name}</b><span>{group.members?.length || 0} members · {group.expenses} expenses</span></span>
-                            <span className="group-total"><b>{money(group.total)}</b><span>total spend</span></span>
-                          </button>
+                            <span className="group-name">
+                              <b>{group.name}</b>
+                              <span>{group.members?.length || 0} members · {group.expenses} expenses · {formatMoney(group.total)} total</span>
+                              <span className={`group-user-balance ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : 'is-settled'}`}>
+                                {groupBalanceLabel(balance, formatMoney)}
+                              </span>
+                            </span>
+                            <span className="group-row-actions">
+                              <button type="button" className="group-action-button" onClick={() => openGroup(group.id)}>View Group</button>
+                              {group.settlement_suggestion && (
+                                <button type="button" className="group-action-button group-settle-button" disabled={!Number.isFinite(exchangeRate)} onClick={() => openGroupSettlement(group)}>
+                                  Settle Up
+                                </button>
+                              )}
+                            </span>
+                          </article>
                         )
                       })}
                       {!groups.length && <div className="empty">Create a group to get started.</div>}
                     </div>
+                    {Math.abs(unassignedBalance) >= 0.01 && (
+                      <p className="group-balance-note">
+                        Overall balance also includes {formatMoney(unassignedBalance)} from settlements not assigned to a group.
+                      </p>
+                    )}
                     <button className="view-all" onClick={() => setTab('Groups')}>See all groups <ArrowRight size={14} /></button>
                   </div>
                   <div className="tip-card">
@@ -1018,24 +1123,43 @@ function App() {
           {tab === 'Groups' && (
             <section className="screen-panel">
               <div className="panel-heading screen-panel-heading">
-                <div><div className="section-title">All groups <span className="title-count">{groups.length}</span></div><div className="section-subtitle">Select a group to see its expenses.</div></div>
+                <div>
+                  <div className="section-title">All groups <span className="title-count">{groups.length}</span></div>
+                  <div className="section-subtitle">Group balances use expense shares and settlements.</div>
+                </div>
               </div>
               {groups.length ? (
                 <div className="group-grid">
                   {groups.map(group => {
                     const Icon = groupIcons[group.icon] || Users
+                    const balance = Number(group.user_balance || 0)
                     return (
-                      <button className="group-card" key={group.id} onClick={() => openGroup(group.id)}>
-                        <span className="group-card-icon" style={{ background: group.color }}><Icon size={20} /></span>
-                        <span className="group-card-name">{group.name}</span>
-                        <span className="group-card-meta">{group.members?.length || 0} members · {group.expenses} {group.expenses === 1 ? 'expense' : 'expenses'}</span>
-                        <strong>{money(group.total)}</strong>
-                        <span className="group-card-link">Open group <ArrowRight size={14} /></span>
-                      </button>
+                      <article className="group-card-shell" key={group.id}>
+                        <button className="group-card" onClick={() => openGroup(group.id)}>
+                          <span className="group-card-icon" style={{ background: group.color }}><Icon size={20} /></span>
+                          <span className="group-card-name">{group.name}</span>
+                          <span className="group-card-meta">{group.members?.length || 0} members · {group.expenses} {group.expenses === 1 ? 'expense' : 'expenses'}</span>
+                          <strong>{formatMoney(group.total)} total expenses</strong>
+                          <span className={`group-card-balance ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : 'is-settled'}`}>
+                            {groupBalanceLabel(balance, formatMoney)}
+                          </span>
+                          <span className="group-card-link">View Group <ArrowRight size={14} /></span>
+                        </button>
+                        {group.settlement_suggestion && (
+                          <button type="button" className="button button-light group-card-settle" disabled={!Number.isFinite(exchangeRate)} onClick={() => openGroupSettlement(group)}>
+                            Settle Up
+                          </button>
+                        )}
+                      </article>
                     )
                   })}
                 </div>
               ) : <div className="empty">No groups yet. Create one to start sharing expenses.</div>}
+              {Math.abs(unassignedBalance) >= 0.01 && (
+                <p className="group-balance-note">
+                  Overall balance also includes {formatMoney(unassignedBalance)} from settlements not assigned to a group.
+                </p>
+              )}
             </section>
           )}
 
@@ -1066,7 +1190,7 @@ function App() {
                             <span>{memberOf.length ? memberOf.map(group => group.name).join(', ') : 'Not assigned to a group'}</span>
                           </div>
                           <div className={`workspace-user-balance ${personBalance < 0 ? 'is-owed' : personBalance > 0 ? 'is-owing' : ''}`}>
-                            <b>{personBalance < 0 ? '+' : personBalance > 0 ? '−' : ''}{money(personBalance)}</b>
+                            <b>{personBalance < 0 ? '+' : personBalance > 0 ? '−' : ''}{formatMoney(personBalance)}</b>
                             <span>{personBalance < 0 ? 'owed' : personBalance > 0 ? 'owes' : 'settled'}</span>
                           </div>
                           <button
@@ -1134,6 +1258,7 @@ function App() {
                   currentUser={currentUser}
                   onGroupClick={openGroup}
                   onSettleExpense={openExpenseSettlement}
+                  formatMoney={formatMoney}
                   showSettlement
                 />}
             </section>
@@ -1164,7 +1289,7 @@ function App() {
                         <div><b>{person.name}{isCurrentUser ? ' (you)' : ''}</b><span>Shared expense account</span></div>
                       </div>
                       <b className={`balance-value ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : ''}`}>
-                        {balance < 0 ? '+' : balance > 0 ? '−' : ''}{money(balance)}
+                        {balance < 0 ? '+' : balance > 0 ? '−' : ''}{formatMoney(balance)}
                       </b>
                       <span className={`balance-status ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : ''}`}>
                         {balance < 0 ? 'Owed overall' : balance > 0 ? 'Owes overall' : 'Settled'}
@@ -1188,7 +1313,7 @@ function App() {
         <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
           <form className="modal" onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : 'Record a settlement'}</h2></div>
+              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
@@ -1207,8 +1332,8 @@ function App() {
                         <input type="checkbox" name="personIds" value={share.person_id} aria-label={`Select ${share.name}`} />
                         <span>{share.name}</span>
                         <label className="expense-settlement-amount">
-                          <span className="sr-only">Payment amount for {share.name}, up to {money(share.outstanding_amount)}</span>
-                          <input name={`amount-${share.person_id}`} type="number" min="0.01" max={share.outstanding_amount} step="0.01" defaultValue={share.outstanding_amount.toFixed(2)} required />
+                          <span className="sr-only">Payment amount for {share.name}, up to {formatMoney(share.outstanding_amount)}</span>
+                          <input name={`amount-${share.person_id}`} type="number" min="0.01" max={Number.isFinite(exchangeRate) ? (share.outstanding_amount * exchangeRate).toFixed(2) : undefined} step="0.01" defaultValue={Number.isFinite(exchangeRate) ? (share.outstanding_amount * exchangeRate).toFixed(2) : ''} disabled={!Number.isFinite(exchangeRate)} required />
                         </label>
                       </div>
                     ))}
@@ -1223,13 +1348,13 @@ function App() {
                   {settlementPlan.map((payment, index) => (
                     <div className="settlement-plan-row" key={`${payment.payerId}-${payment.payeeId}-${index}`}>
                       <span><b>{payment.payer}</b> pays <b>{payment.payee}</b></span>
-                      <strong>{money(payment.amount)}</strong>
+                      <strong>{formatMoney(payment.amount)}</strong>
                     </div>
                   ))}
                 </div>
                 <div className="settlement-plan-total">
                   <span>Your balance to clear · {settlementPlan.length} {settlementPlan.length === 1 ? 'payment' : 'payments'}</span>
-                  <b>{money(settlementPlan.reduce((total, payment) => total + payment.amount, 0))}</b>
+                  <b>{formatMoney(settlementPlan.reduce((total, payment) => total + payment.amount, 0))}</b>
                 </div>
               </>
             )}
@@ -1271,7 +1396,7 @@ function App() {
               <>
                 <label>What was it for?<input required name="title" maxLength="255" placeholder="Enter an expense name" /></label>
                 <div className="form-row">
-                  <label>Amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" required /></label>
+                <label>Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" disabled={!Number.isFinite(exchangeRate)} required /></label>
                   <label>Category<select name="category">{Object.keys(categoryIcons).map(category => <option key={category}>{category}</option>)}</select></label>
                 </div>
                 <label>Group<select name="groupId" required value={expenseGroupId} onChange={event => setExpenseGroupId(Number(event.target.value))}><option value="" disabled>Select a group</option>{groups.filter(group => group.members?.length).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
@@ -1314,12 +1439,17 @@ function App() {
 
             {modal === 'settlement' && (
               <>
+                {settlementDefaults?.groupId && (
+                  <p className="form-hint">
+                    This payment is assigned to {groups.find(group => group.id === Number(settlementDefaults.groupId))?.name || 'this group'} and will update both group and overall balances.
+                  </p>
+                )}
                 <div className="form-row">
-                  <label>Paid by<select name="payerId" required defaultValue={settlementDefaults?.payerId || data.currentUserId}>{people.map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
-                  <label>Paid to<select name="payeeId" required defaultValue={settlementDefaults?.payeeId || people.find(person => person.id !== data.currentUserId)?.id || ''}>{people.filter(person => person.id !== (settlementDefaults?.payerId || data.currentUserId)).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
+                  <label>Paid by<select name="payerId" required defaultValue={settlementDefaults?.payerId || data.currentUserId}>{settlementPeople.map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
+                  <label>Paid to<select name="payeeId" required defaultValue={settlementDefaults?.payeeId || settlementPeople.find(person => person.id !== data.currentUserId)?.id || ''}>{settlementPeople.filter(person => person.id !== (settlementDefaults?.payerId || data.currentUserId)).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
                 </div>
                 <div className="form-row">
-                  <label>Amount<input name="amount" type="number" min="0.01" step="0.01" defaultValue={settlementDefaults?.amount || ''} placeholder="0.00" required /></label>
+                  <label>Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" defaultValue={settlementDefaults?.amount || ''} placeholder="0.00" disabled={!Number.isFinite(exchangeRate)} required /></label>
                   <label>Note<input name="note" maxLength="255" defaultValue="Settlement" required /></label>
                 </div>
               </>

@@ -84,6 +84,53 @@ async function getWorkspaceBalances(workspaceId, executor = pool) {
   return balances;
 }
 
+async function getWorkspaceGroupBalances(workspaceId, executor = pool) {
+  const [balances] = await executor.execute(
+    `SELECT gm.group_id, p.id, p.name, p.initials, p.color,
+            COALESCE(split_totals.amount, 0) - COALESCE(paid_totals.amount, 0)
+              + COALESCE(settlement_received.amount, 0) - COALESCE(settlement_paid.amount, 0) AS balance
+     FROM \`groups\` g
+     JOIN people p ON p.workspace_id = g.workspace_id
+     LEFT JOIN (
+       SELECT e.group_id, s.person_id, SUM(s.amount) AS amount
+       FROM splits s JOIN expenses e ON e.id = s.expense_id
+       GROUP BY e.group_id, s.person_id
+     ) split_totals ON split_totals.group_id = g.id AND split_totals.person_id = p.id
+     LEFT JOIN (
+       SELECT group_id, paid_by AS person_id, SUM(amount) AS amount
+       FROM expenses GROUP BY group_id, paid_by
+     ) paid_totals ON paid_totals.group_id = g.id AND paid_totals.person_id = p.id
+     LEFT JOIN (
+       SELECT COALESCE(st.group_id, e.group_id) AS group_id, st.payee_id AS person_id, SUM(st.amount) AS amount
+       FROM settlements st LEFT JOIN expenses e ON e.id = st.expense_id
+       WHERE st.group_id IS NOT NULL OR st.expense_id IS NOT NULL
+       GROUP BY COALESCE(st.group_id, e.group_id), st.payee_id
+     ) settlement_received ON settlement_received.group_id = g.id AND settlement_received.person_id = p.id
+     LEFT JOIN (
+       SELECT COALESCE(st.group_id, e.group_id) AS group_id, st.payer_id AS person_id, SUM(st.amount) AS amount
+       FROM settlements st LEFT JOIN expenses e ON e.id = st.expense_id
+       WHERE st.group_id IS NOT NULL OR st.expense_id IS NOT NULL
+       GROUP BY COALESCE(st.group_id, e.group_id), st.payer_id
+     ) settlement_paid ON settlement_paid.group_id = g.id AND settlement_paid.person_id = p.id
+     WHERE g.workspace_id = ? AND (
+       EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.person_id = p.id)
+       OR EXISTS (
+         SELECT 1 FROM expenses e JOIN splits s ON s.expense_id = e.id
+         WHERE e.group_id = g.id AND s.person_id = p.id
+       )
+       OR EXISTS (SELECT 1 FROM expenses e WHERE e.group_id = g.id AND e.paid_by = p.id)
+       OR EXISTS (
+         SELECT 1 FROM settlements st LEFT JOIN expenses linked ON linked.id = st.expense_id
+         WHERE COALESCE(st.group_id, linked.group_id) = g.id
+           AND (st.payer_id = p.id OR st.payee_id = p.id)
+       )
+     )
+     ORDER BY g.id, p.id`,
+    [workspaceId]
+  );
+  return balances;
+}
+
 function derivePasswordHash(password, salt) {
   return scrypt(password, salt, 64, passwordHashOptions);
 }
@@ -192,6 +239,7 @@ async function ensureWorkspaceForeignKey(table, name) {
 
 async function migrateWorkspaceOwnership() {
   await ensureColumn('settlements', 'expense_id', 'INT NULL');
+  await ensureColumn('settlements', 'group_id', 'INT NULL');
   const [expenseSettlementConstraint] = await pool.query(
     `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'settlements'
@@ -210,6 +258,24 @@ async function migrateWorkspaceOwnership() {
   );
   if (!expenseSettlementIndex.length) {
     await pool.query('ALTER TABLE settlements ADD INDEX idx_settlements_expense (expense_id)');
+  }
+  const [groupSettlementConstraint] = await pool.query(
+    `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'settlements'
+       AND CONSTRAINT_NAME = 'fk_settlements_group'`
+  );
+  if (!groupSettlementConstraint.length) {
+    await pool.query(
+      'ALTER TABLE settlements ADD CONSTRAINT fk_settlements_group FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE'
+    );
+  }
+  const [groupSettlementIndex] = await pool.query(
+    `SELECT INDEX_NAME FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'settlements'
+       AND INDEX_NAME = 'idx_settlements_group'`
+  );
+  if (!groupSettlementIndex.length) {
+    await pool.query('ALTER TABLE settlements ADD INDEX idx_settlements_group (group_id)');
   }
   await ensureColumn('people', 'workspace_id', 'INT NULL');
   await ensureColumn('groups', 'workspace_id', 'INT NULL');
@@ -905,6 +971,39 @@ app.get('/api/summary', async (req, res) => {
     for (const group of groups) {
       group.members = membersByGroup.get(group.id) || [];
     }
+    const groupBalances = await getWorkspaceGroupBalances(workspaceId);
+    const groupBalancesById = new Map();
+    for (const person of groupBalances) {
+      const balances = groupBalancesById.get(person.group_id) || [];
+      balances.push(person);
+      groupBalancesById.set(person.group_id, balances);
+    }
+    for (const group of groups) {
+      const balances = groupBalancesById.get(group.id) || [];
+      group.balance_people = balances;
+      const userBalance = balances.find(person => person.id === req.account.person_id);
+      group.user_balance = Number(userBalance?.balance || 0);
+      const userBalanceCents = Math.round(group.user_balance * 100);
+      group.settlement_suggestion = userBalanceCents
+        ? balances
+          .filter(person => person.id !== req.account.person_id &&
+            (userBalanceCents > 0 ? Number(person.balance) < 0 : Number(person.balance) > 0))
+          .map(person => {
+            const otherBalanceCents = Math.round(Number(person.balance) * 100);
+            const payer = userBalanceCents > 0 ? userBalance : person;
+            const payee = userBalanceCents > 0 ? person : userBalance;
+            return {
+              payerId: payer.id,
+              payer: payer.name,
+              payeeId: payee.id,
+              payee: payee.name,
+              amount: Math.min(Math.abs(userBalanceCents), Math.abs(otherBalanceCents)) / 100
+            };
+          })
+          .filter(payment => payment.amount > 0)
+          .sort((left, right) => right.amount - left.amount)[0] || null
+        : null;
+    }
     const activity = await q(
       `SELECT e.id, e.title, e.amount, e.category, e.created_at, p.name AS payer,
               p.initials, p.color, g.name AS group_name
@@ -1479,18 +1578,21 @@ app.put('/api/groups/:groupId/members', async (req, res) => {
 });
 
 app.post('/api/settlements', async (req, res) => {
-  const { payerId, payeeId, amount, note = 'Settlement' } = req.body || {};
+  const { payerId, payeeId, amount, groupId, note = 'Settlement' } = req.body || {};
   const normalizedPayerId = Number(payerId);
   const normalizedPayeeId = Number(payeeId);
+  const normalizedGroupId = groupId === undefined || groupId === null ? null : Number(groupId);
   const amountCents = Math.round(Number(amount) * 100);
   if (!Number.isInteger(normalizedPayerId) || normalizedPayerId <= 0 ||
       !Number.isInteger(normalizedPayeeId) || normalizedPayeeId <= 0 ||
       normalizedPayerId === normalizedPayeeId ||
+      (normalizedGroupId !== null && (!Number.isInteger(normalizedGroupId) || normalizedGroupId <= 0)) ||
       !Number.isFinite(Number(amount)) || !Number.isSafeInteger(amountCents) ||
       amountCents <= 0 || amountCents > 999999999999 ||
       typeof note !== 'string' || !note.trim() || note.length > 255) {
     return res.status(400).json({ error: 'Choose two people and a positive amount.' });
   }
+  let connection;
   try {
     const people = await q(
       'SELECT id FROM people WHERE workspace_id = ? AND id IN (?, ?)',
@@ -1499,14 +1601,58 @@ app.post('/api/settlements', async (req, res) => {
     if (people.length !== 2) {
       return res.status(400).json({ error: 'Choose two users from your workspace.' });
     }
-    await q(
-      'INSERT INTO settlements(payer_id, payee_id, amount, note) VALUES(?, ?, ?, ?)',
-      [normalizedPayerId, normalizedPayeeId, amountCents / 100, note.trim()]
-    );
+    if (normalizedGroupId === null) {
+      await q(
+        'INSERT INTO settlements(payer_id, payee_id, amount, note) VALUES(?, ?, ?, ?)',
+        [normalizedPayerId, normalizedPayeeId, amountCents / 100, note.trim()]
+      );
+    } else {
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+      const [groupRows] = await connection.execute(
+        'SELECT id FROM `groups` WHERE id = ? AND workspace_id = ? FOR UPDATE',
+        [normalizedGroupId, req.account.workspace_id]
+      );
+      if (!groupRows.length) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Group not found.' });
+      }
+      const groupBalances = await getWorkspaceGroupBalances(req.account.workspace_id, connection);
+      const payerBalance = groupBalances.find(person =>
+        person.group_id === normalizedGroupId && person.id === normalizedPayerId
+      );
+      const payeeBalance = groupBalances.find(person =>
+        person.group_id === normalizedGroupId && person.id === normalizedPayeeId
+      );
+      if (!payerBalance || !payeeBalance) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'Both users must be members of this group.' });
+      }
+      const payerCents = Math.round(Number(payerBalance.balance) * 100);
+      const payeeCents = Math.round(Number(payeeBalance.balance) * 100);
+      if (payerCents <= 0 || payeeCents >= 0 || amountCents > Math.min(payerCents, -payeeCents)) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'The group balance changed. Refresh and try again.' });
+      }
+      await connection.execute(
+        'INSERT INTO settlements(payer_id, payee_id, amount, group_id, note) VALUES(?, ?, ?, ?, ?)',
+        [normalizedPayerId, normalizedPayeeId, amountCents / 100, normalizedGroupId, note.trim()]
+      );
+      await connection.commit();
+    }
     res.status(201).json({ ok: true });
   } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Group settlement rollback failed', rollbackError);
+      }
+    }
     console.error(error);
     res.status(500).json({ error: 'Could not save this settlement.' });
+  } finally {
+    connection?.release();
   }
 });
 

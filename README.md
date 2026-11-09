@@ -48,6 +48,7 @@ For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME` (normally `lend
 - Rate limiting, security headers, and request body limits; secure cookies when `COOKIE_SECURE=true`
 - Manual creation of people and groups; no generated sample or dummy records
 - MySQL persistence for groups, group members, expenses, splits, and settlements
+- Group-level net balances use expense shares and linked or group-assigned settlements; amounts are stored in INR and can be displayed in INR or converted to USD using the latest available rate from Frankfurter
 - Record full or custom partial expense-share payments individually, or review and confirm suggested payments to clear your own balance
 
 ## Before customer release
