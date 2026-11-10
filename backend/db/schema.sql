@@ -103,6 +103,62 @@ CREATE TABLE IF NOT EXISTS splits (
   CONSTRAINT fk_splits_person FOREIGN KEY (person_id) REFERENCES people(id)
 );
 
+CREATE TABLE IF NOT EXISTS recurring_expenses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  workspace_id INT NOT NULL,
+  group_id INT NOT NULL,
+  created_by INT NOT NULL,
+  paid_by INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT NULL,
+  amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
+  base_amount DECIMAL(12, 2) NOT NULL CHECK (base_amount > 0),
+  currency ENUM('INR', 'USD') NOT NULL,
+  exchange_rate_to_inr DECIMAL(15, 8) NOT NULL CHECK (exchange_rate_to_inr > 0),
+  category VARCHAR(100) NOT NULL DEFAULT 'Other',
+  split_method ENUM('equal', 'custom') NOT NULL DEFAULT 'equal',
+  variable_amount BOOLEAN NOT NULL DEFAULT FALSE,
+  frequency ENUM('weekly', 'monthly', 'quarterly', 'yearly') NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NULL,
+  anchor_month TINYINT UNSIGNED NOT NULL,
+  anchor_day TINYINT UNSIGNED NOT NULL,
+  next_occurrence_date DATE NULL,
+  status ENUM('active', 'paused', 'completed', 'cancelled') NOT NULL DEFAULT 'active',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_recurring_expenses_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+  CONSTRAINT fk_recurring_expenses_group FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE,
+  CONSTRAINT fk_recurring_expenses_creator FOREIGN KEY (created_by) REFERENCES people(id),
+  CONSTRAINT fk_recurring_expenses_payer FOREIGN KEY (paid_by) REFERENCES people(id),
+  INDEX idx_recurring_due (status, next_occurrence_date)
+);
+
+CREATE TABLE IF NOT EXISTS recurring_expense_participants (
+  template_id INT NOT NULL,
+  person_id INT NOT NULL,
+  share_percent DECIMAL(7, 4) NULL,
+  PRIMARY KEY (template_id, person_id),
+  CONSTRAINT fk_recurring_participants_template FOREIGN KEY (template_id) REFERENCES recurring_expenses(id) ON DELETE CASCADE,
+  CONSTRAINT fk_recurring_participants_person FOREIGN KEY (person_id) REFERENCES people(id)
+);
+
+CREATE TABLE IF NOT EXISTS recurring_expense_occurrences (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  template_id INT NOT NULL,
+  occurrence_date DATE NOT NULL,
+  status ENUM('processing', 'needs_confirmation', 'generated') NOT NULL DEFAULT 'processing',
+  expense_id INT NULL,
+  entered_amount DECIMAL(12, 2) NULL,
+  base_amount DECIMAL(12, 2) NULL,
+  generated_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_recurring_occurrences_template FOREIGN KEY (template_id) REFERENCES recurring_expenses(id) ON DELETE CASCADE,
+  CONSTRAINT fk_recurring_occurrences_expense FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE SET NULL,
+  UNIQUE KEY uq_recurring_occurrence (template_id, occurrence_date),
+  INDEX idx_recurring_occurrence_date (occurrence_date)
+);
+
 CREATE TABLE IF NOT EXISTS settlements (
   id INT AUTO_INCREMENT PRIMARY KEY,
   payer_id INT NOT NULL,

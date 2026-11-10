@@ -8,6 +8,12 @@ const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const { calculateMinimalSettlements, validateGroupSettlement } = require('./settlements');
+const {
+  createExpenseAndSplits,
+  dateOnly,
+  nextOccurrenceDate,
+  reserveOccurrence,
+} = require('./recurring');
 const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
@@ -222,6 +228,116 @@ const publicApiRateLimit = rateLimit({
 async function ensureColumn(table, column, definition) {
   const [columns] = await pool.query(`SHOW COLUMNS FROM \`${table}\` LIKE ?`, [column]);
   if (!columns.length) await pool.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+}
+
+function dateOnOrAfter(startDate, frequency, anchorMonth, anchorDay, minimumDate) {
+  let date = dateOnly(startDate);
+  const minimum = dateOnly(minimumDate);
+  for (let count = 0; date < minimum && count < 10000; count += 1) {
+    date = nextOccurrenceDate(date, frequency, anchorMonth, anchorDay);
+  }
+  if (date < minimum) throw new RangeError('The recurring schedule is too far in the past.');
+  return date;
+}
+
+async function processDueRecurringTemplate(templateId) {
+  const connection = await pool.getConnection();
+  let inTransaction = false;
+  try {
+    await connection.beginTransaction();
+    inTransaction = true;
+    const [templates] = await connection.execute(
+      `SELECT * FROM recurring_expenses
+       WHERE id = ? AND status = 'active' AND next_occurrence_date <= UTC_DATE()
+       FOR UPDATE`,
+      [templateId]
+    );
+    if (!templates.length) {
+      await connection.commit();
+      inTransaction = false;
+      return false;
+    }
+
+    const template = templates[0];
+    const occurrenceDate = dateOnly(template.next_occurrence_date);
+    const [participants] = await connection.execute(
+      `SELECT person_id, share_percent FROM recurring_expense_participants
+       WHERE template_id = ? ORDER BY person_id`,
+      [template.id]
+    );
+    if (!participants.length) throw new Error(`Recurring expense ${template.id} has no participants.`);
+
+    const reserved = await reserveOccurrence(connection, template.id, occurrenceDate);
+    if (reserved && template.variable_amount) {
+      await connection.execute(
+        `UPDATE recurring_expense_occurrences SET status = 'needs_confirmation'
+         WHERE template_id = ? AND occurrence_date = ?`,
+        [template.id, occurrenceDate]
+      );
+    } else if (reserved) {
+      await createExpenseAndSplits(
+        connection,
+        template,
+        occurrenceDate,
+        template.amount,
+        template.base_amount,
+        participants
+      );
+    }
+
+    const nextDate = nextOccurrenceDate(
+      occurrenceDate,
+      template.frequency,
+      template.anchor_month,
+      template.anchor_day
+    );
+    const completed = template.end_date && nextDate > dateOnly(template.end_date);
+    await connection.execute(
+      'UPDATE recurring_expenses SET next_occurrence_date = ?, status = ? WHERE id = ?',
+      [completed ? null : nextDate, completed ? 'completed' : 'active', template.id]
+    );
+    await connection.commit();
+    inTransaction = false;
+    return true;
+  } catch (error) {
+    if (inTransaction) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Recurring expense rollback failed', rollbackError);
+      }
+    }
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+let recurringSchedulerRunning = false;
+async function runDueRecurringExpenses() {
+  if (recurringSchedulerRunning) return;
+  recurringSchedulerRunning = true;
+  try {
+    const [dueTemplates] = await pool.execute(
+      `SELECT id FROM recurring_expenses
+       WHERE status = 'active' AND next_occurrence_date <= UTC_DATE()
+       ORDER BY next_occurrence_date, id LIMIT 100`
+    );
+    for (const { id } of dueTemplates) {
+      for (let occurrence = 0; occurrence < 500; occurrence += 1) {
+        try {
+          if (!await processDueRecurringTemplate(id)) break;
+        } catch (error) {
+          console.error(`Recurring expense ${id} could not be generated.`, error);
+          break;
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Recurring expense scheduler failed.', error);
+  } finally {
+    recurringSchedulerRunning = false;
+  }
 }
 
 async function ensureWorkspaceForeignKey(table, name) {
@@ -1042,6 +1158,456 @@ app.get('/api/summary', async (req, res) => {
   }
 });
 
+app.get('/api/recurring-expenses', async (req, res) => {
+  try {
+    const workspaceId = req.account.workspace_id;
+    const templates = await q(
+      `SELECT r.*, g.name AS group_name, p.name AS payer_name
+       FROM recurring_expenses r
+       JOIN \`groups\` g ON g.id = r.group_id AND g.workspace_id = ?
+       JOIN people p ON p.id = r.paid_by AND p.workspace_id = ?
+       WHERE r.workspace_id = ?
+       ORDER BY r.status = 'active' DESC, r.next_occurrence_date, r.id`,
+      [workspaceId, workspaceId, workspaceId]
+    );
+    if (!templates.length) return res.json({ templates: [], occurrences: [] });
+    const ids = templates.map(template => template.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const [participants, occurrences] = await Promise.all([
+      q(
+        `SELECT rp.template_id, rp.person_id, rp.share_percent, p.name
+         FROM recurring_expense_participants rp
+         JOIN people p ON p.id = rp.person_id AND p.workspace_id = ?
+         WHERE rp.template_id IN (${placeholders})
+         ORDER BY rp.template_id, p.name, p.id`,
+        [workspaceId, ...ids]
+      ),
+      q(
+        `SELECT o.id, o.template_id, o.occurrence_date, o.status, o.expense_id,
+                o.entered_amount, o.base_amount, o.generated_at,
+                r.title, r.currency, r.amount AS expected_amount, r.variable_amount,
+                g.name AS group_name, e.title AS expense_title, e.amount AS expense_base_amount
+         FROM recurring_expense_occurrences o
+         JOIN recurring_expenses r ON r.id = o.template_id
+         JOIN \`groups\` g ON g.id = r.group_id AND g.workspace_id = ?
+         LEFT JOIN expenses e ON e.id = o.expense_id
+         WHERE o.template_id IN (${placeholders})
+         ORDER BY o.occurrence_date DESC, o.id DESC
+         LIMIT 200`,
+        [workspaceId, ...ids]
+      ),
+    ]);
+    const participantsByTemplate = new Map();
+    for (const participant of participants) {
+      const current = participantsByTemplate.get(participant.template_id) || [];
+      current.push(participant);
+      participantsByTemplate.set(participant.template_id, current);
+    }
+    for (const template of templates) {
+      template.participants = participantsByTemplate.get(template.id) || [];
+    }
+    res.json({ templates, occurrences });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load recurring expenses.' });
+  }
+});
+
+app.post('/api/recurring-expenses', async (req, res) => {
+  const body = req.body || {};
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+  const description = typeof body.description === 'string' ? body.description.trim() : '';
+  const category = typeof body.category === 'string' ? body.category.trim() : '';
+  const groupId = Number(body.groupId);
+  const paidBy = Number(body.paidBy);
+  const amount = Number(body.amount);
+  const exchangeRateToInr = Number(body.exchangeRateToInr);
+  const baseAmount = Math.round(amount * exchangeRateToInr * 100) / 100;
+  const participantInput = Array.isArray(body.participants) ? body.participants : [];
+  const participants = participantInput.map(participant => ({
+    personId: Number(participant?.personId),
+    sharePercent: participant?.sharePercent === null || participant?.sharePercent === undefined
+      ? null
+      : Number(participant.sharePercent),
+  }));
+  const participantIds = participants.map(participant => participant.personId);
+  const frequency = body.frequency;
+  const splitMethod = body.splitMethod;
+  const currency = body.currency;
+  let startDate;
+  let endDate;
+  try {
+    startDate = dateOnly(body.startDate);
+    endDate = body.endDate ? dateOnly(body.endDate) : null;
+  } catch {
+    return res.status(400).json({ error: 'Enter valid recurring expense start and end dates.' });
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const customTotal = participants.reduce((sum, participant) => sum + Number(participant.sharePercent || 0), 0);
+  if (!title || title.length > 255 || description.length > 2000 ||
+      !category || category.length > 100 ||
+      !Number.isInteger(groupId) || groupId <= 0 ||
+      !Number.isInteger(paidBy) || paidBy <= 0 ||
+      !Number.isFinite(amount) || amount <= 0 || amount > 9999999999 ||
+      !Number.isFinite(exchangeRateToInr) || exchangeRateToInr <= 0 ||
+      exchangeRateToInr >= 10000000 || baseAmount > 9999999999.99 ||
+      !Number.isSafeInteger(Math.round(amount * 100)) ||
+      !Number.isSafeInteger(Math.round(baseAmount * 100)) || baseAmount <= 0 ||
+      !['INR', 'USD'].includes(currency) ||
+      (currency === 'INR' && Math.abs(exchangeRateToInr - 1) > 0.000001) ||
+      !['weekly', 'monthly', 'quarterly', 'yearly'].includes(frequency) ||
+      !['equal', 'custom'].includes(splitMethod) ||
+      typeof body.variableAmount !== 'boolean' ||
+      !participantIds.length || participantIds.some(id => !Number.isInteger(id) || id <= 0) ||
+      new Set(participantIds).size !== participantIds.length ||
+      (endDate && endDate < startDate) || startDate < today ||
+      (splitMethod === 'custom' && (
+        participants.some(participant => !Number.isFinite(participant.sharePercent) || participant.sharePercent <= 0) ||
+        Math.abs(customTotal - 100) > 0.01
+      ))) {
+    return res.status(400).json({ error: 'Check the title, group, amount, dates, split, currency, and participants.' });
+  }
+
+  let connection;
+  let inTransaction = false;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    inTransaction = true;
+    const [groups] = await connection.execute(
+      'SELECT id FROM `groups` WHERE id = ? AND workspace_id = ? FOR UPDATE',
+      [groupId, req.account.workspace_id]
+    );
+    if (!groups.length) {
+      await connection.rollback();
+      inTransaction = false;
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+    const idsToCheck = [...new Set([paidBy, ...participantIds])];
+    const [members] = await connection.execute(
+      `SELECT gm.person_id AS id FROM group_members gm
+       JOIN people p ON p.id = gm.person_id AND p.workspace_id = ?
+       WHERE gm.group_id = ? AND gm.person_id IN (${idsToCheck.map(() => '?').join(',')})`,
+      [req.account.workspace_id, groupId, ...idsToCheck]
+    );
+    if (members.length !== idsToCheck.length) {
+      await connection.rollback();
+      inTransaction = false;
+      return res.status(400).json({ error: 'Choose a group member as payer and participants.' });
+    }
+
+    const anchorMonth = Number(startDate.slice(5, 7));
+    const anchorDay = Number(startDate.slice(8, 10));
+    const [template] = await connection.execute(
+      `INSERT INTO recurring_expenses
+       (workspace_id, group_id, created_by, paid_by, title, description, amount, base_amount,
+        currency, exchange_rate_to_inr, category, split_method, variable_amount, frequency,
+        start_date, end_date, anchor_month, anchor_day, next_occurrence_date, status)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+      [
+        req.account.workspace_id, groupId, req.account.person_id, paidBy, title, description || null,
+        amount, baseAmount, currency, exchangeRateToInr, category, splitMethod,
+        body.variableAmount, frequency, startDate, endDate, anchorMonth, anchorDay, startDate,
+      ]
+    );
+    for (const participant of participants) {
+      await connection.execute(
+        `INSERT INTO recurring_expense_participants(template_id, person_id, share_percent)
+         VALUES(?, ?, ?)`,
+        [template.insertId, participant.personId, splitMethod === 'custom' ? participant.sharePercent : null]
+      );
+    }
+    await connection.commit();
+    inTransaction = false;
+    res.status(201).json({ ok: true, id: template.insertId, message: 'Recurring expense created.' });
+  } catch (error) {
+    if (inTransaction) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Recurring expense rollback failed', rollbackError);
+      }
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Could not save this recurring expense.' });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.put('/api/recurring-expenses/:templateId', async (req, res) => {
+  const templateId = Number(req.params.templateId);
+  if (!Number.isInteger(templateId) || templateId <= 0) {
+    return res.status(400).json({ error: 'Recurring expense ID must be a positive integer.' });
+  }
+  const body = req.body || {};
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+  const description = typeof body.description === 'string' ? body.description.trim() : '';
+  const category = typeof body.category === 'string' ? body.category.trim() : '';
+  const groupId = Number(body.groupId);
+  const paidBy = Number(body.paidBy);
+  const amount = Number(body.amount);
+  const exchangeRateToInr = Number(body.exchangeRateToInr);
+  const baseAmount = Math.round(amount * exchangeRateToInr * 100) / 100;
+  const participantInput = Array.isArray(body.participants) ? body.participants : [];
+  const participants = participantInput.map(participant => ({
+    personId: Number(participant?.personId),
+    sharePercent: participant?.sharePercent === null || participant?.sharePercent === undefined
+      ? null
+      : Number(participant.sharePercent),
+  }));
+  const participantIds = participants.map(participant => participant.personId);
+  const frequency = body.frequency;
+  const splitMethod = body.splitMethod;
+  const currency = body.currency;
+  let startDate;
+  let endDate;
+  try {
+    startDate = dateOnly(body.startDate);
+    endDate = body.endDate ? dateOnly(body.endDate) : null;
+  } catch {
+    return res.status(400).json({ error: 'Enter valid recurring expense start and end dates.' });
+  }
+  const customTotal = participants.reduce((sum, participant) => sum + Number(participant.sharePercent || 0), 0);
+  if (!title || title.length > 255 || description.length > 2000 ||
+      !category || category.length > 100 ||
+      !Number.isInteger(groupId) || groupId <= 0 ||
+      !Number.isInteger(paidBy) || paidBy <= 0 ||
+      !Number.isFinite(amount) || amount <= 0 || amount > 9999999999 ||
+      !Number.isFinite(exchangeRateToInr) || exchangeRateToInr <= 0 ||
+      exchangeRateToInr >= 10000000 || baseAmount > 9999999999.99 ||
+      !Number.isSafeInteger(Math.round(amount * 100)) ||
+      !Number.isSafeInteger(Math.round(baseAmount * 100)) || baseAmount <= 0 ||
+      !['INR', 'USD'].includes(currency) ||
+      (currency === 'INR' && Math.abs(exchangeRateToInr - 1) > 0.000001) ||
+      !['weekly', 'monthly', 'quarterly', 'yearly'].includes(frequency) ||
+      !['equal', 'custom'].includes(splitMethod) ||
+      typeof body.variableAmount !== 'boolean' ||
+      !participantIds.length || participantIds.some(id => !Number.isInteger(id) || id <= 0) ||
+      new Set(participantIds).size !== participantIds.length ||
+      (endDate && endDate < startDate) ||
+      (splitMethod === 'custom' && (
+        participants.some(participant => !Number.isFinite(participant.sharePercent) || participant.sharePercent <= 0) ||
+        Math.abs(customTotal - 100) > 0.01
+      ))) {
+    return res.status(400).json({ error: 'Check the title, group, amount, dates, split, currency, and participants.' });
+  }
+
+  let connection;
+  let inTransaction = false;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    inTransaction = true;
+    const [existing] = await connection.execute(
+      `SELECT * FROM recurring_expenses
+       WHERE id = ? AND workspace_id = ? FOR UPDATE`,
+      [templateId, req.account.workspace_id]
+    );
+    if (!existing.length) {
+      await connection.rollback();
+      inTransaction = false;
+      return res.status(404).json({ error: 'Recurring expense not found.' });
+    }
+    const old = existing[0];
+    if (old.status === 'cancelled') {
+      await connection.rollback();
+      inTransaction = false;
+      return res.status(409).json({ error: 'Cancelled recurring expenses cannot be edited.' });
+    }
+    const [groups] = await connection.execute(
+      'SELECT id FROM `groups` WHERE id = ? AND workspace_id = ? FOR UPDATE',
+      [groupId, req.account.workspace_id]
+    );
+    if (!groups.length) {
+      await connection.rollback();
+      inTransaction = false;
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+    const idsToCheck = [...new Set([paidBy, ...participantIds])];
+    const [members] = await connection.execute(
+      `SELECT gm.person_id AS id FROM group_members gm
+       JOIN people p ON p.id = gm.person_id AND p.workspace_id = ?
+       WHERE gm.group_id = ? AND gm.person_id IN (${idsToCheck.map(() => '?').join(',')})`,
+      [req.account.workspace_id, groupId, ...idsToCheck]
+    );
+    if (members.length !== idsToCheck.length) {
+      await connection.rollback();
+      inTransaction = false;
+      return res.status(400).json({ error: 'Choose a group member as payer and participants.' });
+    }
+
+    const anchorMonth = Number(startDate.slice(5, 7));
+    const anchorDay = Number(startDate.slice(8, 10));
+    const today = new Date().toISOString().slice(0, 10);
+    let nextDate = old.start_date === startDate && old.frequency === frequency && old.next_occurrence_date
+      ? dateOnOrAfter(old.next_occurrence_date, frequency, anchorMonth, anchorDay, today)
+      : dateOnOrAfter(startDate, frequency, anchorMonth, anchorDay, today);
+    const completed = endDate && nextDate > endDate;
+    nextDate = completed ? null : nextDate;
+    const status = old.status === 'paused' ? 'paused' : completed ? 'completed' : 'active';
+    await connection.execute(
+      `UPDATE recurring_expenses SET group_id = ?, paid_by = ?, title = ?, description = ?,
+       amount = ?, base_amount = ?, currency = ?, exchange_rate_to_inr = ?, category = ?,
+       split_method = ?, variable_amount = ?, frequency = ?, start_date = ?, end_date = ?,
+       anchor_month = ?, anchor_day = ?, next_occurrence_date = ?, status = ?
+       WHERE id = ?`,
+      [
+        groupId, paidBy, title, description || null, amount, baseAmount, currency,
+        exchangeRateToInr, category, splitMethod, body.variableAmount, frequency, startDate,
+        endDate, anchorMonth, anchorDay, nextDate, status, templateId,
+      ]
+    );
+    await connection.execute('DELETE FROM recurring_expense_participants WHERE template_id = ?', [templateId]);
+    for (const participant of participants) {
+      await connection.execute(
+        `INSERT INTO recurring_expense_participants(template_id, person_id, share_percent)
+         VALUES(?, ?, ?)`,
+        [templateId, participant.personId, splitMethod === 'custom' ? participant.sharePercent : null]
+      );
+    }
+    await connection.commit();
+    inTransaction = false;
+    res.json({ ok: true, message: 'Recurring expense updated.' });
+  } catch (error) {
+    if (inTransaction) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Recurring expense rollback failed', rollbackError);
+      }
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Could not update this recurring expense.' });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.patch('/api/recurring-expenses/:templateId/status', async (req, res) => {
+  const templateId = Number(req.params.templateId);
+  const status = req.body?.status;
+  if (!Number.isInteger(templateId) || templateId <= 0 || !['active', 'paused'].includes(status)) {
+    return res.status(400).json({ error: 'Choose active or paused for a valid recurring expense.' });
+  }
+  try {
+    const result = await q(
+      `UPDATE recurring_expenses SET status = ?
+       WHERE id = ? AND workspace_id = ? AND status IN ('active', 'paused')`,
+      [status, templateId, req.account.workspace_id]
+    );
+    if (!result.affectedRows) {
+      const [templates] = await q(
+        'SELECT id FROM recurring_expenses WHERE id = ? AND workspace_id = ?',
+        [templateId, req.account.workspace_id]
+      );
+      return res.status(templates.length ? 409 : 404).json({
+        error: templates.length ? 'Completed or cancelled recurring expenses cannot be resumed.' : 'Recurring expense not found.',
+      });
+    }
+    res.json({ ok: true, message: status === 'paused' ? 'Recurring expense paused.' : 'Recurring expense resumed.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not update recurring expense status.' });
+  }
+});
+
+app.delete('/api/recurring-expenses/:templateId', async (req, res) => {
+  const templateId = Number(req.params.templateId);
+  if (!Number.isInteger(templateId) || templateId <= 0) {
+    return res.status(400).json({ error: 'Recurring expense ID must be a positive integer.' });
+  }
+  try {
+    const result = await q(
+      `UPDATE recurring_expenses SET status = 'cancelled', next_occurrence_date = NULL
+       WHERE id = ? AND workspace_id = ? AND status != 'cancelled'`,
+      [templateId, req.account.workspace_id]
+    );
+    if (!result.affectedRows) return res.status(404).json({ error: 'Recurring expense not found.' });
+    res.json({ ok: true, message: 'Recurring expense deactivated.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not deactivate this recurring expense.' });
+  }
+});
+
+app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confirm', async (req, res) => {
+  const templateId = Number(req.params.templateId);
+  const amount = Number(req.body?.amount);
+  let occurrenceDate;
+  try {
+    occurrenceDate = dateOnly(req.params.occurrenceDate);
+  } catch {
+    return res.status(400).json({ error: 'Enter a valid occurrence date.' });
+  }
+  if (!Number.isInteger(templateId) || templateId <= 0 ||
+      !Number.isFinite(amount) || amount <= 0 || amount > 9999999999 ||
+      !Number.isSafeInteger(Math.round(amount * 100))) {
+    return res.status(400).json({ error: 'Enter a positive actual amount.' });
+  }
+
+  let connection;
+  let inTransaction = false;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    inTransaction = true;
+    const [templates] = await connection.execute(
+      `SELECT * FROM recurring_expenses
+       WHERE id = ? AND workspace_id = ? AND variable_amount = TRUE FOR UPDATE`,
+      [templateId, req.account.workspace_id]
+    );
+    if (!templates.length) {
+      await connection.rollback();
+      inTransaction = false;
+      return res.status(404).json({ error: 'Variable recurring expense not found.' });
+    }
+    const template = templates[0];
+    const [occurrences] = await connection.execute(
+      `SELECT id, status FROM recurring_expense_occurrences
+       WHERE template_id = ? AND occurrence_date = ? FOR UPDATE`,
+      [templateId, occurrenceDate]
+    );
+    if (!occurrences.length || occurrences[0].status !== 'needs_confirmation') {
+      await connection.rollback();
+      inTransaction = false;
+      return res.status(409).json({ error: 'This occurrence is already handled or does not need confirmation.' });
+    }
+    const [participants] = await connection.execute(
+      `SELECT person_id, share_percent FROM recurring_expense_participants
+       WHERE template_id = ? ORDER BY person_id`,
+      [templateId]
+    );
+    const baseAmount = Math.round(amount * Number(template.exchange_rate_to_inr) * 100) / 100;
+    if (!Number.isSafeInteger(Math.round(baseAmount * 100)) || baseAmount <= 0 || baseAmount > 9999999999.99) {
+      throw new Error('The confirmed amount could not be converted to the stored base currency.');
+    }
+    const expenseId = await createExpenseAndSplits(
+      connection,
+      template,
+      occurrenceDate,
+      amount,
+      baseAmount,
+      participants
+    );
+    await connection.commit();
+    inTransaction = false;
+    res.status(201).json({ ok: true, expenseId, message: 'Recurring expense recorded.' });
+  } catch (error) {
+    if (inTransaction) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Recurring occurrence confirmation rollback failed', rollbackError);
+      }
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Could not record this recurring expense.' });
+  } finally {
+    connection?.release();
+  }
+});
+
 app.get('/api/expenses', async (req, res) => {
   const groupId = req.query.groupId === undefined ? null : Number(req.query.groupId);
   if (groupId !== null && (!Number.isInteger(groupId) || groupId <= 0)) {
@@ -1700,7 +2266,12 @@ app.use((error, _req, res, next) => {
 
 const port = process.env.PORT || 5000;
 init()
-  .then(() => app.listen(port, '0.0.0.0', () => console.log(`GroupBuk API listening on ${port}`)))
+  .then(() => {
+    void runDueRecurringExpenses();
+    const recurringInterval = setInterval(() => { void runDueRecurringExpenses(); }, 60 * 1000);
+    recurringInterval.unref();
+    app.listen(port, '0.0.0.0', () => console.log(`GroupBuk API listening on ${port}`));
+  })
   .catch(error => {
     console.error('Database startup failed', error);
     process.exit(1);

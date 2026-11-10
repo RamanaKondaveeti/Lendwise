@@ -51,6 +51,9 @@ For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME` (normally `lend
 - Group-level net balances use expense shares and linked or group-assigned settlements; amounts are stored in INR and can be displayed in INR or converted to USD using the latest available rate from Frankfurter
 - Suggested settlements are calculated independently per group in stored INR using an exact minimum-transfer search; the currency selector affects display and form input conversion, not the underlying balance calculation
 - Record full or custom partial expense-share payments individually, or review and confirm suggested payments to clear your own balance
+- Recurring expense templates retain their configured INR/USD amount and conversion rate; generated expenses are stored in the existing INR base and use the same split, balance, settlement, and analytics rules
+- The backend checks for due recurring expenses at startup and once per minute. A database row lock plus a unique `(template_id, occurrence_date)` key makes generation transaction-safe and safe to retry; variable bills remain pending until an actual amount is confirmed
+- Occurrence history is retained with the template and links each generated expense to its scheduled date. Pausing or deactivating a template does not remove expenses already generated
 
 ## Before customer release
 

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownLeft,
   ArrowLeftRight,
   ArrowRight,
   ArrowUpRight,
   CalendarDays,
+  CalendarClock,
   CarFront,
   Check,
   Clapperboard,
@@ -20,9 +21,12 @@ import {
   LogOut,
   Mountain,
   Plus,
+  Pause,
+  Play,
   Pencil,
   Plane,
   ReceiptText,
+  Repeat,
   Search,
   Trash2,
   Users,
@@ -78,6 +82,11 @@ const categoryStyles = {
   Utilities: 'utilities',
 }
 const chartColors = ['#4f8b5b', '#83ad7d', '#a8c797', '#c4d8ac', '#e3b46b', '#d98c72', '#9d83b8', '#6f9fa4', '#d08fba', '#8e9b91']
+const equalSharePercentages = ids => {
+  const base = Math.floor(10000 / Math.max(ids.length, 1))
+  const remainder = 10000 % Math.max(ids.length, 1)
+  return Object.fromEntries(ids.map((id, index) => [id, (base + (index < remainder ? 1 : 0)) / 100]))
+}
 const monthName = value => new Intl.DateTimeFormat('en-US', {
   month: 'long',
   year: 'numeric',
@@ -257,6 +266,157 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onE
   )
 }
 
+function RecurringExpenseFields({ groups, currency, exchangeRate, initial, currentUserId }) {
+  const [groupId, setGroupId] = useState(Number(initial?.group_id || groups.find(group => group.members?.length)?.id || ''))
+  const [splitMethod, setSplitMethod] = useState(initial?.split_method || 'equal')
+  const [configuredCurrency, setConfiguredCurrency] = useState(initial?.currency || currency)
+  const initialGroup = groups.find(group => Number(group.id) === groupId)
+  const [participantIds, setParticipantIds] = useState(
+    initial?.participants?.map(participant => Number(participant.person_id)) ||
+      initialGroup?.members?.map(person => person.id) || []
+  )
+  const [payerId, setPayerId] = useState(Number(initial?.paid_by || currentUserId || initialGroup?.members?.[0]?.id || ''))
+  const [sharePercentages, setSharePercentages] = useState(() => Object.fromEntries(
+    (initialGroup?.members || []).map(person => {
+      const saved = initial?.participants?.find(participant => Number(participant.person_id) === person.id)?.share_percent
+      return [person.id, saved === null || saved === undefined ? equalSharePercentages(initialGroup.members.map(member => member.id))[person.id] : Number(saved)]
+    })
+  ))
+  const selectedGroup = groups.find(group => Number(group.id) === groupId)
+  const groupMembers = selectedGroup?.members || []
+  const savedRate = initial && configuredCurrency === initial.currency
+    ? Number(initial.exchange_rate_to_inr)
+    : null
+  const exchangeRateToInr = configuredCurrency === 'INR'
+    ? 1
+    : savedRate || (Number.isFinite(exchangeRate) && exchangeRate > 0 ? 1 / exchangeRate : null)
+  const selectedPercentageTotal = participantIds.reduce(
+    (total, personId) => total + Number(sharePercentages[personId] || 0),
+    0
+  )
+
+  return (
+    <>
+      <label>Expense title<input required name="title" maxLength="255" defaultValue={initial?.title || ''} placeholder="e.g. Monthly rent" /></label>
+      <label>Description<textarea name="description" maxLength="2000" defaultValue={initial?.description || ''} placeholder="Add details about this recurring expense" /></label>
+      <label>Group
+        <select name="groupId" required value={groupId} onChange={event => {
+          const nextGroupId = Number(event.target.value)
+          const members = groups.find(group => Number(group.id) === nextGroupId)?.members || []
+          setGroupId(nextGroupId)
+          setParticipantIds(members.map(person => person.id))
+          setPayerId(members.some(person => person.id === Number(currentUserId))
+            ? Number(currentUserId)
+            : Number(members[0]?.id || ''))
+          setSharePercentages(equalSharePercentages(members.map(person => person.id)))
+        }}>
+          {groups.filter(group => group.members?.length || Number(group.id) === groupId).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}
+        </select>
+      </label>
+      <label>Paid by
+        <select name="paidBy" required value={payerId} onChange={event => setPayerId(Number(event.target.value))}>
+          {groupMembers.map(person => <option value={person.id} key={person.id}>{person.name}</option>)}
+        </select>
+      </label>
+      <div className="form-row">
+        <label>Expected amount
+          <input name="amount" type="number" min="0.01" step="0.01" defaultValue={initial?.amount || ''} placeholder="0.00" required disabled={configuredCurrency === 'USD' && !Number.isFinite(exchangeRateToInr)} />
+        </label>
+        <label>Currency
+          <select name="currency" value={configuredCurrency} onChange={event => setConfiguredCurrency(event.target.value)}>
+            <option value="INR">INR</option>
+            <option value="USD">USD</option>
+          </select>
+        </label>
+      </div>
+      <input type="hidden" name="exchangeRateToInr" value={exchangeRateToInr || ''} />
+      {configuredCurrency === 'USD' && !Number.isFinite(exchangeRateToInr) &&
+        <p className="form-hint">A current USD exchange rate is required to save this recurring expense.</p>}
+      <label>Category
+        <select name="category" defaultValue={initial?.category || 'Other'}>
+          {expenseCategories.map(category => <option key={category}>{category}</option>)}
+        </select>
+      </label>
+      <label>Frequency
+        <select name="frequency" defaultValue={initial?.frequency || 'monthly'}>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="quarterly">Quarterly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </label>
+      <div className="form-row">
+        <label>Start date<input name="startDate" type="date" defaultValue={initial?.start_date?.slice(0, 10) || new Date().toISOString().slice(0, 10)} required /></label>
+        <label>End date (optional)<input name="endDate" type="date" defaultValue={initial?.end_date?.slice(0, 10) || ''} /></label>
+      </div>
+      <label className="recurring-toggle">
+        <input type="checkbox" name="variableAmount" defaultChecked={Boolean(initial?.variable_amount)} />
+        <span>Variable amount</span>
+        <small>Ask for the actual bill amount on each due date.</small>
+      </label>
+      <label>Split method
+        <select name="splitMethod" value={splitMethod} onChange={event => setSplitMethod(event.target.value)}>
+          <option value="equal">Split equally</option>
+          <option value="custom">Custom percentages</option>
+        </select>
+      </label>
+      <fieldset className="participant-field">
+        <legend>Participants</legend>
+        {groupMembers.length ? (
+          <div className="participant-list recurring-participant-list">
+            {groupMembers.map(person => (
+              <div className="recurring-participant-row" key={person.id}>
+                <label>
+                  <input
+                    type="checkbox"
+                    name="participantIds"
+                    value={person.id}
+                    checked={participantIds.includes(person.id)}
+                    onChange={event => {
+                      setParticipantIds(selected => event.target.checked
+                        ? [...selected, person.id]
+                        : selected.filter(id => id !== person.id))
+                      if (event.target.checked) {
+                        setSharePercentages(current => ({
+                          ...current,
+                          [person.id]: current[person.id] || 0.01,
+                        }))
+                      }
+                    }}
+                  />
+                  <span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span>
+                  <span>{person.name}</span>
+                </label>
+                {splitMethod === 'custom' && participantIds.includes(person.id) && (
+                  <span className="recurring-percent-input">
+                    <input
+                      type="number"
+                      min="0.01"
+                      max="100"
+                      step="0.01"
+                      name={`sharePercent-${person.id}`}
+                      value={sharePercentages[person.id] ?? ''}
+                      aria-label={`${person.name} split percentage`}
+                      onChange={event => setSharePercentages(current => ({ ...current, [person.id]: event.target.value }))}
+                      required
+                    />
+                    <small>%</small>
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : <p className="form-hint">This group needs members before a recurring expense can be created.</p>}
+      </fieldset>
+      {splitMethod === 'custom' && (
+        <p className={`form-hint ${Math.abs(selectedPercentageTotal - 100) > 0.01 ? 'recurring-share-invalid' : ''}`}>
+          Selected shares total {selectedPercentageTotal.toFixed(2)}%; they must total 100%.
+        </p>
+      )}
+    </>
+  )
+}
+
 function SettlementSuggestions({ suggestions, formatMoney, onRecordSettlement, disabled }) {
   return (
     <section className="panel settlement-suggestions">
@@ -428,6 +588,12 @@ function App() {
   const [activity, setActivity] = useState([])
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityLoaded, setActivityLoaded] = useState(false)
+  const [recurringTemplates, setRecurringTemplates] = useState([])
+  const [recurringOccurrences, setRecurringOccurrences] = useState([])
+  const [recurringLoading, setRecurringLoading] = useState(false)
+  const [recurringEditing, setRecurringEditing] = useState(null)
+  const [occurrenceToConfirm, setOccurrenceToConfirm] = useState(null)
+  const recurringNoticeKeys = useRef(new Set())
   const [reloadKey, setReloadKey] = useState(0)
   const [selectedMonth, setSelectedMonth] = useState(() => monthValue(new Date()))
   const [currency, setCurrency] = useState(() => window.localStorage.getItem('groupbuk_currency') === 'USD' ? 'USD' : 'INR')
@@ -442,6 +608,13 @@ function App() {
 
   const refreshWorkspaces = async () => {
     setWorkspaces(await request('/api/workspaces'))
+  }
+
+  const refreshRecurring = async () => {
+    const result = await request('/api/recurring-expenses')
+    setRecurringTemplates(result.templates)
+    setRecurringOccurrences(result.occurrences)
+    return result
   }
 
   useEffect(() => {
@@ -541,6 +714,52 @@ function App() {
       })
     return () => { active = false }
   }, [tab, selectedGroupId, reloadKey])
+
+  useEffect(() => {
+    if (!authUser || (tab !== 'Overview' && tab !== 'Recurring')) return undefined
+    let active = true
+    const loadRecurring = async () => {
+      setRecurringLoading(true)
+      try {
+        const result = await request('/api/recurring-expenses')
+        if (!active) return
+        setRecurringTemplates(result.templates)
+        setRecurringOccurrences(result.occurrences)
+        const recentlyGenerated = result.occurrences.filter(occurrence =>
+          occurrence.status === 'needs_confirmation' ||
+          (occurrence.status === 'generated' &&
+            Date.now() - new Date(occurrence.generated_at).getTime() < 24 * 60 * 60 * 1000)
+        )
+        const newOccurrences = recentlyGenerated.filter(occurrence => {
+          const key = `${authUser.workspaceId}:${occurrence.id}`
+          if (recurringNoticeKeys.current.has(key)) return false
+          recurringNoticeKeys.current.add(key)
+          return true
+        })
+        if (newOccurrences.some(occurrence => occurrence.status === 'generated')) {
+          await refresh()
+          if (!active) return
+          setReloadKey(key => key + 1)
+        }
+        if (!active) return
+        if (newOccurrences.some(occurrence => occurrence.status === 'needs_confirmation')) {
+          notify('A variable recurring expense needs its actual amount confirmed.')
+        } else if (newOccurrences.some(occurrence => occurrence.status === 'generated')) {
+          notify('A recurring expense was generated and added to your balances.')
+        }
+      } catch (error) {
+        if (active) setNotice(error.message)
+      } finally {
+        if (active) setRecurringLoading(false)
+      }
+    }
+    loadRecurring()
+    const timer = window.setInterval(loadRecurring, 60 * 1000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [tab, authUser?.workspaceId])
 
   useEffect(() => {
     window.localStorage.setItem('groupbuk_currency', currency)
@@ -681,6 +900,47 @@ function App() {
     setModal('expense-category')
   }
 
+  function openRecurringEditor(template = null) {
+    setRecurringEditing(template)
+    setModal(template ? 'recurring-edit' : 'recurring')
+  }
+
+  function openOccurrenceConfirmation(occurrence) {
+    setOccurrenceToConfirm(occurrence)
+    setModal('recurring-confirm')
+  }
+
+  async function setRecurringStatus(template, status) {
+    setBusy(true)
+    try {
+      const result = await request(`/api/recurring-expenses/${template.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      await refreshRecurring()
+      notify(result.message)
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deactivateRecurring(template) {
+    if (!window.confirm(`Deactivate “${template.title}”? Its generated expense history will remain.`)) return
+    setBusy(true)
+    try {
+      const result = await request(`/api/recurring-expenses/${template.id}`, { method: 'DELETE' })
+      await refreshRecurring()
+      notify(result.message)
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function createSettlementPlan() {
     const userBalance = Math.round(Number(currentUser?.balance || 0) * 100)
     if (!userBalance) return []
@@ -796,6 +1056,9 @@ function App() {
       setAuthUser(null)
       setData(null)
       setWorkspaces([])
+      setRecurringTemplates([])
+      setRecurringOccurrences([])
+      recurringNoticeKeys.current.clear()
       setAuthMode('login')
       setAuthError('')
       setAuthNotice('')
@@ -820,6 +1083,9 @@ function App() {
       setWorkspaceMenuOpen(false)
       setActivity([])
       setActivityLoaded(false)
+      setRecurringTemplates([])
+      setRecurringOccurrences([])
+      recurringNoticeKeys.current.clear()
       setReloadKey(key => key + 1)
       notify(`Switched to ${account.workspaceName}.`)
     } catch (error) {
@@ -908,6 +1174,11 @@ function App() {
       return
     }
     const form = new FormData(event.currentTarget)
+    if (['recurring', 'recurring-edit'].includes(modal) &&
+        (!Number.isFinite(Number(form.get('exchangeRateToInr'))) || Number(form.get('exchangeRateToInr')) <= 0)) {
+      notify('A current exchange rate is required before saving this recurring expense.')
+      return
+    }
     let url
     let payload
     let successMessage
@@ -960,6 +1231,36 @@ function App() {
       url = `/api/expenses/${expenseToEdit.id}/category`
       payload = { category: form.get('category') }
       successMessage = 'Expense category updated.'
+    } else if (modal === 'recurring' || modal === 'recurring-edit') {
+      const splitMethod = form.get('splitMethod')
+      const participantIds = form.getAll('participantIds').map(Number)
+      url = modal === 'recurring-edit'
+        ? `/api/recurring-expenses/${recurringEditing.id}`
+        : '/api/recurring-expenses'
+      payload = {
+        title: form.get('title'),
+        description: form.get('description'),
+        groupId: Number(form.get('groupId')),
+        paidBy: Number(form.get('paidBy')),
+        amount: Number(form.get('amount')),
+        currency: form.get('currency'),
+        exchangeRateToInr: Number(form.get('exchangeRateToInr')),
+        category: form.get('category'),
+        splitMethod,
+        participants: participantIds.map(personId => ({
+          personId,
+          sharePercent: splitMethod === 'custom' ? Number(form.get(`sharePercent-${personId}`)) : null,
+        })),
+        variableAmount: form.get('variableAmount') === 'on',
+        frequency: form.get('frequency'),
+        startDate: form.get('startDate'),
+        endDate: form.get('endDate') || null,
+      }
+      successMessage = modal === 'recurring-edit' ? 'Recurring expense updated.' : 'Recurring expense created.'
+    } else if (modal === 'recurring-confirm') {
+      url = `/api/recurring-expenses/${occurrenceToConfirm.template_id}/occurrences/${encodeURIComponent(occurrenceToConfirm.occurrence_date.slice(0, 10))}/confirm`
+      payload = { amount: Number(form.get('amount')) }
+      successMessage = 'Recurring expense recorded.'
     } else if (modal === 'group') {
       url = '/api/groups'
       payload = {
@@ -982,8 +1283,13 @@ function App() {
 
     setBusy(true)
     try {
+      const submittedModal = modal
       const result = await request(url, {
-        method: modal === 'members' ? 'PUT' : modal === 'expense-category' ? 'PATCH' : 'POST',
+        method: submittedModal === 'members' || submittedModal === 'recurring-edit'
+          ? 'PUT'
+          : submittedModal === 'expense-category'
+            ? 'PATCH'
+            : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
@@ -991,6 +1297,9 @@ function App() {
       else setModal('')
       await refresh()
       setReloadKey(key => key + 1)
+      if (['recurring', 'recurring-edit', 'recurring-confirm'].includes(submittedModal)) {
+        await refreshRecurring()
+      }
       notify(result.message || successMessage)
     } catch (error) {
       notify(error.message)
@@ -1128,10 +1437,12 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav>
-          {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
+          {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [CalendarClock, 'Recurring'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
             <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => setTab(name)}>
               <Icon size={18} />{name}
               {name === 'Activity' && <span className="nav-count">{data.activityCount || 0}</span>}
+              {name === 'Recurring' && recurringOccurrences.some(occurrence => occurrence.status === 'needs_confirmation') &&
+                <span className="nav-count">{recurringOccurrences.filter(occurrence => occurrence.status === 'needs_confirmation').length}</span>}
             </button>
           ))}
           <button className="nav-item settle-up-nav" type="button" aria-label="Settle up" title="Settle up" disabled={!Number(currentUser?.balance)} onClick={openSettleAll}>
@@ -1204,6 +1515,7 @@ function App() {
                 {tab === 'Activity' && 'Every expense recorded across your groups.'}
                 {tab === 'Balances' && 'See where everyone stands and record payments.'}
                 {tab === 'Group' && 'Expenses and totals for this group.'}
+                {tab === 'Recurring' && 'Schedule shared expenses and review generated bills.'}
               </p>
             </div>
             <div className="welcome-actions">
@@ -1353,6 +1665,40 @@ function App() {
                   <button className="view-all" onClick={() => setTab('Activity')}>View all activity <ArrowRight size={14} /></button>
                 </div>
                 <div className="right-column">
+                  <div className="panel recurring-upcoming-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <div className="section-title">Upcoming recurring</div>
+                        <div className="section-subtitle">Next scheduled group expenses</div>
+                      </div>
+                      <button className="more-button" aria-label="View recurring expenses" onClick={() => setTab('Recurring')}><ArrowRight size={15} /></button>
+                    </div>
+                    {recurringTemplates.filter(template => template.status === 'active' && template.next_occurrence_date).length ? (
+                      <div className="recurring-upcoming-list">
+                        {recurringTemplates
+                          .filter(template => template.status === 'active' && template.next_occurrence_date)
+                          .slice(0, 3)
+                          .map(template => (
+                            <article className="recurring-upcoming-row" key={template.id}>
+                              <span className="recurring-upcoming-icon"><Repeat size={15} /></span>
+                              <span className="recurring-upcoming-copy">
+                                <b>{template.title}</b>
+                                <small>{template.group_name} · Due {date(template.next_occurrence_date)}</small>
+                              </span>
+                              <strong>{new Intl.NumberFormat(template.currency === 'INR' ? 'en-IN' : 'en-US', {
+                                style: 'currency',
+                                currency: template.currency,
+                              }).format(Number(template.amount))}</strong>
+                            </article>
+                          ))}
+                      </div>
+                    ) : (
+                      <div className="recurring-upcoming-empty">
+                        {recurringLoading ? 'Loading schedule…' : 'No upcoming recurring expenses.'}
+                        <button type="button" onClick={() => setTab('Recurring')}>Set up a schedule</button>
+                      </div>
+                    )}
+                  </div>
                   <div className="panel groups-panel">
                     <div className="panel-heading">
                       <div>
@@ -1402,6 +1748,87 @@ function App() {
                 </div>
               </section>
             </>
+          )}
+
+          {tab === 'Recurring' && (
+            <div className="recurring-page">
+              <section className="panel screen-panel recurring-templates-panel">
+                <div className="panel-heading screen-panel-heading">
+                  <div>
+                    <div className="section-title">Recurring expense templates <span className="title-count">{recurringTemplates.length}</span></div>
+                    <div className="section-subtitle">Scheduled expenses are added to balances and analytics only after they are generated.</div>
+                  </div>
+                  <button className="button button-dark" disabled={!groups.some(group => group.members?.length)} onClick={() => openRecurringEditor()}>
+                    <Plus size={15} />Create recurring
+                  </button>
+                </div>
+                {recurringLoading && !recurringTemplates.length
+                  ? <div className="empty"><LoaderCircle className="loading-icon" size={20} />Loading recurring expenses…</div>
+                  : recurringTemplates.length
+                    ? <div className="recurring-template-list">
+                      {recurringTemplates.map(template => (
+                        <article className="recurring-template-card" key={template.id}>
+                          <div className="recurring-template-main">
+                            <span className="recurring-template-icon"><Repeat size={17} /></span>
+                            <div>
+                              <b>{template.title}</b>
+                              <p>{template.description || template.category} · {template.group_name}</p>
+                              <span>{template.participants.map(participant => participant.name).join(', ')}</span>
+                            </div>
+                          </div>
+                          <div className="recurring-template-meta">
+                            <b>{new Intl.NumberFormat(template.currency === 'INR' ? 'en-IN' : 'en-US', {
+                              style: 'currency',
+                              currency: template.currency,
+                            }).format(Number(template.amount))}{template.variable_amount ? ' expected' : ''}</b>
+                            <span>{template.frequency[0].toUpperCase() + template.frequency.slice(1)} · {template.split_method === 'equal' ? 'Equal split' : 'Custom split'}</span>
+                            <span>{template.next_occurrence_date ? `Next · ${date(template.next_occurrence_date)}` : 'No future occurrence'}</span>
+                          </div>
+                          <span className={`recurring-status recurring-status-${template.status}`}>{template.status}</span>
+                          <div className="recurring-template-actions">
+                            {template.status !== 'cancelled' &&
+                              <button type="button" className="button button-light" onClick={() => openRecurringEditor(template)}><Pencil size={14} />Edit</button>}
+                            {template.status === 'active' &&
+                              <button type="button" className="button button-light" disabled={busy} onClick={() => setRecurringStatus(template, 'paused')}><Pause size={14} />Pause</button>}
+                            {template.status === 'paused' &&
+                              <button type="button" className="button button-light" disabled={busy} onClick={() => setRecurringStatus(template, 'active')}><Play size={14} />Resume</button>}
+                            {template.status !== 'cancelled' &&
+                              <button type="button" className="recurring-delete-button" disabled={busy} aria-label={`Deactivate ${template.title}`} onClick={() => deactivateRecurring(template)}><Trash2 size={15} /></button>}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                    : <div className="empty">No recurring expenses yet. Create a template to schedule shared bills.</div>}
+              </section>
+
+              <section className="panel screen-panel recurring-history-panel">
+                <div className="panel-heading screen-panel-heading">
+                  <div>
+                    <div className="section-title">Occurrence history <span className="title-count">{recurringOccurrences.length}</span></div>
+                    <div className="section-subtitle">Generated expenses and bills waiting for actual amounts.</div>
+                  </div>
+                </div>
+                {recurringOccurrences.length ? (
+                  <div className="recurring-occurrence-list">
+                    {recurringOccurrences.map(occurrence => (
+                      <article className="recurring-occurrence-row" key={occurrence.id}>
+                        <div>
+                          <b>{occurrence.title}</b>
+                          <span>{occurrence.group_name} · Due {date(occurrence.occurrence_date)}</span>
+                        </div>
+                        <strong>{new Intl.NumberFormat(occurrence.currency === 'INR' ? 'en-IN' : 'en-US', {
+                          style: 'currency',
+                          currency: occurrence.currency,
+                        }).format(Number(occurrence.status === 'generated' ? occurrence.entered_amount : occurrence.expected_amount))}</strong>
+                        {occurrence.status === 'needs_confirmation'
+                          ? <button type="button" className="button button-dark" onClick={() => openOccurrenceConfirmation(occurrence)}>Enter actual amount</button>
+                          : <span className="recurring-status recurring-status-generated">Generated</span>}
+                      </article>
+                    ))}
+                  </div>
+                ) : <div className="empty">No occurrences generated yet.</div>}
+              </section>
+            </div>
           )}
 
           {tab === 'Groups' && (
@@ -1616,7 +2043,7 @@ function App() {
         <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
           <form className="modal" onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
+              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'recurring' ? 'Create recurring expense' : modal === 'recurring-edit' ? 'Edit recurring expense' : modal === 'recurring-confirm' ? 'Confirm recurring amount' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
@@ -1725,6 +2152,32 @@ function App() {
               </>
             )}
 
+            {(modal === 'recurring' || modal === 'recurring-edit') && (
+              <>
+                <p className="form-hint">Fixed expenses are generated automatically. Variable bills will wait for confirmation before affecting analytics and balances.</p>
+                <RecurringExpenseFields
+                  key={recurringEditing?.id || 'new-recurring'}
+                  groups={groups}
+                  currency={currency}
+                  exchangeRate={exchangeRate}
+                  initial={recurringEditing}
+                  currentUserId={data.currentUserId}
+                />
+              </>
+            )}
+
+            {modal === 'recurring-confirm' && occurrenceToConfirm && (
+              <>
+                <p className="form-hint">
+                  Enter the actual {occurrenceToConfirm.currency} bill for “{occurrenceToConfirm.title}” due {date(occurrenceToConfirm.occurrence_date)}.
+                  This creates the expense and splits only after confirmation.
+                </p>
+                <label>Actual amount ({occurrenceToConfirm.currency})
+                  <input name="amount" type="number" min="0.01" step="0.01" defaultValue={occurrenceToConfirm.expected_amount} required />
+                </label>
+              </>
+            )}
+
             {modal === 'group' && (
               <>
                 <label>Group name<input required name="name" maxLength="255" placeholder="Enter a group name" /></label>
@@ -1771,7 +2224,7 @@ function App() {
 
             {!(modal === 'invite' && manualInviteLink) && (
               <button className="button button-dark modal-submit" disabled={busy}>
-                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'expense-category' ? 'Save category' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
+                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'expense-category' ? 'Save category' : modal === 'recurring' ? 'Create schedule' : modal === 'recurring-edit' ? 'Save schedule' : modal === 'recurring-confirm' ? 'Confirm & record expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
                 <ArrowRight size={15} />
               </button>
             )}
