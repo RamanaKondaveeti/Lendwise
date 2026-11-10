@@ -24,7 +24,7 @@ Use the SMTP provider's required port and TLS settings. `APP_URL` must be the ex
 
 Back up the MySQL database and test restoring that backup before deployment or upgrades. The backend applies schema updates at startup. The workspace ownership migration gives each existing account its own workspace and account-linked person; previously shared, unowned people and groups are preserved in a separate `Legacy workspace` so they are not exposed to an arbitrary account. Those records are not visible through account workspaces and need a deliberate manual reassignment if they should remain in use. Run migrations on a restored copy first and verify the resulting data before deploying them to customer data.
 
-After HTTPS is configured at a reverse proxy or load balancer, run:
+For an initial production deployment, configure HTTPS at a reverse proxy or load balancer, then build and start the Compose services:
 
 ```powershell
 docker compose up --build -d
@@ -33,6 +33,16 @@ docker compose logs -f backend
 ```
 
 The frontend is published on port 3000 for the HTTPS proxy. The backend is only exposed on the internal Compose network and is not published directly. Route `/api` through the frontend proxy to the backend. Do not expose port 3000 directly to customers over plain HTTP.
+
+### EC2 host Nginx and Let's Encrypt
+
+For an EC2 host running Ubuntu/Debian, the repository includes a temporary HTTP proxy at `deploy/nginx/groupbuk.com.http.conf` and the final TLS/canonical-host configuration at `deploy/nginx/groupbuk.com.https.conf.example`. The first proxies both names to the frontend on `127.0.0.1:3000`; the final redirects HTTP and `www` to `https://groupbuk.com` and proxies the apex host. These files are host Nginx configuration; the Nginx inside the frontend container continues to serve the built app and proxy `/api` to the backend.
+
+Before changing the EC2 host, connect over SSH and inspect the OS, Nginx, port listeners, Compose services, and existing certificates. Do not overwrite another site's vhost or remove existing certificates. The host must accept inbound TCP 80 and 443 in its EC2 security group for public HTTP/HTTPS and the HTTP-01 certificate challenge. Keep SSH restricted to your administration IP; do not open backend port 5000 or MySQL port 3306. After confirming those checks, enable the temporary host vhost and test/reload Nginx. On a host with the Nginx Certbot plugin installed, run `sudo certbot --nginx --redirect -d groupbuk.com -d www.groupbuk.com`; follow its email prompt. Then install the final example config as the active vhost, run `sudo nginx -t`, and reload Nginx.
+
+The production `.env` uses `APP_URL=https://groupbuk.com` and `COOKIE_SECURE=true`. The Compose frontend mapping binds port 3000 to loopback only, so apply that Compose change only after host Nginx is running. `docker compose up -d --no-deps backend frontend` applies the backend environment and frontend port mapping without rebuilding images or touching the database. The frontend uses relative `/api` paths and the existing same-origin reverse proxy; no CORS allowlist or OAuth callback change is needed. Verify automatic certificate renewal with `sudo certbot renew --dry-run`.
+
+The required DNS records are `A @ 15.252.10.1` and `CNAME www groupbuk.com` (or `A www 15.252.10.1`). Avoid conflicting `AAAA` records unless the EC2 host is configured for IPv6.
 
 ## Local development
 
