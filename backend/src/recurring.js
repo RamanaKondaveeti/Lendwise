@@ -101,14 +101,15 @@ async function createExpenseAndSplits(executor, template, occurrenceDate, entere
     participants.map(participant => participant.share_percent)
   );
   const [expense] = await executor.execute(
-    `INSERT INTO expenses(group_id, title, amount, paid_by, category, created_at)
-     VALUES(?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO expenses(group_id, title, amount, paid_by, category, split_method, created_at)
+     VALUES(?, ?, ?, ?, ?, ?, ?)`,
     [
       template.group_id,
       template.title,
       baseAmount,
       template.paid_by,
       template.category,
+      template.split_method === 'custom' ? 'exact' : 'equal',
       `${dateOnly(occurrenceDate)} 12:00:00`,
     ]
   );

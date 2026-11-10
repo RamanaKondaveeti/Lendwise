@@ -8,7 +8,7 @@ const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const { calculateMinimalSettlements, validateGroupSettlement } = require('./settlements');
-const { allocateExpenseSplits } = require('./expense-splits');
+const { allocateExpenseSplits, allocateItemWiseSplits } = require('./expense-splits');
 const { createNotifications, reminderPeriodKey } = require('./notifications');
 const {
   buildExpenseReportFilter,
@@ -636,6 +636,7 @@ async function init() {
     await pool.query(statement);
   }
   await ensureColumn('expenses', 'category', "VARCHAR(100) NOT NULL DEFAULT 'Other'");
+  await ensureColumn('expenses', 'split_method', "ENUM('equal', 'exact', 'percentage', 'shares', 'itemwise') NOT NULL DEFAULT 'equal'");
   await ensureColumn('notification_preferences', 'budget_alert', 'TINYINT(1) NOT NULL DEFAULT 1');
   await ensureColumn('budgets', 'exchange_rate_to_inr', 'DECIMAL(15, 8) NOT NULL DEFAULT 1');
   const [notificationTypeColumn] = await pool.query(
@@ -2303,7 +2304,7 @@ app.get('/api/expenses', async (req, res) => {
 
   try {
     const expenses = await q(
-      `SELECT e.id, e.group_id, e.title, e.amount, e.category, e.created_at,
+      `SELECT e.id, e.group_id, e.title, e.amount, e.category, e.split_method, e.created_at,
               p.id AS payer_id, p.name AS payer, p.initials, p.color,
               g.name AS group_name
        FROM expenses e
@@ -2351,6 +2352,43 @@ app.get('/api/expenses', async (req, res) => {
       expense.outstanding_amount = expense.shares
         .filter(share => share.person_id !== expense.payer_id)
         .reduce((total, share) => total + share.outstanding_amount, 0);
+      expense.items = [];
+    }
+    const expenseIds = expenses.map(expense => expense.id);
+    if (expenseIds.length) {
+      const itemRows = await q(
+        `SELECT i.id, i.expense_id, i.item_name, i.quantity, i.unit_price, i.total_amount, i.allocation_method,
+                a.person_id, p.name AS person_name, a.allocation_amount
+         FROM expense_items i
+         JOIN expenses e ON e.id = i.expense_id
+         JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+         LEFT JOIN expense_item_allocations a ON a.expense_item_id = i.id
+         LEFT JOIN people p ON p.id = a.person_id AND p.workspace_id = ?
+         WHERE i.expense_id IN (${expenseIds.map(() => '?').join(',')})
+         ORDER BY i.id, p.name, p.id`,
+        [req.account.workspace_id, req.account.workspace_id, ...expenseIds]
+      );
+      const expensesById = new Map(expenses.map(expense => [expense.id, expense]));
+      const itemsById = new Map();
+      for (const row of itemRows) {
+        let item = itemsById.get(row.id);
+        if (!item) {
+          item = {
+            id: row.id,
+            item_name: row.item_name,
+            quantity: Number(row.quantity),
+            unit_price: Number(row.unit_price),
+            total_amount: Number(row.total_amount),
+            allocation_method: row.allocation_method,
+            allocations: [],
+          };
+          itemsById.set(row.id, item);
+          expensesById.get(row.expense_id)?.items.push(item);
+        }
+        if (row.person_id !== null) {
+          item.allocations.push({ person_id: row.person_id, name: row.person_name, amount: Number(row.allocation_amount) });
+        }
+      }
     }
     res.json(expenses);
   } catch (error) {
@@ -3021,8 +3059,14 @@ app.post('/api/expenses', async (req, res) => {
   const normalizedPaidBy = Number(paidBy);
   const amountCents = Math.round(Number(amount) * 100);
   let allocations = null;
+  let itemWiseDetails = null;
   try {
-    allocations = allocateExpenseSplits(amountCents, participants, splitMethod);
+    if (splitMethod === 'itemwise') {
+      itemWiseDetails = allocateItemWiseSplits(amountCents, req.body?.items);
+      allocations = itemWiseDetails.allocations;
+    } else {
+      allocations = allocateExpenseSplits(amountCents, participants, splitMethod);
+    }
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
@@ -3033,7 +3077,7 @@ app.post('/api/expenses', async (req, res) => {
       !Number.isFinite(Number(amount)) || !Number.isSafeInteger(amountCents) ||
       amountCents <= 0 || amountCents > 999999999999 ||
       !Number.isInteger(normalizedPaidBy) || normalizedPaidBy <= 0 ||
-      !Array.isArray(participants) || !participantIds.length) {
+      (splitMethod !== 'itemwise' && !Array.isArray(participants)) || !participantIds.length) {
     return res.status(400).json({ error: 'Add a title, positive amount, group, and participants.' });
   }
 
@@ -3061,14 +3105,29 @@ app.post('/api/expenses', async (req, res) => {
     await connection.beginTransaction();
     inTransaction = true;
     const [expense] = await connection.execute(
-      'INSERT INTO expenses(group_id, title, amount, paid_by, category) VALUES(?, ?, ?, ?, ?)',
-      [normalizedGroupId, title.trim(), amountCents / 100, normalizedPaidBy, category]
+      'INSERT INTO expenses(group_id, title, amount, paid_by, category, split_method) VALUES(?, ?, ?, ?, ?, ?)',
+      [normalizedGroupId, title.trim(), amountCents / 100, normalizedPaidBy, category, splitMethod]
     );
     for (const { personId, cents } of allocations) {
       await connection.execute(
         'INSERT INTO splits(expense_id, person_id, amount) VALUES(?, ?, ?)',
         [expense.insertId, personId, cents / 100]
       );
+    }
+    if (itemWiseDetails) {
+      for (const item of itemWiseDetails.items) {
+        const [itemResult] = await connection.execute(
+          `INSERT INTO expense_items(expense_id, item_name, quantity, unit_price, total_amount, allocation_method)
+           VALUES(?, ?, ?, ?, ?, ?)`,
+          [expense.insertId, item.itemName, item.quantityMillis / 1000, item.unitPriceCents / 100, item.totalCents / 100, item.allocationMethod]
+        );
+        for (const allocation of item.allocations) {
+          await connection.execute(
+            'INSERT INTO expense_item_allocations(expense_item_id, person_id, allocation_amount) VALUES(?, ?, ?)',
+            [itemResult.insertId, allocation.personId, allocation.cents / 100]
+          );
+        }
+      }
     }
     await notifyGroupMembers(connection, req.account.workspace_id, normalizedGroupId, {
       type: 'expense_created',

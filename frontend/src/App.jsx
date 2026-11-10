@@ -723,6 +723,7 @@ function App() {
   const [expenseExactAmounts, setExpenseExactAmounts] = useState({})
   const [expensePercentages, setExpensePercentages] = useState({})
   const [expenseShares, setExpenseShares] = useState({})
+  const [expenseItems, setExpenseItems] = useState([])
   const [expenseTotalInput, setExpenseTotalInput] = useState('')
   const [expenseToSettle, setExpenseToSettle] = useState(null)
   const [expenseToEdit, setExpenseToEdit] = useState(null)
@@ -1241,6 +1242,68 @@ function App() {
   const expenseTotalShares = expenseShareAllocations.reduce((sum, allocation) => sum + (allocation.valid ? BigInt(allocation.raw) : 0n), 0n)
   const expenseShareCents = expenseTotalCents === null ? [] : shareCountCents(expenseTotalCents, expenseShareAllocations)
   const expenseShareAllocatedCents = expenseShareCents.reduce((sum, share) => sum + share.cents, 0)
+  const expenseItemwiseDetails = expenseItems.map(item => {
+    const quantityMatch = /^(\d+)(?:\.(\d{1,3}))?$/.exec(String(item.quantity).trim())
+    const unitPriceValid = /^\d+(?:\.\d{1,2})?$/.test(String(item.unitPrice).trim()) && Number.isFinite(exchangeRate) && exchangeRate > 0
+    const quantityMillis = quantityMatch
+      ? Number(quantityMatch[1]) * 1000 + Number((quantityMatch[2] || '').padEnd(3, '0'))
+      : 0
+    const candidateUnitPriceBaseCents = unitPriceValid ? Math.round(Number(item.unitPrice) / exchangeRate * 100) : null
+    const unitPriceBaseCents = Number.isSafeInteger(candidateUnitPriceBaseCents) ? candidateUnitPriceBaseCents : null
+    const totalCents = unitPriceBaseCents === null || !Number.isSafeInteger(quantityMillis)
+      ? null
+      : Number((BigInt(unitPriceBaseCents) * BigInt(quantityMillis) + 500n) / 1000n)
+    const ids = item.participantIds || []
+    const rawAllocations = ids.map(personId => ({ personId, raw: item.allocations?.[personId] ?? '' }))
+    let allocations = []
+    let allocationValid = ids.length > 0
+    if (totalCents !== null) {
+      if (item.allocationMethod === 'equal') {
+        const base = Math.floor(totalCents / Math.max(ids.length, 1))
+        const remainder = totalCents % Math.max(ids.length, 1)
+        allocations = ids.map((personId, index) => ({ personId, cents: base + (index < remainder ? 1 : 0) }))
+      } else if (item.allocationMethod === 'exact') {
+        allocations = rawAllocations.map(({ personId, raw }) => {
+          const valid = /^\d+(?:\.\d{1,2})?$/.test(String(raw).trim())
+          const cents = valid ? Math.round(Number(raw) / exchangeRate * 100) : 0
+          return { personId, raw, cents, valid }
+        })
+        allocationValid = allocationValid && allocations.every(allocation => allocation.valid) &&
+          allocations.reduce((sum, allocation) => sum + allocation.cents, 0) === totalCents
+      } else if (item.allocationMethod === 'percentage') {
+        allocations = rawAllocations.map(({ personId, raw }) => ({ personId, raw, units: parsePercentageUnits(raw) }))
+        allocationValid = allocationValid && allocations.every(allocation => allocation.units !== null) &&
+          allocations.reduce((sum, allocation) => sum + (allocation.units || 0), 0) === 10000
+        allocations = percentageShareCents(totalCents, allocations).map((share, index) => ({ ...share, personId: ids[index] }))
+      } else {
+        allocations = rawAllocations.map(({ personId, raw }) => ({
+          personId,
+          raw,
+          valid: /^\d+$/.test(String(raw)) && Number.isSafeInteger(Number(raw)) && Number(raw) > 0,
+        }))
+        allocationValid = allocationValid && allocations.every(allocation => allocation.valid)
+        allocations = shareCountCents(totalCents, allocations).map((share, index) => ({ ...share, personId: ids[index] }))
+      }
+    }
+    const memberIds = new Set((selectedExpenseGroup?.members || []).map(person => person.id))
+    const membersValid = ids.every(personId => memberIds.has(personId))
+    return {
+      ...item,
+      quantityMillis,
+      unitPriceBaseCents,
+      totalCents,
+      allocations,
+      valid: Boolean(item.itemName?.trim()) && item.itemName.trim().length <= 255 &&
+        quantityMillis > 0 && Number.isSafeInteger(quantityMillis) && unitPriceValid &&
+        totalCents !== null && Number.isSafeInteger(totalCents) && allocationValid && membersValid,
+    }
+  })
+  const expenseItemwiseTotalCents = expenseItemwiseDetails.reduce((sum, item) => sum + (item.totalCents || 0), 0)
+  const expenseItemwiseAllocatedCents = expenseItemwiseDetails.reduce((sum, item) =>
+    sum + item.allocations.reduce((itemSum, allocation) => itemSum + allocation.cents, 0), 0)
+  const expenseItemwiseDisplayTotal = Number.isFinite(exchangeRate) && exchangeRate > 0
+    ? (expenseItemwiseTotalCents / 100 * exchangeRate).toFixed(2)
+    : ''
   const expenseSplitValid = expenseSplitMethod === 'exact'
     ? expenseTotalCents !== null && expenseParticipantIds.length > 0 &&
       expenseExactAllocations.every(allocation => allocation.valid) &&
@@ -1252,7 +1315,10 @@ function App() {
       : expenseSplitMethod === 'shares'
         ? expenseTotalCents !== null && expenseParticipantIds.length > 0 && expenseShareAllocations.every(allocation => allocation.valid) &&
           expenseTotalShares > 0n && Number.isFinite(exchangeRate) && exchangeRate > 0
-        : true
+        : expenseSplitMethod === 'itemwise'
+          ? expenseItemwiseDetails.length > 0 && expenseItemwiseDetails.every(item => item.valid) &&
+            expenseItemwiseTotalCents > 0 && expenseItemwiseAllocatedCents === expenseItemwiseTotalCents
+          : true
   const settlementGroup = groups.find(group => group.id === Number(settlementDefaults?.groupId))
   const settlementPeople = settlementGroup ? settlementGroup.balance_people || [] : people
   const suggestedSettlements = groups.flatMap(group => group.settlement_suggestions || [])
@@ -1347,8 +1413,25 @@ function App() {
     setExpenseExactAmounts({})
     setExpensePercentages({})
     setExpenseShares({})
+    setExpenseItems([])
     setExpenseTotalInput('')
     setModal('expense')
+  }
+
+  function updateExpenseItem(index, update) {
+    setExpenseItems(current => current.map((item, itemIndex) =>
+      itemIndex === index ? update(item) : item))
+  }
+
+  function addExpenseItem() {
+    setExpenseItems(current => [...current, {
+      itemName: '',
+      quantity: '1',
+      unitPrice: '',
+      allocationMethod: 'equal',
+      participantIds: [...expenseParticipantIds],
+      allocations: {},
+    }])
   }
 
   function openManualSettlement() {
@@ -1892,7 +1975,9 @@ function App() {
         return
       }
       const selectedParticipants = expenseParticipantIds
-      const normalizedTotalCents = Math.round(toStoredAmount(form.get('amount')) * 100)
+      const normalizedTotalCents = expenseSplitMethod === 'itemwise'
+        ? expenseItemwiseTotalCents
+        : Math.round(toStoredAmount(form.get('amount')) * 100)
       const exactCents = expenseSplitMethod === 'exact'
         ? expenseExactAllocations.map(allocation => Math.floor(allocation.cents / exchangeRate))
         : null
@@ -1912,11 +1997,11 @@ function App() {
       payload = {
         groupId: Number(form.get('groupId')),
         title: form.get('title'),
-        amount: toStoredAmount(form.get('amount')),
+        amount: expenseSplitMethod === 'itemwise' ? expenseItemwiseTotalCents / 100 : toStoredAmount(form.get('amount')),
         paidBy: Number(form.get('paidBy')),
         category: form.get('category'),
         splitMethod: expenseSplitMethod,
-        participants: expenseSplitMethod === 'exact'
+        participants: expenseSplitMethod === 'itemwise' ? undefined : expenseSplitMethod === 'exact'
           ? selectedParticipants.map((personId, index) => ({ personId, amount: exactCents[index] / 100 }))
           : expenseSplitMethod === 'percentage'
             ? expensePercentageAllocations.map(allocation => ({
@@ -1929,6 +2014,22 @@ function App() {
                 shares: allocation.raw,
               }))
             : selectedParticipants,
+        items: expenseSplitMethod === 'itemwise' ? expenseItemwiseDetails.map(item => ({
+          itemName: item.itemName.trim(),
+          quantity: item.quantityMillis / 1000,
+          unitPrice: item.unitPriceBaseCents / 100,
+          allocationMethod: item.allocationMethod,
+          participants: item.allocationMethod === 'equal'
+            ? item.participantIds
+            : item.allocations.map(allocation => ({
+              personId: allocation.personId,
+              ...(item.allocationMethod === 'exact'
+                ? { amount: allocation.cents / 100 }
+                : item.allocationMethod === 'percentage'
+                  ? { percentage: allocation.raw }
+                  : { shares: allocation.raw }),
+            })),
+        })) : undefined,
       }
       successMessage = 'Expense added.'
     } else if (modal === 'expense-category') {
@@ -3238,7 +3339,7 @@ function App() {
               <>
                 <label>What was it for?<input required name="title" maxLength="255" placeholder="Enter an expense name" /></label>
                 <div className="form-row">
-                <label>Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" value={expenseTotalInput} onChange={event => setExpenseTotalInput(event.target.value)} disabled={!Number.isFinite(exchangeRate)} required /></label>
+                <label>Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" value={expenseSplitMethod === 'itemwise' ? expenseItemwiseDisplayTotal : expenseTotalInput} onChange={event => setExpenseTotalInput(event.target.value)} readOnly={expenseSplitMethod === 'itemwise'} disabled={!Number.isFinite(exchangeRate)} required /></label>
                   <label>Category<select name="category">{expenseCategories.map(category => <option key={category}>{category}</option>)}</select></label>
                 </div>
                 <label>Group<select name="groupId" required value={expenseGroupId} onChange={event => {
@@ -3246,10 +3347,15 @@ function App() {
                   const nextGroup = groups.find(group => group.id === nextGroupId)
                   setExpenseGroupId(nextGroupId)
                   setExpenseParticipantIds((nextGroup?.members || []).map(person => person.id))
+                  const nextMemberIds = new Set((nextGroup?.members || []).map(person => person.id))
+                  setExpenseItems(current => current.map(item => ({
+                    ...item,
+                    participantIds: item.participantIds.filter(personId => nextMemberIds.has(personId)),
+                  })))
                 }}><option value="" disabled>Select a group</option>{groups.filter(group => group.members?.length).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
                 <label key={selectedExpenseGroup?.id}>Paid by<select name="paidBy" required defaultValue={selectedExpenseGroup?.members?.some(person => person.id === data.currentUserId) ? data.currentUserId : selectedExpenseGroup?.members?.[0]?.id || ''}>{(selectedExpenseGroup?.members || []).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
-                <label>Split method<select value={expenseSplitMethod} onChange={event => setExpenseSplitMethod(event.target.value)}><option value="equal">Split equally</option><option value="exact">Exact amounts</option><option value="percentage">Percentage</option><option value="shares">Shares</option></select></label>
-                <fieldset className="participant-field">
+                <label>Split method<select value={expenseSplitMethod} onChange={event => setExpenseSplitMethod(event.target.value)}><option value="equal">Split equally</option><option value="exact">Exact amounts</option><option value="percentage">Percentage</option><option value="shares">Shares</option><option value="itemwise">Item-wise</option></select></label>
+                {expenseSplitMethod !== 'itemwise' && <fieldset className="participant-field">
                   <legend>{expenseSplitMethod === 'exact' ? 'Participants and exact amounts' : expenseSplitMethod === 'percentage' ? 'Participants and percentages' : expenseSplitMethod === 'shares' ? 'Participants and share counts' : 'Split equally between'}</legend>
                   <div className="participant-list">
                     {(selectedExpenseGroup?.members || []).map(person => {
@@ -3314,7 +3420,7 @@ function App() {
                       </div>
                     })}
                   </div>
-                </fieldset>
+                </fieldset>}
                 {expenseSplitMethod === 'equal' ? <p className="form-hint">Choose who shares this expense. Any extra cents are split fairly.</p> : expenseSplitMethod === 'exact' ? <div className="exact-allocation-summary" aria-live="polite">
                   <p>Allocated: {formatCurrentCurrency(expenseAllocatedCents / 100)} of {expenseTotalCents === null ? formatCurrentCurrency(0) : formatCurrentCurrency(expenseTotalCents / 100)}</p>
                   {expenseTotalCents !== null && expenseAllocatedCents < expenseTotalCents && <p className="form-hint">Remaining: {formatCurrentCurrency((expenseTotalCents - expenseAllocatedCents) / 100)}</p>}
@@ -3343,6 +3449,65 @@ function App() {
                   {expenseShareAllocations.some(allocation => !allocation.valid) && <p className="exact-allocation-error">Enter a positive whole number of shares for every selected participant.</p>}
                   {expenseShareAllocations.length > 0 && expenseShareAllocations.every(allocation => allocation.valid) && expenseSplitValid && <p className="allocation-valid-message">Shares are allocated. Rounding cents are distributed deterministically.</p>}
                 </div>}
+                {expenseSplitMethod === 'itemwise' && <section className="itemwise-editor" aria-label="Item-wise expense details">
+                  <div className="itemwise-heading">
+                    <div><strong>Items and participants</strong><span>Assign each item to the people who share it.</span></div>
+                    <button type="button" className="button button-light itemwise-add" onClick={addExpenseItem}><Plus size={14} /> Add item</button>
+                  </div>
+                  {expenseItems.length === 0 && <p className="itemwise-empty">Add an item to start splitting this expense.</p>}
+                  {expenseItems.map((item, itemIndex) => {
+                    const detail = expenseItemwiseDetails[itemIndex]
+                    const allocatedCents = detail?.allocations.reduce((sum, allocation) => sum + allocation.cents, 0) || 0
+                    return <article className="itemwise-card" key={itemIndex}>
+                      <div className="itemwise-card-heading"><strong>Item {itemIndex + 1}</strong><button type="button" className="itemwise-remove" aria-label={`Remove item ${itemIndex + 1}`} onClick={() => setExpenseItems(current => current.filter((_, index) => index !== itemIndex))}><Trash2 size={15} /></button></div>
+                      <div className="itemwise-fields">
+                        <label>Item name<input value={item.itemName} maxLength="255" placeholder="e.g. Dinner" onChange={event => updateExpenseItem(itemIndex, current => ({ ...current, itemName: event.target.value }))} /></label>
+                        <label>Quantity<input type="number" min="0.001" step="0.001" value={item.quantity} onChange={event => updateExpenseItem(itemIndex, current => ({ ...current, quantity: event.target.value }))} /></label>
+                        <label>Unit price ({currency})<input type="number" min="0" step="0.01" value={item.unitPrice} placeholder="0.00" disabled={!Number.isFinite(exchangeRate)} onChange={event => updateExpenseItem(itemIndex, current => ({ ...current, unitPrice: event.target.value }))} /></label>
+                        <label>Item total<input readOnly value={detail?.totalCents === null ? '' : formatMoney((detail?.totalCents || 0) / 100)} /></label>
+                      </div>
+                      <div className="itemwise-allocation-head">
+                        <label>Allocate this item<select value={item.allocationMethod} onChange={event => updateExpenseItem(itemIndex, current => ({ ...current, allocationMethod: event.target.value }))}>
+                          <option value="equal">Equally</option><option value="exact">Exact amounts</option><option value="percentage">Percentage</option><option value="shares">Shares</option>
+                        </select></label>
+                        <span>Allocated: {formatMoney(allocatedCents / 100)} / {formatMoney((detail?.totalCents || 0) / 100)}</span>
+                      </div>
+                      {(selectedExpenseGroup?.members || []).length > 0 ? <div className="itemwise-participants">
+                        {(selectedExpenseGroup?.members || []).map(person => {
+                          const selected = item.participantIds.includes(person.id)
+                          const allocation = detail?.allocations.find(row => row.personId === person.id)
+                          const value = item.allocations?.[person.id] ?? (item.allocationMethod === 'shares' ? '1' : '')
+                          return <div className="itemwise-participant" key={person.id}>
+                            <label className="itemwise-person"><input type="checkbox" checked={selected} aria-label={`Assign ${person.name} to item ${itemIndex + 1}`} onChange={event => updateExpenseItem(itemIndex, current => ({
+                              ...current,
+                              participantIds: event.target.checked
+                                ? current.participantIds.includes(person.id) ? current.participantIds : [...current.participantIds, person.id]
+                                : current.participantIds.filter(id => id !== person.id),
+                            }))} /><span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span><span>{person.name}</span></label>
+                            {selected && item.allocationMethod !== 'equal' && <input className="itemwise-allocation-input" aria-label={`${person.name} ${item.allocationMethod} allocation for ${item.itemName || `item ${itemIndex + 1}`}`} type="number" min="0" step={item.allocationMethod === 'shares' ? '1' : '0.01'} value={value} onChange={event => updateExpenseItem(itemIndex, current => ({ ...current, allocations: { ...current.allocations, [person.id]: event.target.value } }))} />}
+                            {selected && <span className="itemwise-allocation-amount">{formatMoney((allocation?.cents || 0) / 100)}</span>}
+                          </div>
+                        })}
+                      </div> : <p className="form-hint">Add members to the selected group before assigning item shares.</p>}
+                      {item.allocationMethod === 'exact' && <p className={detail?.valid ? 'allocation-valid-message' : 'exact-allocation-error'}>{detail?.valid ? 'Exact amounts match this item.' : 'Enter exact amounts whose INR total matches the item total.'}</p>}
+                      {item.allocationMethod === 'percentage' && <p className={detail?.valid ? 'allocation-valid-message' : 'exact-allocation-error'}>{detail?.valid ? 'Percentages total 100%.' : 'Percentages for this item must total exactly 100%.'}</p>}
+                      {item.allocationMethod === 'shares' && <p className={detail?.valid ? 'allocation-valid-message' : 'exact-allocation-error'}>{detail?.valid ? 'Share counts are valid.' : 'Enter positive whole share counts for every assigned participant.'}</p>}
+                      {!detail?.valid && item.allocationMethod === 'equal' && <p className="exact-allocation-error">Add a valid name, positive quantity, price, and at least one group member.</p>}
+                    </article>
+                  })}
+                  <div className="exact-allocation-summary percentage-allocation-summary itemwise-summary" aria-live="polite">
+                    <strong className="allocation-summary-title">Expense allocation summary</strong>
+                    <div className="allocation-summary-grid">
+                      <div><span>Expense total</span><strong>{formatMoney(expenseItemwiseTotalCents / 100)}</strong></div>
+                      <div><span>Amount allocated</span><strong>{formatMoney(expenseItemwiseAllocatedCents / 100)}</strong></div>
+                      <div><span>{expenseItemwiseAllocatedCents > expenseItemwiseTotalCents ? 'Over-allocated' : 'Remaining amount'}</span><strong>{formatMoney(Math.abs(expenseItemwiseTotalCents - expenseItemwiseAllocatedCents) / 100)}</strong></div>
+                      <div><span>Items</span><strong>{expenseItems.length}</strong></div>
+                    </div>
+                    {expenseItems.length > 0 && expenseItemwiseDetails.some(item => !item.valid) && <p className="exact-allocation-error">Complete each item and make sure its allocation is valid before saving.</p>}
+                    {expenseItems.length > 0 && expenseSplitValid && <p className="allocation-valid-message">All item totals and allocations match the expense total.</p>}
+                    {currency !== 'INR' && <p className="form-hint">Item prices are converted to INR for storage and all allocations use INR cents.</p>}
+                  </div>
+                </section>}
               </>
             )}
 

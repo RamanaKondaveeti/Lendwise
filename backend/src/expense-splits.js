@@ -34,6 +34,17 @@ function positiveShareCount(value) {
   return count;
 }
 
+function quantityToMillis(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    throw new TypeError('Item quantity must be a positive value with up to three decimal places.');
+  }
+  const match = /^(\d+)(?:\.(\d{1,3}))?$/.exec(String(value).trim());
+  if (!match) throw new TypeError('Item quantity must be a positive value with up to three decimal places.');
+  const millis = Number(match[1]) * 1000 + Number((match[2] || '').padEnd(3, '0'));
+  if (!Number.isSafeInteger(millis) || millis <= 0) throw new TypeError('Item quantity must be greater than zero.');
+  return millis;
+}
+
 function allocatePercentageCents(totalCents, participants, ids) {
   const weights = participants.map(participant => percentageToUnits(participant.percentage));
   if (weights.reduce((sum, weight) => sum + weight, 0) !== 10000) {
@@ -114,4 +125,65 @@ function allocateExpenseSplits(totalCents, participants, splitMethod = 'equal') 
   return allocations;
 }
 
-module.exports = { amountToCents, allocateExpenseSplits, percentageToUnits, positiveShareCount };
+function allocateItemWiseSplits(expenseTotalCents, items) {
+  if (!Number.isSafeInteger(expenseTotalCents) || expenseTotalCents <= 0 || !Array.isArray(items) || !items.length) {
+    throw new TypeError('Add at least one valid item.');
+  }
+  const normalizedItems = items.map((item, index) => {
+    if (!item || typeof item.itemName !== 'string' || !item.itemName.trim() || item.itemName.trim().length > 255) {
+      throw new TypeError(`Item ${index + 1} needs a name of 1 to 255 characters.`);
+    }
+    const quantityMillis = quantityToMillis(item.quantity);
+    if (quantityMillis > 9999999999) throw new TypeError(`Item ${index + 1} quantity is too large.`);
+    const unitPriceCents = amountToCents(item.unitPrice);
+    if (unitPriceCents > 999999999999) throw new TypeError(`Item ${index + 1} unit price is too large.`);
+    const totalBigCents = (BigInt(unitPriceCents) * BigInt(quantityMillis) + 500n) / 1000n;
+    if (totalBigCents > 999999999999n) throw new TypeError(`Item ${index + 1} total is too large.`);
+    const totalCents = Number(totalBigCents);
+    if (!Number.isSafeInteger(totalCents)) throw new TypeError(`Item ${index + 1} total is too large.`);
+    const method = item.allocationMethod;
+    if (!['equal', 'exact', 'percentage', 'shares'].includes(method)) {
+      throw new TypeError(`Item ${index + 1} has an invalid allocation method.`);
+    }
+    const participants = item.participants;
+    let allocations;
+    if (totalCents > 0) {
+      allocations = allocateExpenseSplits(totalCents, participants, method);
+    } else if (method === 'exact') {
+      if (!Array.isArray(participants) || !participants.length) throw new TypeError('At least one participant is required for each item.');
+      const ids = participants.map(participant => Number(participant?.personId));
+      if (ids.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length ||
+          participants.some(participant => amountToCents(participant?.amount) !== 0)) {
+        throw new TypeError('Zero-priced items need unique participants with zero exact allocations.');
+      }
+      allocations = ids.map(personId => ({ personId, cents: 0 }));
+    } else {
+      const validated = allocateExpenseSplits(1, participants, method);
+      allocations = validated.map(({ personId }) => ({ personId, cents: 0 }));
+    }
+    return {
+      itemName: item.itemName.trim(),
+      quantityMillis,
+      unitPriceCents,
+      totalCents,
+      allocationMethod: method,
+      allocations,
+    };
+  });
+  if (normalizedItems.reduce((sum, item) => sum + item.totalCents, 0) !== expenseTotalCents) {
+    throw new TypeError('Item totals must equal the expense total exactly.');
+  }
+  const totals = new Map();
+  for (const item of normalizedItems) {
+    for (const allocation of item.allocations) {
+      totals.set(allocation.personId, (totals.get(allocation.personId) || 0) + allocation.cents);
+    }
+  }
+  const aggregateAllocations = [...totals].map(([personId, cents]) => ({ personId, cents }));
+  if (aggregateAllocations.reduce((sum, allocation) => sum + allocation.cents, 0) !== expenseTotalCents) {
+    throw new TypeError('Item allocations must equal the expense total exactly.');
+  }
+  return { items: normalizedItems, allocations: aggregateAllocations };
+}
+
+module.exports = { amountToCents, allocateExpenseSplits, allocateItemWiseSplits, percentageToUnits, positiveShareCount, quantityToMillis };

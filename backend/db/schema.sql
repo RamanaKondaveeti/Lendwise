@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
   paid_by INT NOT NULL,
   category VARCHAR(100) NOT NULL DEFAULT 'Other',
+  split_method ENUM('equal', 'exact', 'percentage', 'shares', 'itemwise') NOT NULL DEFAULT 'equal',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_expenses_group FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE,
   CONSTRAINT fk_expenses_payer FOREIGN KEY (paid_by) REFERENCES people(id)
@@ -168,6 +169,31 @@ CREATE TABLE IF NOT EXISTS splits (
   amount DECIMAL(12, 2) NOT NULL CHECK (amount >= 0),
   CONSTRAINT fk_splits_expense FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,
   CONSTRAINT fk_splits_person FOREIGN KEY (person_id) REFERENCES people(id)
+);
+
+CREATE TABLE IF NOT EXISTS expense_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  expense_id INT NOT NULL,
+  item_name VARCHAR(255) NOT NULL,
+  quantity DECIMAL(10, 3) NOT NULL CHECK (quantity > 0),
+  unit_price DECIMAL(12, 2) NOT NULL CHECK (unit_price >= 0),
+  total_amount DECIMAL(12, 2) NOT NULL CHECK (total_amount >= 0),
+  allocation_method ENUM('equal', 'exact', 'percentage', 'shares') NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_expense_items_expense FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,
+  INDEX idx_expense_items_expense (expense_id)
+);
+
+CREATE TABLE IF NOT EXISTS expense_item_allocations (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  expense_item_id INT NOT NULL,
+  person_id INT NOT NULL,
+  allocation_amount DECIMAL(12, 2) NOT NULL CHECK (allocation_amount >= 0),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_expense_item_allocations_item FOREIGN KEY (expense_item_id) REFERENCES expense_items(id) ON DELETE CASCADE,
+  CONSTRAINT fk_expense_item_allocations_person FOREIGN KEY (person_id) REFERENCES people(id),
+  INDEX idx_expense_item_allocations_item (expense_item_id),
+  INDEX idx_expense_item_allocations_person (person_id)
 );
 
 CREATE TABLE IF NOT EXISTS recurring_expenses (

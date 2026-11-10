@@ -57,7 +57,7 @@ test('generated expenses and all participant splits are inserted with a traceabl
 
   const splitRows = statements.filter(statement => statement.query.startsWith('INSERT INTO splits'));
   assert.equal(expenseId, 44);
-  assert.deepEqual(statements[0].parameters, [3, 'Monthly utilities', 1500, 2, 'Utilities & Bills', '2025-03-01 12:00:00']);
+  assert.deepEqual(statements[0].parameters, [3, 'Monthly utilities', 1500, 2, 'Utilities & Bills', 'equal', '2025-03-01 12:00:00']);
   assert.deepEqual(splitRows.map(statement => statement.parameters), [
     [44, 2, 500],
     [44, 3, 500],
