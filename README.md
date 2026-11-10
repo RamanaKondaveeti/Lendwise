@@ -57,6 +57,7 @@ For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME` (normally `lend
 - Account-specific notifications cover expense changes, settlements, invitations, group membership, and recurring occurrences; the header notification center polls every 30 seconds and supports read/dismiss actions across joined workspaces
 - Notification preferences are account-scoped, including daily/weekly/off settlement reminders. The backend checks outstanding group balances at startup and every 15 minutes; unique per-account reminder keys prevent duplicate reminders within the selected period
 - Reports provide workspace-scoped expense, monthly, group, member, settlement, and outstanding-balance views with date, group, member, category, and currency controls. CSV, Excel, and PDF exports use database records and recorded split amounts; the API paginates results and exports up to 5,000 matching rows per download. Amounts remain stored in INR and USD is a presentation conversion using the current display rate.
+- Light, dark, and system appearance preferences are stored locally per account in the browser; system mode follows the device color preference. The mobile sidebar opens as a dismissible navigation drawer.
 
 ## Before customer release
 

@@ -25,6 +25,9 @@ import {
   LayoutDashboard,
   LoaderCircle,
   LogOut,
+  Menu,
+  Moon,
+  Monitor,
   Mountain,
   Plus,
   Pause,
@@ -35,6 +38,7 @@ import {
   Repeat,
   Search,
   Settings2,
+  Sun,
   Trash2,
   Users,
   Utensils,
@@ -141,6 +145,15 @@ const todayIso = () => {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
+const themeOptions = new Set(['light', 'dark', 'system'])
+const storedThemePreference = () => {
+  try {
+    const preference = window.localStorage.getItem('groupbuk_theme')
+    return themeOptions.has(preference) ? preference : 'system'
+  } catch {
+    return 'system'
+  }
+}
 
 function MonthlyExpenseChart({ series, selectedMonth, onSelectMonth, formatMoney }) {
   const maximum = Math.max(1, ...series.map(item => item.total))
@@ -182,6 +195,20 @@ function MonthlyExpenseChart({ series, selectedMonth, onSelectMonth, formatMoney
         )
       })}
     </svg>
+  )
+}
+
+function LoadingSkeleton({ rows = 3, label = 'Loading content' }) {
+  return (
+    <div className="loading-skeleton-list" role="status" aria-label={label}>
+      {Array.from({ length: rows }, (_, index) => (
+        <div className="loading-skeleton-row" key={index} aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -611,6 +638,8 @@ function App() {
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false)
   const [manualInviteLink, setManualInviteLink] = useState('')
   const [tab, setTab] = useState('Overview')
+  const [themePreference, setThemePreference] = useState(storedThemePreference)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [focusExpenseId, setFocusExpenseId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
@@ -668,6 +697,50 @@ function App() {
   const [currency, setCurrency] = useState(() => window.localStorage.getItem('groupbuk_currency') === 'USD' ? 'USD' : 'INR')
   const [exchangeRate, setExchangeRate] = useState(() => currency === 'INR' ? 1 : null)
   const [currencyLoading, setCurrencyLoading] = useState(false)
+
+  const setTheme = preference => {
+    if (!themeOptions.has(preference)) return
+    setThemePreference(preference)
+    try {
+      window.localStorage.setItem('groupbuk_theme', preference)
+      if (authUser?.id) window.localStorage.setItem(`groupbuk_theme_${authUser.id}`, preference)
+    } catch (error) {
+      notify('Could not save your appearance preference in this browser.')
+    }
+  }
+
+  useEffect(() => {
+    if (!authUser?.id) return
+    try {
+      const accountPreference = window.localStorage.getItem(`groupbuk_theme_${authUser.id}`)
+      if (themeOptions.has(accountPreference)) setThemePreference(accountPreference)
+    } catch (error) {
+      notify('Could not restore your saved appearance preference.')
+    }
+  }, [authUser?.id])
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const applyTheme = () => {
+      const resolvedTheme = themePreference === 'system'
+        ? media.matches ? 'dark' : 'light'
+        : themePreference
+      document.documentElement.dataset.theme = resolvedTheme
+      document.documentElement.style.colorScheme = resolvedTheme
+    }
+    applyTheme()
+    media.addEventListener?.('change', applyTheme)
+    return () => media.removeEventListener?.('change', applyTheme)
+  }, [themePreference])
+
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined
+    const closeOnEscape = event => {
+      if (event.key === 'Escape') setMobileNavOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [mobileNavOpen])
 
   const refresh = async () => {
     const summary = await request('/api/summary')
@@ -1773,7 +1846,15 @@ function App() {
   const pageTitle = tab === 'Group' ? selectedGroup?.name || 'Group' : tab
 
   return (
-    <div className="app">
+    <div className={`app ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
+      {mobileNavOpen && (
+        <button
+          type="button"
+          className="mobile-nav-scrim"
+          aria-label="Close navigation"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
       <aside className="sidebar">
         <a className="brand" href="#" onClick={event => { event.preventDefault(); setTab('Overview') }}>
           <span className="brand-mark"><ArrowLeftRight size={19} /></span>
@@ -1800,26 +1881,26 @@ function App() {
         <div className="nav-label">WORKSPACE</div>
         <nav>
           {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [CalendarClock, 'Recurring'], [FileBarChart, 'Reports'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
-            <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => setTab(name)}>
+            <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => { setTab(name); setMobileNavOpen(false) }}>
               <Icon size={18} />{name}
               {name === 'Activity' && <span className="nav-count">{data.activityCount || 0}</span>}
               {name === 'Recurring' && recurringOccurrences.some(occurrence => occurrence.status === 'needs_confirmation') &&
                 <span className="nav-count">{recurringOccurrences.filter(occurrence => occurrence.status === 'needs_confirmation').length}</span>}
             </button>
           ))}
-          <button className="nav-item settle-up-nav" type="button" aria-label="Settle up" title="Settle up" disabled={!Number(currentUser?.balance)} onClick={openSettleAll}>
+          <button className="nav-item settle-up-nav" type="button" aria-label="Settle up" title="Settle up" disabled={!Number(currentUser?.balance)} onClick={() => { openSettleAll(); setMobileNavOpen(false) }}>
             <Check size={18} />Settle up
           </button>
         </nav>
         <div className="nav-label groups-label">
           YOUR GROUPS
-          <button aria-label="Create group" onClick={() => setModal('group')}><Plus size={15} /></button>
+          <button aria-label="Create group" onClick={() => { setModal('group'); setMobileNavOpen(false) }}><Plus size={15} /></button>
         </div>
         <div className="group-links">
           {groups.map(group => {
             const Icon = groupIcons[group.icon] || Users
             return (
-              <button key={group.id} className="group-link" onClick={() => openGroup(group.id)}>
+              <button key={group.id} className="group-link" onClick={() => { openGroup(group.id); setMobileNavOpen(false) }}>
                 <span className="group-ico" style={{ background: group.color }}><Icon size={15} /></span>
                 <span>{group.name}</span>
               </button>
@@ -1827,7 +1908,20 @@ function App() {
           })}
         </div>
         <div className="sidebar-bottom">
-          <button className="nav-item" disabled={people.length < 2} onClick={openManualSettlement}><ArrowLeftRight size={18} />Record settlement</button>
+          <label className="theme-switcher">
+            {themePreference === 'system' ? <Monitor size={15} aria-hidden="true" /> : themePreference === 'dark' ? <Moon size={15} aria-hidden="true" /> : <Sun size={15} aria-hidden="true" />}
+            <span>Appearance</span>
+            <select
+              aria-label="Color theme"
+              value={themePreference}
+              onChange={event => setTheme(event.target.value)}
+            >
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="system">System</option>
+            </select>
+          </label>
+          <button className="nav-item" disabled={people.length < 2} onClick={() => { openManualSettlement(); setMobileNavOpen(false) }}><ArrowLeftRight size={18} />Record settlement</button>
           <div className="profile">
             <div className="avatar me">{currentUser?.initials || 'ME'}</div>
             <div className="profile-copy"><b>{currentUser?.name || authUser.name}</b><small>{authUser.email}</small></div>
@@ -1838,11 +1932,22 @@ function App() {
 
       <main className="main">
         <header className="topbar">
-          <div className="crumb">Workspace <span>/</span> <b>{pageTitle}</b></div>
+          <div className="topbar-leading">
+            <button
+              type="button"
+              className="mobile-nav-toggle"
+              aria-label={mobileNavOpen ? 'Close navigation' : 'Open navigation'}
+              aria-expanded={mobileNavOpen}
+              onClick={() => setMobileNavOpen(open => !open)}
+            >
+              {mobileNavOpen ? <X size={19} /> : <Menu size={19} />}
+            </button>
+            <div className="crumb">Workspace <span>/</span> <b>{pageTitle}</b></div>
+          </div>
           <div className="top-actions">
             <label className="search">
               <Search size={16} />
-              <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search expenses..." />
+              <input aria-label="Search expenses" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search expenses..." />
               <kbd>/</kbd>
             </label>
             <label className="currency-switcher" title="Choose the currency for displayed amounts">
@@ -2018,7 +2123,7 @@ function App() {
             </div>
           </div>
 
-          {notice && <div className="toast"><Check size={16} />{notice}</div>}
+          {notice && <div className="toast" role="status" aria-live="polite"><Check size={16} />{notice}</div>}
 
           {tab === 'Overview' && (
             <>
@@ -2376,7 +2481,9 @@ function App() {
                     </div>
                   </div>
                 )}
-                {!reportResult && <div className="empty report-empty">Choose a report and filters, then generate a preview.</div>}
+                {!reportResult && (reportLoading
+                  ? <LoadingSkeleton rows={4} label="Loading report preview" />
+                  : <div className="empty report-empty">Choose a report and filters, then generate a preview.</div>)}
                 {reportResult && visibleReportRows.length > 0 && (
                   <div className="report-table-wrap">
                     <table className="report-table">
@@ -2421,7 +2528,7 @@ function App() {
                   </button>
                 </div>
                 {recurringLoading && !recurringTemplates.length
-                  ? <div className="empty"><LoaderCircle className="loading-icon" size={20} />Loading recurring expenses…</div>
+                  ? <LoadingSkeleton rows={3} label="Loading recurring expenses" />
                   : recurringTemplates.length
                     ? <div className="recurring-template-list">
                       {recurringTemplates.map(template => (
