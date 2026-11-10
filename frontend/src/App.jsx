@@ -3113,7 +3113,7 @@ function App() {
 
       {modal && (
         <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
-          <form className="modal" onSubmit={submit}>
+          <form className={`modal${modal === 'expense' ? ' expense-modal' : ''}`} onSubmit={submit}>
             <div className="modal-top">
               <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'recurring' ? 'Create recurring expense' : modal === 'recurring-edit' ? 'Edit recurring expense' : modal === 'recurring-confirm' ? 'Confirm recurring amount' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
@@ -3214,11 +3214,11 @@ function App() {
                   <div className="participant-list">
                     {(selectedExpenseGroup?.members || []).map(person => <label key={person.id} className={expenseSplitMethod === 'exact' ? 'expense-share-option' : expenseSplitMethod === 'percentage' ? 'expense-share-option expense-share-percentage' : ''}>
                       <input type="checkbox" name="participants" value={person.id} checked={expenseParticipantIds.includes(person.id)} onChange={event => setExpenseParticipantIds(current => event.target.checked ? [...current, person.id] : current.filter(id => id !== person.id))} />
-                      <span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span>{person.name}
+                      <span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span><span className="expense-share-name">{person.name}</span>
                       {expenseSplitMethod === 'exact' && expenseParticipantIds.includes(person.id) && <input className="exact-share-input" aria-label={`${person.name} exact share`} type="number" min="0" step="0.01" placeholder={`0.00 ${currency}`} value={expenseExactAmounts[person.id] ?? ''} onClick={event => event.stopPropagation()} onChange={event => setExpenseExactAmounts(current => ({ ...current, [person.id]: event.target.value }))} />}
                       {expenseSplitMethod === 'percentage' && expenseParticipantIds.includes(person.id) && <>
-                        <input className="exact-share-input percentage-share-input" aria-label={`${person.name} percentage`} type="number" min="0" max="100" step="0.01" placeholder="0.00%" value={expensePercentages[person.id] ?? ''} onClick={event => event.stopPropagation()} onChange={event => setExpensePercentages(current => ({ ...current, [person.id]: event.target.value }))} />
-                        <span className="percentage-calculated">{formatCurrentCurrency((expensePercentageCents[expenseParticipantIds.indexOf(person.id)]?.cents || 0) / 100)}</span>
+                        <input className="exact-share-input percentage-share-input" aria-label={`${person.name} percentage`} type="number" inputMode="decimal" min="0" max="100" step="0.01" placeholder="0.00%" value={expensePercentages[person.id] ?? ''} onClick={event => event.stopPropagation()} onChange={event => setExpensePercentages(current => ({ ...current, [person.id]: event.target.value }))} />
+                        <span className="percentage-calculated" aria-label="Calculated share amount" title="Calculated share amount">{formatCurrentCurrency((expensePercentageCents[expenseParticipantIds.indexOf(person.id)]?.cents || 0) / 100)}</span>
                       </>}
                     </label>)}
                   </div>
@@ -3230,12 +3230,17 @@ function App() {
                   {(expenseTotalCents === null || expenseExactAllocations.some(allocation => !allocation.valid)) && <p className="exact-allocation-error">Enter a valid nonnegative amount (up to two decimal places) for each selected participant.</p>}
                   {expenseTotalCents !== null && expenseAllocatedCents === expenseTotalCents && expenseSplitValid && currency !== 'INR' && <p className="form-hint">Shares are converted to INR cents for storage; any paise rounding is distributed across the selected shares.</p>}
                 </div> : <div className="exact-allocation-summary percentage-allocation-summary" aria-live="polite">
-                  <p>Total allocated: {(expensePercentageUnits / 100).toFixed(2)}%</p>
-                  {expensePercentageUnits < 10000 && <p className="form-hint">Remaining: {((10000 - expensePercentageUnits) / 100).toFixed(2)}%</p>}
-                  {expensePercentageUnits > 10000 && <p className="exact-allocation-error">Over-allocated by {((expensePercentageUnits - 10000) / 100).toFixed(2)}%.</p>}
-                  {expenseTotalCents !== null && <p>Amount allocated: {formatCurrentCurrency(expensePercentageAllocatedCents / 100)} · Remaining amount: {formatCurrentCurrency(Math.max(0, expenseTotalCents - expensePercentageAllocatedCents) / 100)}</p>}
+                  <strong className="allocation-summary-title">Allocation summary</strong>
+                  <div className="allocation-summary-grid">
+                    <div><span>Total percentage</span><strong>{(expensePercentageUnits / 100).toFixed(2)}%</strong></div>
+                    <div><span>Remaining percentage</span><strong>{(Math.max(0, 10000 - expensePercentageUnits) / 100).toFixed(2)}%</strong></div>
+                    <div><span>Total amount allocated</span><strong>{formatCurrentCurrency(expensePercentageAllocatedCents / 100)}</strong></div>
+                    <div><span>Remaining amount</span><strong>{expenseTotalCents === null ? formatCurrentCurrency(0) : formatCurrentCurrency(Math.max(0, expenseTotalCents - expensePercentageAllocatedCents) / 100)}</strong></div>
+                  </div>
                   {(expenseTotalCents === null || expensePercentageAllocations.some(allocation => !allocation.valid)) && <p className="exact-allocation-error">Enter a nonnegative percentage with up to two decimal places for every selected participant.</p>}
-                  {expensePercentageUnits !== 10000 && expensePercentageAllocations.every(allocation => allocation.valid) && <p className="exact-allocation-error">Percentages must total exactly 100% before saving.</p>}
+                  {expensePercentageUnits < 10000 && expensePercentageAllocations.every(allocation => allocation.valid) && <p className="exact-allocation-error">Percentages must total exactly 100% before saving.</p>}
+                  {expensePercentageUnits > 10000 && <p className="exact-allocation-error">Percentages exceed 100% by {((expensePercentageUnits - 10000) / 100).toFixed(2)}%.</p>}
+                  {expensePercentageUnits === 10000 && expensePercentageAllocations.every(allocation => allocation.valid) && expenseSplitValid && <p className="allocation-valid-message">Percentages are fully allocated.</p>}
                 </div>}
               </>
             )}
