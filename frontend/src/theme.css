@@ -1064,3 +1064,10 @@ html[data-theme="dark"] .app :is(.search input, .range-select select, .monthly-s
   overscroll-behavior-y: contain;
   scrollbar-width: thin;
 }
+
+.budget-overview-status {
+  flex: none;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 700;
+}

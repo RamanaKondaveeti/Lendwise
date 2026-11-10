@@ -45,7 +45,7 @@ async function getBudgetSpend(executor, budget, range) {
 }
 
 function budgetAlertThresholdsCrossed(configured, percentUsed) {
-  const thresholds = [...new Set([...configured.map(Number), 80, 90, 100])];
+  const thresholds = [...new Set([...configured.map(Number), 80, 90, 100])].sort((a, b) => a - b);
   const crossed = thresholds.filter(value => Number.isFinite(value) && percentUsed >= value);
   if (percentUsed > 100) crossed.push('exceeded');
   return crossed;

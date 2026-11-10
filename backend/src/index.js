@@ -376,6 +376,7 @@ async function processDueRecurringTemplate(templateId) {
     );
     await connection.commit();
     inTransaction = false;
+    await runBudgetAlerts(template.workspace_id);
     return true;
   } catch (error) {
     if (inTransaction) {
@@ -1008,12 +1009,14 @@ async function attachBudgetAlertNotifications(budgets, accountId, executor = poo
   }));
 }
 
-async function runBudgetAlerts() {
+async function runBudgetAlerts(workspaceId = null) {
   try {
     const [budgets] = await pool.execute(
       `SELECT b.*, DATE_FORMAT(b.start_date, '%Y-%m-%d') AS start_date,
         DATE_FORMAT(b.end_date, '%Y-%m-%d') AS end_date
-       FROM budgets b WHERE b.is_active = TRUE AND b.is_paused = FALSE`
+       FROM budgets b WHERE b.is_active = TRUE AND b.is_paused = FALSE
+         AND (? IS NULL OR b.workspace_id = ?)`,
+      [workspaceId, workspaceId]
     );
     const today = new Date().toISOString().slice(0, 10);
     for (const budget of budgets) {
@@ -2269,6 +2272,7 @@ app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confir
     }, req.account.id);
     await connection.commit();
     inTransaction = false;
+    await runBudgetAlerts(req.account.workspace_id);
     res.status(201).json({ ok: true, expenseId, message: 'Recurring expense recorded.' });
   } catch (error) {
     if (inTransaction) {
@@ -2675,6 +2679,7 @@ app.patch('/api/expenses/:expenseId/category', async (req, res) => {
       dedupeKey: `expense-updated:${expenseId}:${crypto.randomUUID()}`,
     }, req.account.id);
     await connection.commit();
+    await runBudgetAlerts(req.account.workspace_id);
     res.json({ ok: true, message: 'Expense category updated.' });
   } catch (error) {
     if (connection) {
@@ -3066,6 +3071,7 @@ app.post('/api/expenses', async (req, res) => {
     }, req.account.id);
     await connection.commit();
     inTransaction = false;
+    await runBudgetAlerts(req.account.workspace_id);
     res.status(201).json({ ok: true, id: expense.insertId });
   } catch (error) {
     if (inTransaction) {
