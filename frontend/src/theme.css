@@ -214,7 +214,13 @@ html[data-theme="dark"] .app :is(.group-action-button, .settle-expense-button, .
   color: var(--theme-text);
 }
 
-html[data-theme="dark"] .app :is(.group-action-button, .settle-expense-button, .sign-out-top-button, .sign-out-button, .notification-bell, .icon-button) svg {
+html[data-theme="dark"] .app :is(.group-action-button, .settle-expense-button, .sign-out-top-button, .sign-out-button, .notification-bell, .icon-button, .more-button) {
+  border-color: var(--theme-border);
+  background-color: var(--theme-card);
+  color: #d7e9dc;
+}
+
+html[data-theme="dark"] .app :is(.group-action-button, .settle-expense-button, .sign-out-top-button, .sign-out-button, .notification-bell, .icon-button, .more-button) svg {
   color: inherit;
   stroke: currentColor;
 }
