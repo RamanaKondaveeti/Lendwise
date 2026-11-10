@@ -21,6 +21,19 @@ function percentageToUnits(value) {
   return units;
 }
 
+function positiveShareCount(value) {
+  if ((typeof value !== 'string' && typeof value !== 'number') ||
+      (typeof value === 'number' && !Number.isSafeInteger(value))) {
+    throw new TypeError('Each share count must be a positive whole number.');
+  }
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) throw new TypeError('Each share count must be a positive whole number.');
+  const count = BigInt(text);
+  if (count <= 0n) throw new TypeError('Each share count must be greater than zero.');
+  if (count > BigInt(Number.MAX_SAFE_INTEGER)) throw new TypeError('Each share count is too large.');
+  return count;
+}
+
 function allocatePercentageCents(totalCents, participants, ids) {
   const weights = participants.map(participant => percentageToUnits(participant.percentage));
   if (weights.reduce((sum, weight) => sum + weight, 0) !== 10000) {
@@ -48,12 +61,37 @@ function allocatePercentageCents(totalCents, participants, ids) {
   return shares.map(({ personId, cents }) => ({ personId, cents }));
 }
 
+function allocateSharesCents(totalCents, participants, ids) {
+  const weights = participants.map(participant => positiveShareCount(participant.shares));
+  const totalShares = weights.reduce((sum, weight) => sum + weight, 0n);
+  if (totalShares <= 0n) throw new TypeError('Total shares must be greater than zero.');
+  const total = BigInt(totalCents);
+  const shares = weights.map((weight, index) => {
+    const product = total * weight;
+    return {
+      personId: ids[index],
+      cents: Number(product / totalShares),
+      remainder: product % totalShares,
+      index,
+    };
+  });
+  let remaining = totalCents - shares.reduce((sum, share) => sum + share.cents, 0);
+  const remainderOrder = [...shares].sort((left, right) => {
+    if (left.remainder === right.remainder) return left.index - right.index;
+    return left.remainder > right.remainder ? -1 : 1;
+  });
+  for (let index = 0; remaining > 0; index++, remaining--) {
+    remainderOrder[index % remainderOrder.length].cents++;
+  }
+  return shares.map(({ personId, cents }) => ({ personId, cents }));
+}
+
 function allocateExpenseSplits(totalCents, participants, splitMethod = 'equal') {
   if (!Number.isSafeInteger(totalCents) || totalCents <= 0 || !Array.isArray(participants) || !participants.length) {
     throw new TypeError('A positive expense amount and at least one participant are required.');
   }
   const ids = participants.map(participant => Number(
-    ['exact', 'percentage'].includes(splitMethod) ? participant?.personId : participant
+    ['exact', 'percentage', 'shares'].includes(splitMethod) ? participant?.personId : participant
   ));
   if (ids.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) {
     throw new TypeError('Participant IDs must be valid and unique.');
@@ -64,7 +102,8 @@ function allocateExpenseSplits(totalCents, participants, splitMethod = 'equal') 
     return ids.map((personId, index) => ({ personId, cents: base + (index < remainder ? 1 : 0) }));
   }
   if (splitMethod === 'percentage') return allocatePercentageCents(totalCents, participants, ids);
-  if (splitMethod !== 'exact') throw new TypeError('Split method must be equal, exact, or percentage.');
+  if (splitMethod === 'shares') return allocateSharesCents(totalCents, participants, ids);
+  if (splitMethod !== 'exact') throw new TypeError('Split method must be equal, exact, percentage, or shares.');
   const allocations = participants.map((participant, index) => ({
     personId: ids[index],
     cents: amountToCents(participant.amount),
@@ -75,4 +114,4 @@ function allocateExpenseSplits(totalCents, participants, splitMethod = 'equal') 
   return allocations;
 }
 
-module.exports = { amountToCents, allocateExpenseSplits, percentageToUnits };
+module.exports = { amountToCents, allocateExpenseSplits, percentageToUnits, positiveShareCount };

@@ -205,6 +205,7 @@ function derivePasswordHash(password, salt) {
 
 const sessionCookieName = 'lendwise_session';
 const sessionDurationSeconds = Number(process.env.SESSION_DURATION_SECONDS || 8 * 60 * 60);
+const rememberedSessionDurationSeconds = 30 * 24 * 60 * 60;
 const emailTokenDurationSeconds = 60 * 60;
 if (!Number.isInteger(sessionDurationSeconds) || sessionDurationSeconds < 300 || sessionDurationSeconds > 30 * 24 * 60 * 60) {
   throw new Error('SESSION_DURATION_SECONDS must be between 300 seconds and 30 days.');
@@ -217,11 +218,12 @@ function getSessionToken(req) {
   return cookie?.slice(sessionCookieName.length + 1) || '';
 }
 
-function setSessionCookie(res, token) {
+function setSessionCookie(res, token, maxAgeSeconds = sessionDurationSeconds) {
   const secure = process.env.COOKIE_SECURE === 'true' ? '; Secure' : '';
+  const persistence = maxAgeSeconds ? `; Max-Age=${maxAgeSeconds}` : '';
   res.setHeader(
     'Set-Cookie',
-    `${sessionCookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${sessionDurationSeconds}${secure}`
+    `${sessionCookieName}=${token}; HttpOnly; SameSite=Strict; Path=/${persistence}${secure}`
   );
 }
 
@@ -237,14 +239,17 @@ function hashSessionToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-async function createSession(accountId, workspaceId, res) {
+async function createSession(accountId, workspaceId, res, rememberMe = null) {
+  const durationSeconds = rememberMe === true
+    ? rememberedSessionDurationSeconds
+    : sessionDurationSeconds;
   const token = crypto.randomBytes(32).toString('base64url');
   await q(
     `INSERT INTO auth_sessions(token_hash, account_id, workspace_id, expires_at)
      VALUES(?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND))`,
-    [hashSessionToken(token), accountId, workspaceId, sessionDurationSeconds]
+    [hashSessionToken(token), accountId, workspaceId, durationSeconds]
   );
-  setSessionCookie(res, token);
+  setSessionCookie(res, token, rememberMe === false ? 0 : durationSeconds);
 }
 
 function emailIsConfigured() {
@@ -884,7 +889,7 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
       return res.status(401).json({ error: 'Email or password is incorrect.' });
     }
 
-    await createSession(account.id, account.workspace_id, res);
+    await createSession(account.id, account.workspace_id, res, req.body?.rememberMe === true);
     res.json({
       id: account.id,
       email: account.email,

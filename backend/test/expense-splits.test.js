@@ -121,3 +121,57 @@ test('percentage allocation rejects negative values, excessive precision, and du
     { personId: 2, percentage: '50' },
   ], 'percentage'), /unique/);
 });
+
+test('shares allocation distributes 2:1:1 proportionally', () => {
+  assert.deepEqual(allocateExpenseSplits(1200, [
+    { personId: 2, shares: 2 },
+    { personId: 3, shares: 1 },
+    { personId: 4, shares: 1 },
+  ], 'shares'), [
+    { personId: 2, cents: 600 },
+    { personId: 3, cents: 300 },
+    { personId: 4, cents: 300 },
+  ]);
+});
+
+test('shares allocation splits 100 equally across 1:1:1 with deterministic cents', () => {
+  assert.deepEqual(allocateExpenseSplits(10000, [
+    { personId: 2, shares: 1 },
+    { personId: 3, shares: 1 },
+    { personId: 4, shares: 1 },
+  ], 'shares'), [
+    { personId: 2, cents: 3334 },
+    { personId: 3, cents: 3333 },
+    { personId: 4, cents: 3333 },
+  ]);
+});
+
+test('shares allocation distributes 3:2:1 and conserves the expense total', () => {
+  const allocations = allocateExpenseSplits(10000, [
+    { personId: 2, shares: 3 },
+    { personId: 3, shares: 2 },
+    { personId: 4, shares: 1 },
+  ], 'shares');
+  assert.deepEqual(allocations.map(share => share.cents), [5000, 3333, 1667]);
+  assert.equal(allocations.reduce((sum, share) => sum + share.cents, 0), 10000);
+});
+
+test('shares allocation deterministically gives a leftover cent to the earliest tied participant', () => {
+  assert.deepEqual(allocateExpenseSplits(1, [
+    { personId: 2, shares: 1 },
+    { personId: 3, shares: 1 },
+    { personId: 4, shares: 1 },
+  ], 'shares').map(share => share.cents), [1, 0, 0]);
+});
+
+test('shares allocation rejects zero, negative, fractional, unsafe, and duplicate shares', () => {
+  for (const invalidShares of [0, -1, 1.5, '1.5', '0', Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => allocateExpenseSplits(100, [
+      { personId: 2, shares: invalidShares },
+    ], 'shares'), /share count/);
+  }
+  assert.throws(() => allocateExpenseSplits(100, [
+    { personId: 2, shares: 1 },
+    { personId: 2, shares: 1 },
+  ], 'shares'), /unique/);
+});

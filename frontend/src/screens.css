@@ -139,12 +139,14 @@
 .expense-share-equal{grid-template-columns:minmax(0,1fr)}
 .expense-share-exact{grid-template-columns:minmax(0,1fr) minmax(110px,130px)}
 .expense-share-percentage{grid-template-columns:minmax(0,1fr) minmax(100px,108px) minmax(84px,auto)}
+.expense-share-shares{grid-template-columns:minmax(0,1fr) minmax(100px,108px) minmax(84px,auto)}
 .expense-modal .participant-list .expense-participant-toggle{display:grid;grid-template-columns:16px 20px minmax(0,1fr);align-items:center;gap:8px;min-width:0;margin:0;color:var(--theme-text,#20352e);font-size:10px;font-weight:600;cursor:pointer}
 .expense-participant-toggle input[type="checkbox"]{width:16px;height:16px;margin:0;accent-color:#167f68;cursor:pointer}
 .expense-share-name{min-width:0;overflow-wrap:anywhere;line-height:1.3}
 .percentage-calculated{justify-self:end;align-self:center;min-width:0;color:#426a49;font-size:10px;font-weight:700;text-align:right;white-space:nowrap}
 .modal .participant-list input.exact-share-input{box-sizing:border-box;width:100%;height:38px;min-width:0;flex:0 0 auto;margin:0;padding:0 9px;border:1px solid #dfe9e3;border-radius:6px;background:#fff;color:#20352e;font:inherit;font-size:11px;font-variant-numeric:tabular-nums}
 .modal .participant-list input.percentage-share-input{width:100%;min-width:100px;flex:0 0 100px;padding:0 8px;text-align:right;appearance:textfield;-moz-appearance:textfield}
+.modal .participant-list input.shares-count-input{width:100%;min-width:100px;flex:0 0 100px;padding:0 8px;text-align:right;font-variant-numeric:tabular-nums}
 .modal .participant-list input.percentage-share-input::-webkit-inner-spin-button,.modal .participant-list input.percentage-share-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 .exact-allocation-summary{padding:9px 11px;border:1px solid #dfe9e3;border-radius:7px;background:#f7faf7;color:#52675b;font-size:10px}
 .exact-allocation-summary p{margin:3px 0}
@@ -225,6 +227,10 @@ footer svg{vertical-align:middle}
   .expense-share-percentage .expense-participant-toggle{grid-column:1/-1}
   .expense-share-percentage .percentage-share-input{grid-column:2;grid-row:2;justify-self:end}
   .expense-share-percentage .percentage-calculated{grid-column:1;grid-row:2;justify-self:start}
+  .expense-share-shares{grid-template-columns:minmax(0,1fr) 104px;row-gap:5px}
+  .expense-share-shares .expense-participant-toggle{grid-column:1/-1}
+  .expense-share-shares .shares-count-input{grid-column:2;grid-row:2;justify-self:end}
+  .expense-share-shares .percentage-calculated{grid-column:1;grid-row:2;justify-self:start}
   .expense-modal .participant-list{grid-template-columns:1fr;gap:8px}
 }
 @media(max-width:380px){
@@ -232,7 +238,9 @@ footer svg{vertical-align:middle}
   .expense-modal .modal-top{top:-13px;margin:-13px -13px 0;padding:12px 13px 8px}
   .expense-modal .modal-submit{bottom:-13px;margin:0 -13px -13px;width:calc(100% + 26px);padding:0 13px}
   .expense-share-percentage{grid-template-columns:minmax(0,1fr) 102px}
+  .expense-share-shares{grid-template-columns:minmax(0,1fr) 102px}
   .modal .participant-list input.percentage-share-input{min-width:98px;flex-basis:98px}
+  .modal .participant-list input.shares-count-input{min-width:98px;flex-basis:98px}
 }
 
 :root{color-scheme:light;color:#20352e;background:#f3f9f6}
@@ -469,6 +477,9 @@ footer a{color:#668575}
 .auth-form label{display:grid;gap:7px;color:#52685b;font-size:10px;font-weight:600}
 .auth-form input{height:43px;width:100%;padding:0 12px;border:1px solid #dfeae3;border-radius:8px;background:white;color:#20352e;font-size:12px;outline:none}
 .auth-form input:focus{border-color:#58b987;box-shadow:0 0 0 3px #58b98720}
+.auth-form .remember-me-option{display:flex;align-items:center;gap:9px;width:max-content;min-height:20px;color:#52685b;font-size:11px;font-weight:500;cursor:pointer}
+.auth-form .remember-me-option input[type="checkbox"]{flex:0 0 16px;width:16px;height:16px;margin:0;padding:0;border:1px solid #b9cec1;border-radius:4px;accent-color:#21875e;cursor:pointer}
+.auth-form .remember-me-option input[type="checkbox"]:focus{box-shadow:0 0 0 3px #58b98730}
 .auth-submit{width:100%;height:43px;margin-top:3px;border-radius:8px;font-size:11px}
 .auth-submit svg{margin-left:auto}
 .auth-error{margin:0;padding:10px 12px;border:1px solid #f2d1cd;border-radius:8px;background:#fff1ef;color:#aa4138;font-size:10px}

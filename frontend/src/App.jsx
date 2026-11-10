@@ -147,6 +147,21 @@ const percentageShareCents = (totalCents, allocations) => {
   }
   return shares
 }
+const shareCountCents = (totalCents, allocations) => {
+  const weights = allocations.map(allocation => BigInt(allocation.valid ? allocation.raw : 0))
+  const totalShares = weights.reduce((sum, shares) => sum + shares, 0n)
+  if (!totalShares) return allocations.map((_, index) => ({ index, cents: 0, remainder: 0n }))
+  const shares = weights.map((weight, index) => {
+    const product = BigInt(totalCents) * weight
+    return { index, cents: Number(product / totalShares), remainder: product % totalShares }
+  })
+  let remaining = totalCents - shares.reduce((sum, share) => sum + share.cents, 0)
+  const order = [...shares].sort((left, right) => left.remainder === right.remainder
+    ? left.index - right.index
+    : left.remainder > right.remainder ? -1 : 1)
+  for (let index = 0; remaining > 0; index++, remaining--) shares[order[index % order.length].index].cents++
+  return shares
+}
 const monthName = value => new Intl.DateTimeFormat('en-US', {
   month: 'long',
   year: 'numeric',
@@ -707,6 +722,7 @@ function App() {
   const [expenseParticipantIds, setExpenseParticipantIds] = useState([])
   const [expenseExactAmounts, setExpenseExactAmounts] = useState({})
   const [expensePercentages, setExpensePercentages] = useState({})
+  const [expenseShares, setExpenseShares] = useState({})
   const [expenseTotalInput, setExpenseTotalInput] = useState('')
   const [expenseToSettle, setExpenseToSettle] = useState(null)
   const [expenseToEdit, setExpenseToEdit] = useState(null)
@@ -1217,6 +1233,14 @@ function App() {
     ? []
     : percentageShareCents(expenseTotalCents, expensePercentageAllocations)
   const expensePercentageAllocatedCents = expensePercentageCents.reduce((sum, share) => sum + share.cents, 0)
+  const expenseShareAllocations = expenseParticipantIds.map(personId => {
+    const raw = expenseShares[personId] ?? '1'
+    const valid = /^\d+$/.test(String(raw)) && Number.isSafeInteger(Number(raw)) && Number(raw) > 0
+    return { personId, raw, valid }
+  })
+  const expenseTotalShares = expenseShareAllocations.reduce((sum, allocation) => sum + (allocation.valid ? BigInt(allocation.raw) : 0n), 0n)
+  const expenseShareCents = expenseTotalCents === null ? [] : shareCountCents(expenseTotalCents, expenseShareAllocations)
+  const expenseShareAllocatedCents = expenseShareCents.reduce((sum, share) => sum + share.cents, 0)
   const expenseSplitValid = expenseSplitMethod === 'exact'
     ? expenseTotalCents !== null && expenseParticipantIds.length > 0 &&
       expenseExactAllocations.every(allocation => allocation.valid) &&
@@ -1225,7 +1249,10 @@ function App() {
       ? expenseTotalCents !== null && expenseParticipantIds.length > 0 &&
         expensePercentageAllocations.every(allocation => allocation.valid) &&
         expensePercentageUnits === 10000 && Number.isFinite(exchangeRate) && exchangeRate > 0
-      : true
+      : expenseSplitMethod === 'shares'
+        ? expenseTotalCents !== null && expenseParticipantIds.length > 0 && expenseShareAllocations.every(allocation => allocation.valid) &&
+          expenseTotalShares > 0n && Number.isFinite(exchangeRate) && exchangeRate > 0
+        : true
   const settlementGroup = groups.find(group => group.id === Number(settlementDefaults?.groupId))
   const settlementPeople = settlementGroup ? settlementGroup.balance_people || [] : people
   const suggestedSettlements = groups.flatMap(group => group.settlement_suggestions || [])
@@ -1319,6 +1346,7 @@ function App() {
     setExpenseParticipantIds((defaultGroup?.members || []).map(person => person.id))
     setExpenseExactAmounts({})
     setExpensePercentages({})
+    setExpenseShares({})
     setExpenseTotalInput('')
     setModal('expense')
   }
@@ -1664,6 +1692,7 @@ function App() {
           name: signingUp ? form.get('name') : undefined,
           email: authEmail,
           password: form.get('password'),
+          rememberMe: authMode === 'login' ? form.get('rememberMe') === 'on' : undefined,
           invitationToken: signingUp ? invitationToken || undefined : undefined,
         }),
       })
@@ -1894,6 +1923,11 @@ function App() {
               personId: allocation.personId,
               percentage: allocation.raw,
             }))
+            : expenseSplitMethod === 'shares'
+              ? expenseShareAllocations.map(allocation => ({
+                personId: allocation.personId,
+                shares: allocation.raw,
+              }))
             : selectedParticipants,
       }
       successMessage = 'Expense added.'
@@ -2035,6 +2069,12 @@ function App() {
               )}
               {authMode !== 'forgot' && (
                 <label>{authMode === 'reset' ? 'New password' : 'Password'}<input name="password" type="password" autoComplete={authMode === 'signup' || authMode === 'reset' ? 'new-password' : 'current-password'} minLength={authMode === 'reset' ? '12' : '8'} maxLength="128" placeholder={authMode === 'signup' ? 'At least 8 characters' : authMode === 'reset' ? 'At least 12 characters' : 'Your password'} required /></label>
+              )}
+              {authMode === 'login' && (
+                <label className="remember-me-option">
+                  <input name="rememberMe" type="checkbox" />
+                  <span>Remember me</span>
+                </label>
               )}
               {authNotice && <p className="auth-success" role="status">{authNotice}</p>}
               {authError && <p className="auth-error" role="alert">{authError}</p>}
@@ -3208,9 +3248,9 @@ function App() {
                   setExpenseParticipantIds((nextGroup?.members || []).map(person => person.id))
                 }}><option value="" disabled>Select a group</option>{groups.filter(group => group.members?.length).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
                 <label key={selectedExpenseGroup?.id}>Paid by<select name="paidBy" required defaultValue={selectedExpenseGroup?.members?.some(person => person.id === data.currentUserId) ? data.currentUserId : selectedExpenseGroup?.members?.[0]?.id || ''}>{(selectedExpenseGroup?.members || []).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
-                <label>Split method<select value={expenseSplitMethod} onChange={event => setExpenseSplitMethod(event.target.value)}><option value="equal">Split equally</option><option value="exact">Exact amounts</option><option value="percentage">Percentage</option></select></label>
+                <label>Split method<select value={expenseSplitMethod} onChange={event => setExpenseSplitMethod(event.target.value)}><option value="equal">Split equally</option><option value="exact">Exact amounts</option><option value="percentage">Percentage</option><option value="shares">Shares</option></select></label>
                 <fieldset className="participant-field">
-                  <legend>{expenseSplitMethod === 'exact' ? 'Participants and exact shares' : expenseSplitMethod === 'percentage' ? 'Participants and percentages' : 'Split equally between'}</legend>
+                  <legend>{expenseSplitMethod === 'exact' ? 'Participants and exact amounts' : expenseSplitMethod === 'percentage' ? 'Participants and percentages' : expenseSplitMethod === 'shares' ? 'Participants and share counts' : 'Split equally between'}</legend>
                   <div className="participant-list">
                     {(selectedExpenseGroup?.members || []).map(person => {
                       const selected = expenseParticipantIds.includes(person.id)
@@ -3258,6 +3298,19 @@ function App() {
                           />
                           <span className="percentage-calculated" aria-label={`Calculated share amount ${formatCurrentCurrency((expensePercentageCents[expenseParticipantIds.indexOf(person.id)]?.cents || 0) / 100)}`} title="Calculated share amount">{formatCurrentCurrency((expensePercentageCents[expenseParticipantIds.indexOf(person.id)]?.cents || 0) / 100)}</span>
                         </>}
+                        {selected && expenseSplitMethod === 'shares' && <>
+                          <input
+                            className="exact-share-input shares-count-input"
+                            aria-label={`${person.name} share count`}
+                            type="number"
+                            inputMode="numeric"
+                            min="1"
+                            step="1"
+                            value={expenseShares[person.id] ?? '1'}
+                            onChange={event => setExpenseShares(current => ({ ...current, [person.id]: event.target.value }))}
+                          />
+                          <span className="percentage-calculated" aria-label={`Calculated share amount ${formatCurrentCurrency((expenseShareCents[expenseParticipantIds.indexOf(person.id)]?.cents || 0) / 100)}`} title="Calculated share amount">{formatCurrentCurrency((expenseShareCents[expenseParticipantIds.indexOf(person.id)]?.cents || 0) / 100)}</span>
+                        </>}
                       </div>
                     })}
                   </div>
@@ -3268,7 +3321,7 @@ function App() {
                   {expenseTotalCents !== null && expenseAllocatedCents > expenseTotalCents && <p className="exact-allocation-error">Over-allocated by {formatCurrentCurrency((expenseAllocatedCents - expenseTotalCents) / 100)}.</p>}
                   {(expenseTotalCents === null || expenseExactAllocations.some(allocation => !allocation.valid)) && <p className="exact-allocation-error">Enter a valid nonnegative amount (up to two decimal places) for each selected participant.</p>}
                   {expenseTotalCents !== null && expenseAllocatedCents === expenseTotalCents && expenseSplitValid && currency !== 'INR' && <p className="form-hint">Shares are converted to INR cents for storage; any paise rounding is distributed across the selected shares.</p>}
-                </div> : <div className="exact-allocation-summary percentage-allocation-summary" aria-live="polite">
+                </div> : expenseSplitMethod === 'percentage' ? <div className="exact-allocation-summary percentage-allocation-summary" aria-live="polite">
                   <strong className="allocation-summary-title">Allocation summary</strong>
                   <div className="allocation-summary-grid">
                     <div><span>Total percentage</span><strong>{(expensePercentageUnits / 100).toFixed(2)}%</strong></div>
@@ -3280,6 +3333,15 @@ function App() {
                   {expensePercentageUnits < 10000 && expensePercentageAllocations.every(allocation => allocation.valid) && <p className="exact-allocation-error">Percentages must total exactly 100% before saving.</p>}
                   {expensePercentageUnits > 10000 && <p className="exact-allocation-error">Percentages exceed 100% by {((expensePercentageUnits - 10000) / 100).toFixed(2)}%.</p>}
                   {expensePercentageUnits === 10000 && expensePercentageAllocations.every(allocation => allocation.valid) && expenseSplitValid && <p className="allocation-valid-message">Percentages are fully allocated.</p>}
+                </div> : <div className="exact-allocation-summary percentage-allocation-summary" aria-live="polite">
+                  <strong className="allocation-summary-title">Share allocation summary</strong>
+                  <div className="allocation-summary-grid">
+                    <div><span>Total shares</span><strong>{expenseTotalShares.toString()}</strong></div>
+                    <div><span>Total amount allocated</span><strong>{formatCurrentCurrency(expenseShareAllocatedCents / 100)}</strong></div>
+                    <div><span>Remaining amount</span><strong>{expenseTotalCents === null ? formatCurrentCurrency(0) : formatCurrentCurrency(Math.max(0, expenseTotalCents - expenseShareAllocatedCents) / 100)}</strong></div>
+                  </div>
+                  {expenseShareAllocations.some(allocation => !allocation.valid) && <p className="exact-allocation-error">Enter a positive whole number of shares for every selected participant.</p>}
+                  {expenseShareAllocations.length > 0 && expenseShareAllocations.every(allocation => allocation.valid) && expenseSplitValid && <p className="allocation-valid-message">Shares are allocated. Rounding cents are distributed deterministically.</p>}
                 </div>}
               </>
             )}
