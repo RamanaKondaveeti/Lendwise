@@ -16,15 +16,15 @@
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --theme-background: #111915;
+  --theme-background: #101713;
   --theme-surface: #19231e;
   --theme-sidebar: #151e19;
   --theme-card: #1d2922;
-  --theme-primary: #66c79a;
+  --theme-primary: #78d5a8;
   --theme-secondary: #203b2e;
-  --theme-text: #e5eee8;
-  --theme-muted: #a0b1a6;
-  --theme-border: #2b3b31;
+  --theme-text: #f0f5f1;
+  --theme-muted: #bdcbc1;
+  --theme-border: #34463a;
   --theme-success: #75d6a5;
   --theme-warning: #e7bd72;
   --theme-error: #e39b83;
@@ -158,7 +158,7 @@ html[data-theme="dark"] .content {
   background: var(--theme-background);
 }
 
-html[data-theme="dark"] .app *:not(svg):not(path):not(rect):not(circle):not(line):not(polyline):not(polygon) {
+html[data-theme="dark"] :where(.app *) {
   color: var(--theme-text);
   border-color: var(--theme-border);
 }
