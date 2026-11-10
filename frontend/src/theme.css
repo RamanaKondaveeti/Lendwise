@@ -205,6 +205,23 @@ html[data-theme="dark"] .workspace-menu button {
   color: var(--theme-text);
 }
 
+html[data-theme="dark"] .app :is(input, select, textarea) {
+  border-color: var(--theme-border);
+  background-color: var(--theme-card);
+  color: var(--theme-text);
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] .app :is(.search input, .range-select select, .monthly-summary-select select, .currency-switcher select, .theme-switcher select) {
+  border-color: transparent;
+  background-color: transparent;
+}
+
+html[data-theme="dark"] .app option {
+  background: var(--theme-card);
+  color: var(--theme-text);
+}
+
 html[data-theme="dark"] .workspace-menu button:hover:not(:disabled),
 html[data-theme="dark"] .button-light:hover,
 html[data-theme="dark"] .select-button:hover,
