@@ -7,44 +7,77 @@ import {
   CalendarDays,
   CarFront,
   Check,
+  Clapperboard,
   ChevronDown,
   CircleHelp,
   Coffee,
+  GraduationCap,
+  HeartPulse,
   House,
+  Lightbulb,
   LayoutDashboard,
   LoaderCircle,
   LogOut,
   Mountain,
   Plus,
+  Pencil,
+  Plane,
   ReceiptText,
   Search,
   Trash2,
   Users,
   Utensils,
   ShoppingBasket,
+  ShoppingBag,
   Zap,
   X,
 } from 'lucide-react'
+import { calculateMonthlyAnalytics, monthValue } from './analytics.mjs'
 
 const groupIcons = { mountain: Mountain, house: House, users: Users }
+const expenseCategories = [
+  'Food & Dining',
+  'Shopping',
+  'Travel',
+  'Rent',
+  'Utilities & Bills',
+  'Entertainment',
+  'Groceries',
+  'Healthcare',
+  'Education',
+  'Other',
+]
 const categoryIcons = {
+  'Food & Dining': Utensils,
   'Food & drink': Utensils,
-  Transport: CarFront,
-  Shopping: ShoppingBasket,
-  Utilities: Zap,
+  Shopping: ShoppingBag,
+  Travel: Plane,
+  Rent: House,
+  'Utilities & Bills': Lightbulb,
+  Entertainment: Clapperboard,
+  Groceries: ShoppingBasket,
+  Healthcare: HeartPulse,
+  Education: GraduationCap,
   Other: ReceiptText,
+  Transport: CarFront,
+  Utilities: Zap,
 }
 const categoryStyles = {
+  'Food & Dining': 'food',
   'Food & drink': 'food',
-  Transport: 'transport',
   Shopping: 'shopping',
-  Utilities: 'utilities',
+  Travel: 'transport',
+  Rent: 'rent',
+  'Utilities & Bills': 'utilities',
+  Entertainment: 'entertainment',
+  Groceries: 'food',
+  Healthcare: 'healthcare',
+  Education: 'education',
   Other: 'other',
+  Transport: 'transport',
+  Utilities: 'utilities',
 }
-const monthValue = value => {
-  const parsed = new Date(value)
-  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`
-}
+const chartColors = ['#4f8b5b', '#83ad7d', '#a8c797', '#c4d8ac', '#e3b46b', '#d98c72', '#9d83b8', '#6f9fa4', '#d08fba', '#8e9b91']
 const monthName = value => new Intl.DateTimeFormat('en-US', {
   month: 'long',
   year: 'numeric',
@@ -60,6 +93,92 @@ const date = value => new Intl.DateTimeFormat('en-US', {
   year: 'numeric',
 }).format(new Date(value))
 
+function MonthlyExpenseChart({ series, selectedMonth, onSelectMonth, formatMoney }) {
+  const maximum = Math.max(1, ...series.map(item => item.total))
+  const baseY = 126
+  const chartHeight = 100
+
+  return (
+    <svg className="analytics-bar-chart" viewBox="0 0 620 158" role="img" aria-label="Monthly expenses for the selected year">
+      {series.map((item, index) => {
+        const height = Math.max(item.total > 0 ? 3 : 0, (item.total / maximum) * chartHeight)
+        const x = 14 + index * 50
+        const label = new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(`${item.month}-01T12:00:00`))
+        return (
+          <g
+            key={item.month}
+            className="analytics-bar"
+            role="button"
+            tabIndex="0"
+            aria-label={`${monthName(item.month)}: ${formatMoney(item.total)}. Select this month.`}
+            onClick={() => onSelectMonth(item.month)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onSelectMonth(item.month)
+              }
+            }}
+          >
+            <title>{monthName(item.month)}: {formatMoney(item.total)}</title>
+            <rect
+              x={x}
+              y={baseY - height}
+              width="28"
+              height={height}
+              rx="5"
+              className={item.month === selectedMonth ? 'analytics-bar-selected' : ''}
+            />
+            <text x={x + 14} y="148" textAnchor="middle">{label}</text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+function CategoryDonutChart({ categories, total, formatMoney }) {
+  const radius = 53
+  const circumference = 2 * Math.PI * radius
+  let offset = 0
+
+  return (
+    <div className="analytics-donut-layout">
+      <svg className="analytics-donut" viewBox="0 0 160 160" role="img" aria-label="Monthly expenses by category">
+        <circle cx="80" cy="80" r={radius} className="analytics-donut-track" />
+        {categories.map((category, index) => {
+          const length = total > 0 ? (category.amount / total) * circumference : 0
+          const currentOffset = offset
+          offset += length
+          return (
+            <circle
+              key={category.name}
+              cx="80"
+              cy="80"
+              r={radius}
+              stroke={chartColors[index % chartColors.length]}
+              strokeDasharray={`${length} ${circumference - length}`}
+              strokeDashoffset={-currentOffset}
+              className="analytics-donut-slice"
+            >
+              <title>{category.name}: {formatMoney(category.amount)}</title>
+            </circle>
+          )
+        })}
+        <text x="80" y="77" className="analytics-donut-total">{categories.length}</text>
+        <text x="80" y="94" className="analytics-donut-caption">categories</text>
+      </svg>
+      <div className="analytics-legend">
+        {categories.length ? categories.map((category, index) => (
+          <div className="analytics-legend-row" key={category.name}>
+            <span className="analytics-legend-name"><i style={{ background: chartColors[index % chartColors.length] }} />{category.name}</span>
+            <b>{formatMoney(category.amount)}</b>
+          </div>
+        )) : <div className="analytics-empty">No category expenses for this month.</div>}
+      </div>
+    </div>
+  )
+}
+
 async function request(url, options) {
   const response = await fetch(url, options)
   const body = await response.json()
@@ -71,7 +190,7 @@ async function request(url, options) {
   return body
 }
 
-function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, showSettlement = false, showShare = false, formatMoney }) {
+function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onEditCategory, showSettlement = false, showShare = false, formatMoney }) {
   if (!expenses.length) return <div className="empty">No expenses to show yet.</div>
 
   return (
@@ -102,6 +221,8 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, sho
                 </button>
                 <i>·</i>
                 {date(expense.created_at)}
+                <i>·</i>
+                <span className="activity-category-label">{expense.category || 'Other'}</span>
               </span>
             </div>
             <div className="activity-payer">
@@ -117,10 +238,17 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, sho
                   : 'total'}</span>
               {showShare && <span className={`settlement-status status-${settlementStatus.toLowerCase().replace(/\s+/g, '-')}`}>{settlementStatus}</span>}
             </div>
-            {showSettlement && (
-              expense.outstanding_amount > 0
-                ? <button className="settle-expense-button" type="button" onClick={() => onSettleExpense(expense)}>Settle</button>
-                : <span className="expense-settled" title="All shares are settled"><Check size={15} /></span>
+            {(onEditCategory || showSettlement) && (
+              <div className="activity-row-actions">
+                {onEditCategory && (
+                  <button className="edit-category-button" type="button" title="Edit category" aria-label={`Edit category for ${expense.title}`} onClick={() => onEditCategory(expense)}>
+                    <Pencil size={14} />
+                  </button>
+                )}
+                {showSettlement && (expense.outstanding_amount > 0
+                  ? <button className="settle-expense-button" type="button" onClick={() => onSettleExpense(expense)}>Settle</button>
+                  : <span className="expense-settled" title="All shares are settled"><Check size={15} /></span>)}
+              </div>
             )}
           </div>
         )
@@ -286,11 +414,15 @@ function App() {
   const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
   const [expenseToSettle, setExpenseToSettle] = useState(null)
+  const [expenseToEdit, setExpenseToEdit] = useState(null)
   const [settlementPlan, setSettlementPlan] = useState([])
   const [settlementDefaults, setSettlementDefaults] = useState(null)
   const [modal, setModal] = useState('')
   const [search, setSearch] = useState('')
   const [dateRange, setDateRange] = useState('30')
+  const [activityCategory, setActivityCategory] = useState('all')
+  const [analyticsGroup, setAnalyticsGroup] = useState('all')
+  const [analyticsCategory, setAnalyticsCategory] = useState('all')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [activity, setActivity] = useState([])
@@ -467,8 +599,19 @@ function App() {
     }).format(Math.abs(Number(amount) * exchangeRate || 0))
   }
   const toStoredAmount = amount => Math.round((Number(amount) / exchangeRate) * 100) / 100
-  const monthOptions = [...new Set([currentMonth, ...activity.map(expense => monthValue(expense.created_at))])]
+  const availableYears = [...new Set([
+    currentMonth,
+    selectedMonth,
+    ...activity.map(expense => monthValue(expense.created_at)),
+  ].map(month => month.slice(0, 4)))]
+  const monthOptions = availableYears
+    .flatMap(year => Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`))
     .sort((left, right) => right.localeCompare(left))
+  const categoryOptions = [...new Set([
+    ...expenseCategories,
+    ...(data?.activity || []).map(expense => expense.category || 'Other'),
+    ...activity.map(expense => expense.category || 'Other'),
+  ])].sort((left, right) => left.localeCompare(right))
   const unassignedBalance = Math.round((myBalance - groups.reduce(
     (total, group) => total + Number(group.user_balance || 0),
     0
@@ -477,6 +620,14 @@ function App() {
     return monthValue(expense.created_at) === selectedMonth
   })
   const monthlyTotal = monthlyExpenses.reduce((total, expense) => total + Number(expense.amount || 0), 0)
+  const analyticsSource = activityLoaded ? activity : data?.activity || []
+  const monthlyAnalytics = useMemo(() => calculateMonthlyAnalytics(
+    analyticsSource,
+    data?.currentUserId,
+    selectedMonth,
+    analyticsGroup,
+    analyticsCategory,
+  ), [analyticsCategory, analyticsGroup, analyticsSource, data?.currentUserId, selectedMonth])
 
   const visibleActivity = useMemo(() => {
     const source = tab === 'Overview' && !activityLoaded ? data?.activity || [] : activity
@@ -485,9 +636,11 @@ function App() {
       const matchesSearch = `${expense.title} ${expense.group_name} ${expense.payer}`
         .toLowerCase()
         .includes(normalizedSearch)
-      return matchesSearch && new Date(expense.created_at).getTime() >= cutoff
+      const matchesCategory = !['Activity', 'Group'].includes(tab) ||
+        activityCategory === 'all' || (expense.category || 'Other') === activityCategory
+      return matchesSearch && matchesCategory && new Date(expense.created_at).getTime() >= cutoff
     })
-  }, [activity, activityLoaded, data, dateRange, normalizedSearch, tab])
+  }, [activity, activityCategory, activityLoaded, data, dateRange, normalizedSearch, tab])
 
   function openGroup(groupId) {
     setSelectedGroupId(Number(groupId))
@@ -521,6 +674,11 @@ function App() {
   function openExpenseSettlement(expense) {
     setExpenseToSettle(expense)
     setModal('expense-settlement')
+  }
+
+  function openExpenseCategoryEdit(expense) {
+    setExpenseToEdit(expense)
+    setModal('expense-category')
   }
 
   function createSettlementPlan() {
@@ -798,6 +956,10 @@ function App() {
         participants: form.getAll('participants').map(Number),
       }
       successMessage = 'Expense added.'
+    } else if (modal === 'expense-category') {
+      url = `/api/expenses/${expenseToEdit.id}/category`
+      payload = { category: form.get('category') }
+      successMessage = 'Expense category updated.'
     } else if (modal === 'group') {
       url = '/api/groups'
       payload = {
@@ -821,7 +983,7 @@ function App() {
     setBusy(true)
     try {
       const result = await request(url, {
-        method: modal === 'members' ? 'PUT' : 'POST',
+        method: modal === 'members' ? 'PUT' : modal === 'expense-category' ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
@@ -1077,6 +1239,73 @@ function App() {
               <b>{activityLoading && !activityLoaded ? '—' : monthlyExpenses.length}</b>
             </div>
           </section>
+          <section className="panel analytics-panel" aria-label="Monthly analytics">
+            <div className="panel-heading analytics-heading">
+              <div>
+                <div className="section-title">Monthly analytics</div>
+                <div className="section-subtitle">Expense records and your actual split amounts</div>
+              </div>
+              <div className="analytics-filters">
+                <label>
+                  <span className="sr-only">Filter analytics by group</span>
+                  <select value={analyticsGroup} onChange={event => setAnalyticsGroup(event.target.value)}>
+                    <option value="all">All groups</option>
+                    {groups.map(group => <option value={group.id} key={group.id}>{group.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span className="sr-only">Filter analytics by category</span>
+                  <select value={analyticsCategory} onChange={event => setAnalyticsCategory(event.target.value)}>
+                    <option value="all">All categories</option>
+                    {categoryOptions.map(category => <option key={category}>{category}</option>)}
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div className="analytics-stats">
+              <div>
+                <span>Group expenses · {monthName(selectedMonth)}</span>
+                <b>{activityLoading && !activityLoaded ? 'Loading…' : formatMoney(monthlyAnalytics.total)}</b>
+              </div>
+              <div>
+                <span>Your personal share</span>
+                <b>{activityLoading && !activityLoaded ? 'Loading…' : formatMoney(monthlyAnalytics.personalShare)}</b>
+              </div>
+              <div>
+                <span>Compared with previous month</span>
+                <b className={monthlyAnalytics.changePercent === null ? '' : monthlyAnalytics.changePercent > 0 ? 'analytics-change-up' : 'analytics-change-down'}>
+                  {monthlyAnalytics.changePercent === null
+                    ? `${monthlyAnalytics.total > 0 ? 'New activity · ' : ''}${formatMoney(monthlyAnalytics.previousTotal)} previous`
+                    : `${monthlyAnalytics.changePercent > 0 ? '+' : ''}${monthlyAnalytics.changePercent.toFixed(1)}% · ${formatMoney(monthlyAnalytics.previousTotal)} previous`}
+                </b>
+              </div>
+            </div>
+            <div className="analytics-charts">
+              <div className="analytics-chart-card">
+                <div className="analytics-chart-heading">
+                  <b>Monthly expenses</b>
+                  <span>{selectedMonth.slice(0, 4)} · Select a bar to view that month</span>
+                </div>
+                <MonthlyExpenseChart
+                  series={monthlyAnalytics.monthlySeries}
+                  selectedMonth={selectedMonth}
+                  onSelectMonth={setSelectedMonth}
+                  formatMoney={formatMoney}
+                />
+              </div>
+              <div className="analytics-chart-card">
+                <div className="analytics-chart-heading">
+                  <b>By category</b>
+                  <span>{monthName(selectedMonth)}</span>
+                </div>
+                <CategoryDonutChart
+                  categories={monthlyAnalytics.categoryTotals}
+                  total={monthlyAnalytics.total}
+                  formatMoney={formatMoney}
+                />
+              </div>
+            </div>
+          </section>
           <section className="balance-grid">
                 <article className={`balance-card total-card ${myBalance > 0 ? 'owes-card' : ''}`}>
                   <div className="card-top">
@@ -1310,9 +1539,19 @@ function App() {
                   <div className="section-title">{tab === 'Group' ? 'Group expenses' : 'All activity'} <span className="title-count">{visibleActivity.length}</span></div>
                   <div className="section-subtitle">{tab === 'Group' ? 'Transactions saved to this group.' : 'Your expense history, loaded from the database.'}</div>
                 </div>
-                {tab === 'Group'
-                  ? <button className="select-button" onClick={() => setTab('Groups')}><ArrowRight className="back-arrow" size={14} />All groups</button>
-                  : <label className="select-button range-select"><CalendarDays size={14} /><select value={dateRange} onChange={event => setDateRange(event.target.value)}><option value="30">Last 30 days</option><option value="7">Last 7 days</option><option value="all">All time</option></select><ChevronDown size={14} /></label>}
+                <div className="activity-controls">
+                  <label className="select-button range-select">
+                    <span>Category</span>
+                    <select value={activityCategory} onChange={event => setActivityCategory(event.target.value)}>
+                      <option value="all">All</option>
+                      {categoryOptions.map(category => <option key={category}>{category}</option>)}
+                    </select>
+                    <ChevronDown size={14} />
+                  </label>
+                  {tab === 'Group'
+                    ? <button className="select-button" onClick={() => setTab('Groups')}><ArrowRight className="back-arrow" size={14} />All groups</button>
+                    : <label className="select-button range-select"><CalendarDays size={14} /><select value={dateRange} onChange={event => setDateRange(event.target.value)}><option value="30">Last 30 days</option><option value="7">Last 7 days</option><option value="all">All time</option></select><ChevronDown size={14} /></label>}
+                </div>
               </div>
               {activityLoading
                 ? <div className="empty"><LoaderCircle className="loading-icon" size={20} />Loading expenses…</div>
@@ -1321,6 +1560,7 @@ function App() {
                   currentUser={currentUser}
                   onGroupClick={openGroup}
                   onSettleExpense={openExpenseSettlement}
+                  onEditCategory={openExpenseCategoryEdit}
                   formatMoney={formatMoney}
                   showSettlement
                 />}
@@ -1376,7 +1616,7 @@ function App() {
         <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
           <form className="modal" onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
+              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
@@ -1460,7 +1700,7 @@ function App() {
                 <label>What was it for?<input required name="title" maxLength="255" placeholder="Enter an expense name" /></label>
                 <div className="form-row">
                 <label>Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" disabled={!Number.isFinite(exchangeRate)} required /></label>
-                  <label>Category<select name="category">{Object.keys(categoryIcons).map(category => <option key={category}>{category}</option>)}</select></label>
+                  <label>Category<select name="category">{expenseCategories.map(category => <option key={category}>{category}</option>)}</select></label>
                 </div>
                 <label>Group<select name="groupId" required value={expenseGroupId} onChange={event => setExpenseGroupId(Number(event.target.value))}><option value="" disabled>Select a group</option>{groups.filter(group => group.members?.length).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
                 <label key={selectedExpenseGroup?.id}>Paid by<select name="paidBy" required defaultValue={selectedExpenseGroup?.members?.some(person => person.id === data.currentUserId) ? data.currentUserId : selectedExpenseGroup?.members?.[0]?.id || ''}>{(selectedExpenseGroup?.members || []).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
@@ -1471,6 +1711,17 @@ function App() {
                   </div>
                 </fieldset>
                 <p className="form-hint">Choose who shares this expense. Any extra cents are split fairly.</p>
+              </>
+            )}
+
+            {modal === 'expense-category' && expenseToEdit && (
+              <>
+                <p className="form-hint">Change the category for “{expenseToEdit.title}”. The expense amount and split are not changed.</p>
+                <label>Category
+                  <select name="category" defaultValue={expenseToEdit.category || 'Other'} required>
+                    {categoryOptions.map(category => <option key={category}>{category}</option>)}
+                  </select>
+                </label>
               </>
             )}
 
@@ -1520,7 +1771,7 @@ function App() {
 
             {!(modal === 'invite' && manualInviteLink) && (
               <button className="button button-dark modal-submit" disabled={busy}>
-                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
+                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'expense-category' ? 'Save category' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
                 <ArrowRight size={15} />
               </button>
             )}

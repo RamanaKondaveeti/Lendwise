@@ -387,6 +387,8 @@ async function init() {
   for (const statement of schema.split(';').map(part => part.trim()).filter(Boolean)) {
     await pool.query(statement);
   }
+  await ensureColumn('expenses', 'category', "VARCHAR(100) NOT NULL DEFAULT 'Other'");
+  await q("UPDATE expenses SET category = 'Other' WHERE category IS NULL OR TRIM(category) = ''");
   await migrateWorkspaceOwnership();
   await q('DELETE FROM auth_sessions WHERE expires_at <= UTC_TIMESTAMP()');
   await q('DELETE FROM email_tokens WHERE expires_at <= UTC_TIMESTAMP()');
@@ -1101,6 +1103,30 @@ app.get('/api/expenses', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Could not load expenses.' });
+  }
+});
+
+app.patch('/api/expenses/:expenseId/category', async (req, res) => {
+  const expenseId = Number(req.params.expenseId);
+  const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+  if (!Number.isInteger(expenseId) || expenseId <= 0 ||
+      !category || category.length > 100) {
+    return res.status(400).json({ error: 'Choose a valid expense category.' });
+  }
+
+  try {
+    const expenses = await q(
+      `SELECT e.id FROM expenses e
+       JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+       WHERE e.id = ?`,
+      [req.account.workspace_id, expenseId]
+    );
+    if (!expenses.length) return res.status(404).json({ error: 'Expense not found.' });
+    await q('UPDATE expenses SET category = ? WHERE id = ?', [category, expenseId]);
+    res.json({ ok: true, message: 'Expense category updated.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not update this expense category.' });
   }
 });
 
