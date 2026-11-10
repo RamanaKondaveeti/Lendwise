@@ -4,10 +4,12 @@ import {
   ArrowLeftRight,
   ArrowRight,
   ArrowUpRight,
+  Bell,
   CalendarDays,
   CalendarClock,
   CarFront,
   Check,
+  CheckCheck,
   Clapperboard,
   ChevronDown,
   CircleHelp,
@@ -28,6 +30,7 @@ import {
   ReceiptText,
   Repeat,
   Search,
+  Settings2,
   Trash2,
   Users,
   Utensils,
@@ -82,6 +85,22 @@ const categoryStyles = {
   Utilities: 'utilities',
 }
 const chartColors = ['#4f8b5b', '#83ad7d', '#a8c797', '#c4d8ac', '#e3b46b', '#d98c72', '#9d83b8', '#6f9fa4', '#d08fba', '#8e9b91']
+const notificationLabels = {
+  expense_created: 'Expense created',
+  expense_updated: 'Expense updated',
+  settlement_recorded: 'Settlement recorded',
+  settlement_reminder: 'Settlement reminder',
+  group_invitation: 'Group invitations',
+  member_joined: 'Member joined',
+  recurring_generated: 'Recurring expense generated',
+  recurring_confirmation: 'Recurring amount confirmation',
+}
+const notificationIcon = type => {
+  if (type.startsWith('expense_')) return ReceiptText
+  if (type.startsWith('settlement_')) return ArrowLeftRight
+  if (type.startsWith('recurring_')) return Repeat
+  return Users
+}
 const equalSharePercentages = ids => {
   const base = Math.floor(10000 / Math.max(ids.length, 1))
   const remainder = 10000 % Math.max(ids.length, 1)
@@ -100,6 +119,10 @@ const date = value => new Intl.DateTimeFormat('en-US', {
   month: 'short',
   day: 'numeric',
   year: 'numeric',
+}).format(new Date(value))
+const notificationTimestamp = value => new Intl.DateTimeFormat('en-US', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
 }).format(new Date(value))
 
 function MonthlyExpenseChart({ series, selectedMonth, onSelectMonth, formatMoney }) {
@@ -218,7 +241,7 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onE
                 ? 'Partially paid'
                 : 'Unpaid'
         return (
-          <div className="activity-row" key={expense.id}>
+          <div className="activity-row" id={`expense-${expense.id}`} key={expense.id}>
             <div className={`activity-icon category-icon-${categoryStyle}`} title={expense.category || 'Other'}>
               <Icon size={17} />
             </div>
@@ -572,6 +595,7 @@ function App() {
   const [manualInviteLink, setManualInviteLink] = useState('')
   const [tab, setTab] = useState('Overview')
   const [selectedGroupId, setSelectedGroupId] = useState(null)
+  const [focusExpenseId, setFocusExpenseId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
   const [expenseToSettle, setExpenseToSettle] = useState(null)
   const [expenseToEdit, setExpenseToEdit] = useState(null)
@@ -594,6 +618,24 @@ function App() {
   const [recurringEditing, setRecurringEditing] = useState(null)
   const [occurrenceToConfirm, setOccurrenceToConfirm] = useState(null)
   const recurringNoticeKeys = useRef(new Set())
+  const notificationCenterRef = useRef(null)
+  const [notifications, setNotifications] = useState([])
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0)
+  const [notificationsHaveMore, setNotificationsHaveMore] = useState(false)
+  const [notificationLimit, setNotificationLimit] = useState(25)
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false)
+  const [notificationPreferencesOpen, setNotificationPreferencesOpen] = useState(false)
+  const [notificationPreferences, setNotificationPreferences] = useState({
+    expense_created: true,
+    expense_updated: true,
+    settlement_recorded: true,
+    settlement_reminder: true,
+    group_invitation: true,
+    member_joined: true,
+    recurring_generated: true,
+    recurring_confirmation: true,
+    settlement_reminder_frequency: 'weekly',
+  })
   const [reloadKey, setReloadKey] = useState(0)
   const [selectedMonth, setSelectedMonth] = useState(() => monthValue(new Date()))
   const [currency, setCurrency] = useState(() => window.localStorage.getItem('groupbuk_currency') === 'USD' ? 'USD' : 'INR')
@@ -608,6 +650,27 @@ function App() {
 
   const refreshWorkspaces = async () => {
     setWorkspaces(await request('/api/workspaces'))
+  }
+
+  const refreshNotifications = async (limit = notificationLimit, offset = 0, merge = false) => {
+    const result = await request(`/api/notifications?limit=${limit}&offset=${offset}`)
+    if (merge) {
+      setNotifications(current => {
+        const merged = new Map([...current, ...result.notifications].map(notification => [notification.id, notification]))
+        return [...merged.values()]
+          .sort((left, right) => new Date(right.created_at) - new Date(left.created_at))
+          .slice(0, offset > 0 ? current.length + result.notifications.length : Math.max(current.length, limit))
+      })
+    } else {
+      setNotifications(result.notifications)
+    }
+    setUnreadNotificationCount(result.unreadCount)
+    setNotificationsHaveMore(result.hasMore)
+    return result
+  }
+
+  const refreshNotificationPreferences = async () => {
+    setNotificationPreferences(await request('/api/notification-preferences'))
   }
 
   const refreshRecurring = async () => {
@@ -667,6 +730,45 @@ function App() {
     initializeAuth()
     return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    if (!authUser) return undefined
+    let active = true
+    const loadNotifications = async () => {
+      try {
+        await refreshNotifications(notificationLimit, 0, true)
+      } catch (error) {
+        if (active) setNotice(error.message)
+      }
+    }
+    loadNotifications()
+    const timer = window.setInterval(loadNotifications, 30 * 1000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [authUser?.id, notificationLimit])
+
+  useEffect(() => {
+    if (!authUser) return undefined
+    let active = true
+    refreshNotificationPreferences().catch(error => {
+      if (active) setNotice(error.message)
+    })
+    return () => { active = false }
+  }, [authUser?.id])
+
+  useEffect(() => {
+    if (!notificationCenterOpen) return undefined
+    const closeOnOutsideClick = event => {
+      if (!notificationCenterRef.current?.contains(event.target)) {
+        setNotificationCenterOpen(false)
+        setNotificationPreferencesOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
+  }, [notificationCenterOpen])
 
   useEffect(() => {
     if (modal !== 'invite' || globalUserQuery.trim().length < 2) {
@@ -760,6 +862,19 @@ function App() {
       window.clearInterval(timer)
     }
   }, [tab, authUser?.workspaceId])
+
+  useEffect(() => {
+    if (tab !== 'Activity' || !activityLoaded || !focusExpenseId) return undefined
+    const row = document.getElementById(`expense-${focusExpenseId}`)
+    if (!row) return undefined
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    row.classList.add('notification-expense-focus')
+    const timer = window.setTimeout(() => {
+      row.classList.remove('notification-expense-focus')
+      setFocusExpenseId(null)
+    }, 2400)
+    return () => window.clearTimeout(timer)
+  }, [tab, activity, activityLoaded, focusExpenseId])
 
   useEffect(() => {
     window.localStorage.setItem('groupbuk_currency', currency)
@@ -995,6 +1110,115 @@ function App() {
     window.setTimeout(() => setNotice(''), 3200)
   }
 
+  async function saveNotificationPreferences(patch) {
+    try {
+      setNotificationPreferences(await request('/api/notification-preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      }))
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+
+  async function markNotificationRead(notificationId) {
+    try {
+      await request(`/api/notifications/${notificationId}/read`, { method: 'PATCH' })
+      await refreshNotifications()
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    try {
+      await request('/api/notifications/read-all', { method: 'POST' })
+      await refreshNotifications()
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+
+  async function dismissNotification(notificationId) {
+    try {
+      await request(`/api/notifications/${notificationId}`, { method: 'DELETE' })
+      await refreshNotifications()
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+
+  async function openNotification(notification) {
+    if (notification.target_type === 'invitation') {
+      notify('Accept the invitation here to join the workspace.')
+      return
+    }
+    if (Number(notification.workspace_id) !== Number(authUser.workspaceId)) {
+      const workspace = workspaces.find(item => Number(item.id) === Number(notification.workspace_id))
+      if (!workspace) {
+        notify(`Switch to ${notification.workspace_name} to open this notification.`)
+        return
+      }
+      if (!await switchWorkspace(Number(workspace.id))) return
+    }
+    if (!notification.read_at) await markNotificationRead(notification.id)
+    setNotificationCenterOpen(false)
+    if (notification.target_type === 'expense') {
+      setSearch('')
+      setDateRange('all')
+      setActivityCategory('all')
+      setSelectedGroupId(null)
+      setFocusExpenseId(Number(notification.target_id))
+      setTab('Activity')
+    } else if (notification.target_type === 'group') {
+      openGroup(notification.target_id)
+    } else if (notification.target_type === 'settlement') {
+      setTab('Balances')
+    } else if (notification.target_type === 'recurring') {
+      const result = await refreshRecurring()
+      const occurrence = result.occurrences.find(item =>
+        Number(item.template_id) === Number(notification.target_id) &&
+        (!notification.target_date || item.occurrence_date.slice(0, 10) === notification.target_date.slice(0, 10))
+      )
+      if (notification.notification_type === 'recurring_confirmation' && occurrence) {
+        openOccurrenceConfirmation(occurrence)
+      } else {
+        setTab('Recurring')
+      }
+    } else {
+      setTab('Groups')
+    }
+  }
+
+  async function acceptNotificationInvitation(notification) {
+    setBusy(true)
+    try {
+      await request('/api/invitations/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invitationId: Number(notification.target_id) }),
+      })
+      const account = await request('/api/auth/me')
+      setAuthUser(account)
+      await Promise.all([refresh(), refreshWorkspaces(), refreshNotifications()])
+      setTab('Overview')
+      setSelectedGroupId(null)
+      setActivity([])
+      setActivityLoaded(false)
+      setRecurringTemplates([])
+      setRecurringOccurrences([])
+      recurringNoticeKeys.current.clear()
+      setReloadKey(key => key + 1)
+      setNotificationCenterOpen(false)
+      notify(`Joined ${account.workspaceName}.`)
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function submitAuth(event) {
     event.preventDefault()
     setBusy(true)
@@ -1059,6 +1283,10 @@ function App() {
       setRecurringTemplates([])
       setRecurringOccurrences([])
       recurringNoticeKeys.current.clear()
+      setNotifications([])
+      setUnreadNotificationCount(0)
+      setNotificationsHaveMore(false)
+      setNotificationCenterOpen(false)
       setAuthMode('login')
       setAuthError('')
       setAuthNotice('')
@@ -1088,8 +1316,10 @@ function App() {
       recurringNoticeKeys.current.clear()
       setReloadKey(key => key + 1)
       notify(`Switched to ${account.workspaceName}.`)
+      return true
     } catch (error) {
       notify(error.message)
+      return false
     } finally {
       setBusy(false)
     }
@@ -1297,6 +1527,7 @@ function App() {
       else setModal('')
       await refresh()
       setReloadKey(key => key + 1)
+      refreshNotifications().catch(error => notify(error.message))
       if (['recurring', 'recurring-edit', 'recurring-confirm'].includes(submittedModal)) {
         await refreshRecurring()
       }
@@ -1495,6 +1726,135 @@ function App() {
               url={`${window.location.origin}${window.location.pathname}`}
               onInstagram={shareSiteOnInstagram}
             />
+            <div className="notification-center" ref={notificationCenterRef}>
+              <button
+                type="button"
+                className={`notification-bell ${notificationCenterOpen ? 'is-open' : ''}`}
+                aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`}
+                aria-expanded={notificationCenterOpen}
+                onClick={() => setNotificationCenterOpen(open => !open)}
+              >
+                <Bell size={18} />
+                {unreadNotificationCount > 0 && (
+                  <span className="notification-badge">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>
+                )}
+              </button>
+              {notificationCenterOpen && (
+                <section className="notification-popover" aria-label="Notification center">
+                  <div className="notification-popover-heading">
+                    <div>
+                      <b>{notificationPreferencesOpen ? 'Notification preferences' : 'Notifications'}</b>
+                      {!notificationPreferencesOpen && <small>{unreadNotificationCount} unread</small>}
+                    </div>
+                    <div className="notification-heading-actions">
+                      {!notificationPreferencesOpen && (
+                        <button type="button" aria-label="Notification preferences" title="Notification preferences" onClick={() => setNotificationPreferencesOpen(true)}>
+                          <Settings2 size={16} />
+                        </button>
+                      )}
+                      {notificationPreferencesOpen && (
+                        <button type="button" aria-label="Back to notifications" onClick={() => setNotificationPreferencesOpen(false)}>
+                          <ArrowLeftRight size={16} />
+                        </button>
+                      )}
+                      <button type="button" aria-label="Close notifications" onClick={() => setNotificationCenterOpen(false)}>
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  {notificationPreferencesOpen ? (
+                    <div className="notification-preferences">
+                      <label className="notification-frequency-setting">
+                        <span>Settlement reminder frequency</span>
+                        <select
+                          value={notificationPreferences.settlement_reminder_frequency}
+                          onChange={event => saveNotificationPreferences({ settlement_reminder_frequency: event.target.value })}
+                        >
+                          <option value="off">Off</option>
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                        </select>
+                      </label>
+                      {Object.entries(notificationLabels).map(([type, label]) => (
+                        <label className="notification-preference-toggle" key={type}>
+                          <span>{label}</span>
+                          <input
+                            type="checkbox"
+                            checked={notificationPreferences[type]}
+                            onChange={event => saveNotificationPreferences({ [type]: event.target.checked })}
+                          />
+                        </label>
+                      ))}
+                      <small>Preferences apply to notifications across your account’s workspaces.</small>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="notification-toolbar">
+                        <button type="button" onClick={markAllNotificationsRead} disabled={!unreadNotificationCount}>
+                          <CheckCheck size={14} />Mark all as read
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (notificationLimit === 25) {
+                              setNotificationLimit(100)
+                              await refreshNotifications(100).catch(error => notify(error.message))
+                            } else if (notificationsHaveMore) {
+                              await refreshNotifications(100, notifications.length, true).catch(error => notify(error.message))
+                            } else {
+                              setNotificationLimit(25)
+                              await refreshNotifications(25).catch(error => notify(error.message))
+                            }
+                          }}
+                        >
+                          {notificationLimit === 25
+                            ? 'View all notifications'
+                            : notificationsHaveMore
+                              ? 'Load more notifications'
+                              : 'Show recent'}
+                        </button>
+                      </div>
+                      <div className="notification-list">
+                        {notifications.length ? notifications.map(notification => {
+                          const Icon = notificationIcon(notification.notification_type)
+                          return (
+                            <article className={`notification-row ${notification.read_at ? '' : 'notification-unread'}`} key={notification.id}>
+                              <button type="button" className="notification-open" onClick={() => openNotification(notification)}>
+                                <span className={`notification-type-icon notification-type-${notification.notification_type}`}><Icon size={15} /></span>
+                                <span className="notification-copy">
+                                  <b>{notification.title}</b>
+                                  <span>{notification.message}</span>
+                                  <small>{notification.workspace_name} · {notificationTimestamp(notification.created_at)}</small>
+                                </span>
+                                {!notification.read_at && <i className="notification-unread-dot" aria-label="Unread" />}
+                              </button>
+                              {notification.target_type === 'invitation' && (
+                                <button
+                                  type="button"
+                                  className="notification-accept"
+                                  disabled={busy}
+                                  onClick={() => acceptNotificationInvitation(notification)}
+                                >
+                                  Accept
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="notification-dismiss"
+                                aria-label="Dismiss notification"
+                                onClick={() => dismissNotification(notification.id)}
+                              >
+                                <X size={14} />
+                              </button>
+                            </article>
+                          )
+                        }) : <div className="notification-empty">You’re all caught up.</div>}
+                      </div>
+                    </>
+                  )}
+                </section>
+              )}
+            </div>
             <button className="icon-button" aria-label="Record settlement" title="Record settlement" disabled={people.length < 2} onClick={openManualSettlement}>
               <ArrowLeftRight size={18} />
             </button>

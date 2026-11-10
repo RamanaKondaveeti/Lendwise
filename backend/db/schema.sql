@@ -39,6 +39,44 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   INDEX idx_auth_sessions_expiration (expires_at)
 );
 
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  account_id INT PRIMARY KEY,
+  expense_created TINYINT(1) NOT NULL DEFAULT 1,
+  expense_updated TINYINT(1) NOT NULL DEFAULT 1,
+  settlement_recorded TINYINT(1) NOT NULL DEFAULT 1,
+  settlement_reminder TINYINT(1) NOT NULL DEFAULT 1,
+  group_invitation TINYINT(1) NOT NULL DEFAULT 1,
+  member_joined TINYINT(1) NOT NULL DEFAULT 1,
+  recurring_generated TINYINT(1) NOT NULL DEFAULT 1,
+  recurring_confirmation TINYINT(1) NOT NULL DEFAULT 1,
+  settlement_reminder_frequency ENUM('off', 'daily', 'weekly') NOT NULL DEFAULT 'weekly',
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_notification_preferences_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  account_id INT NOT NULL,
+  workspace_id INT NOT NULL,
+  notification_type ENUM(
+    'expense_created', 'expense_updated', 'settlement_recorded',
+    'settlement_reminder', 'group_invitation', 'member_joined',
+    'recurring_generated', 'recurring_confirmation'
+  ) NOT NULL,
+  title VARCHAR(160) NOT NULL,
+  message VARCHAR(500) NOT NULL,
+  target_type ENUM('expense', 'group', 'settlement', 'recurring', 'invitation', 'workspace') NOT NULL,
+  target_id INT NULL,
+  target_date DATE NULL,
+  dedupe_key VARCHAR(190) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  read_at DATETIME NULL,
+  CONSTRAINT fk_notifications_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_notifications_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_notification_account_dedupe (account_id, dedupe_key),
+  INDEX idx_notifications_unread (account_id, read_at, created_at)
+);
+
 CREATE TABLE IF NOT EXISTS workspace_members (
   account_id INT NOT NULL,
   workspace_id INT NOT NULL,

@@ -54,6 +54,8 @@ For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME` (normally `lend
 - Recurring expense templates retain their configured INR/USD amount and conversion rate; generated expenses are stored in the existing INR base and use the same split, balance, settlement, and analytics rules
 - The backend checks for due recurring expenses at startup and once per minute. A database row lock plus a unique `(template_id, occurrence_date)` key makes generation transaction-safe and safe to retry; variable bills remain pending until an actual amount is confirmed
 - Occurrence history is retained with the template and links each generated expense to its scheduled date. Pausing or deactivating a template does not remove expenses already generated
+- Account-specific notifications cover expense changes, settlements, invitations, group membership, and recurring occurrences; the header notification center polls every 30 seconds and supports read/dismiss actions across joined workspaces
+- Notification preferences are account-scoped, including daily/weekly/off settlement reminders. The backend checks outstanding group balances at startup and every 15 minutes; unique per-account reminder keys prevent duplicate reminders within the selected period
 
 ## Before customer release
 

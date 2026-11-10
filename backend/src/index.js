@@ -8,6 +8,7 @@ const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const { calculateMinimalSettlements, validateGroupSettlement } = require('./settlements');
+const { createNotifications, reminderPeriodKey } = require('./notifications');
 const {
   createExpenseAndSplits,
   dateOnly,
@@ -67,6 +68,52 @@ const q = async (text, params = []) => {
   return result;
 };
 
+async function notifyPeople(executor, workspaceId, personIds, notification, excludeAccountId = null) {
+  const people = [...new Set(personIds.map(Number))]
+    .filter(personId => Number.isInteger(personId) && personId > 0);
+  if (!people.length) return 0;
+  const [accounts] = await executor.execute(
+    `SELECT account_id FROM workspace_members
+     WHERE workspace_id = ? AND person_id IN (${people.map(() => '?').join(',')})`,
+    [workspaceId, ...people]
+  );
+  return createNotifications(executor, {
+    workspaceId,
+    accountIds: accounts.map(account => account.account_id),
+    excludeAccountId,
+    ...notification,
+  });
+}
+
+async function notifyWorkspaceMembers(executor, workspaceId, notification, excludeAccountId = null) {
+  const [accounts] = await executor.execute(
+    'SELECT account_id FROM workspace_members WHERE workspace_id = ?',
+    [workspaceId]
+  );
+  return createNotifications(executor, {
+    workspaceId,
+    accountIds: accounts.map(account => account.account_id),
+    excludeAccountId,
+    ...notification,
+  });
+}
+
+async function notifyGroupMembers(executor, workspaceId, groupId, notification, excludeAccountId = null) {
+  const [members] = await executor.execute(
+    `SELECT gm.person_id FROM group_members gm
+     JOIN \`groups\` g ON g.id = gm.group_id AND g.workspace_id = ?
+     WHERE gm.group_id = ?`,
+    [workspaceId, groupId]
+  );
+  return notifyPeople(
+    executor,
+    workspaceId,
+    members.map(member => member.person_id),
+    notification,
+    excludeAccountId
+  );
+}
+
 async function getWorkspaceBalances(workspaceId, executor = pool) {
   const [balances] = await executor.execute(
     `SELECT p.id, p.name, p.initials, p.color,
@@ -93,7 +140,7 @@ async function getWorkspaceBalances(workspaceId, executor = pool) {
 
 async function getWorkspaceGroupBalances(workspaceId, executor = pool) {
   const [balances] = await executor.execute(
-    `SELECT g.id AS group_id, p.id, p.name, p.initials, p.color,
+    `SELECT g.id AS group_id, g.name AS group_name, p.id, p.name, p.initials, p.color,
             COALESCE(split_totals.amount, 0) - COALESCE(paid_totals.amount, 0)
               + COALESCE(settlement_received.amount, 0) - COALESCE(settlement_paid.amount, 0) AS balance
      FROM \`groups\` g
@@ -274,6 +321,15 @@ async function processDueRecurringTemplate(templateId) {
          WHERE template_id = ? AND occurrence_date = ?`,
         [template.id, occurrenceDate]
       );
+      await notifyGroupMembers(connection, template.workspace_id, template.group_id, {
+        type: 'recurring_confirmation',
+        title: 'Recurring expense needs confirmation',
+        message: `Enter the actual amount for ${template.title}.`,
+        targetType: 'recurring',
+        targetId: template.id,
+        targetDate: occurrenceDate,
+        dedupeKey: `recurring-confirmation:${template.id}:${occurrenceDate}`,
+      });
     } else if (reserved) {
       await createExpenseAndSplits(
         connection,
@@ -283,6 +339,15 @@ async function processDueRecurringTemplate(templateId) {
         template.base_amount,
         participants
       );
+      await notifyGroupMembers(connection, template.workspace_id, template.group_id, {
+        type: 'recurring_generated',
+        title: 'Recurring expense recorded',
+        message: `${template.title} was added to ${template.currency} group expenses.`,
+        targetType: 'recurring',
+        targetId: template.id,
+        targetDate: occurrenceDate,
+        dedupeKey: `recurring-generated:${template.id}:${occurrenceDate}`,
+      });
     }
 
     const nextDate = nextOccurrenceDate(
@@ -337,6 +402,53 @@ async function runDueRecurringExpenses() {
     console.error('Recurring expense scheduler failed.', error);
   } finally {
     recurringSchedulerRunning = false;
+  }
+}
+
+let settlementReminderSchedulerRunning = false;
+async function runSettlementReminders(now = new Date()) {
+  if (settlementReminderSchedulerRunning) return;
+  settlementReminderSchedulerRunning = true;
+  try {
+    const [workspaces] = await pool.execute('SELECT id FROM workspaces ORDER BY id');
+    for (const workspace of workspaces) {
+      try {
+        const [members, balances] = await Promise.all([
+          pool.execute(
+            `SELECT wm.account_id, wm.person_id,
+                    COALESCE(p.settlement_reminder_frequency, 'weekly') AS frequency
+             FROM workspace_members wm
+             LEFT JOIN notification_preferences p ON p.account_id = wm.account_id
+             WHERE wm.workspace_id = ?`,
+            [workspace.id]
+          ),
+          getWorkspaceGroupBalances(workspace.id),
+        ]);
+        const accountsByPerson = new Map(members[0].map(member => [member.person_id, member]));
+        for (const balance of balances) {
+          if (Number(balance.balance) <= 0) continue;
+          const member = accountsByPerson.get(balance.id);
+          if (!member || member.frequency === 'off') continue;
+          const period = reminderPeriodKey(member.frequency, now);
+          await createNotifications(pool, {
+            workspaceId: workspace.id,
+            accountIds: [member.account_id],
+            type: 'settlement_reminder',
+            title: 'Settlement reminder',
+            message: `You have an outstanding balance in ${balance.group_name}.`,
+            targetType: 'group',
+            targetId: balance.group_id,
+            dedupeKey: `settlement-reminder:${balance.group_id}:${balance.id}:${period}`,
+          });
+        }
+      } catch (error) {
+        console.error(`Settlement reminders failed for workspace ${workspace.id}.`, error);
+      }
+    }
+  } catch (error) {
+    console.error('Settlement reminder scheduler failed.', error);
+  } finally {
+    settlementReminderSchedulerRunning = false;
   }
 }
 
@@ -809,6 +921,183 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   });
 });
 
+app.get('/api/notifications', async (req, res) => {
+  const requestedLimit = Number(req.query.limit || 25);
+  const requestedOffset = Number(req.query.offset || 0);
+  if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100 ||
+      !Number.isSafeInteger(requestedOffset) || requestedOffset < 0 || requestedOffset > 1000000) {
+    return res.status(400).json({ error: 'Notification pages must use a limit from 1 to 100 and a non-negative offset.' });
+  }
+  try {
+    const [page, counts] = await Promise.all([
+      q(
+        `SELECT n.id, n.workspace_id, w.name AS workspace_name, n.notification_type,
+                n.title, n.message, n.target_type, n.target_id, n.target_date,
+                n.created_at, n.read_at
+         FROM notifications n
+         JOIN workspaces w ON w.id = n.workspace_id
+         WHERE n.account_id = ?
+         ORDER BY n.created_at DESC, n.id DESC
+         LIMIT ? OFFSET ?`,
+        [req.account.id, requestedLimit + 1, requestedOffset]
+      ),
+      q(
+        `SELECT COUNT(*) AS unread_count FROM notifications
+         WHERE account_id = ? AND read_at IS NULL`,
+        [req.account.id]
+      ),
+    ]);
+    const hasMore = page.length > requestedLimit;
+    res.json({
+      notifications: page.slice(0, requestedLimit),
+      unreadCount: Number(counts[0]?.unread_count || 0),
+      hasMore,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load your notifications.' });
+  }
+});
+
+app.get('/api/notification-preferences', async (req, res) => {
+  try {
+    const [preferences] = await q(
+      'SELECT * FROM notification_preferences WHERE account_id = ?',
+      [req.account.id]
+    );
+    const saved = preferences || {};
+    res.json({
+      expense_created: Number(saved.expense_created ?? 1) !== 0,
+      expense_updated: Number(saved.expense_updated ?? 1) !== 0,
+      settlement_recorded: Number(saved.settlement_recorded ?? 1) !== 0,
+      settlement_reminder: Number(saved.settlement_reminder ?? 1) !== 0,
+      group_invitation: Number(saved.group_invitation ?? 1) !== 0,
+      member_joined: Number(saved.member_joined ?? 1) !== 0,
+      recurring_generated: Number(saved.recurring_generated ?? 1) !== 0,
+      recurring_confirmation: Number(saved.recurring_confirmation ?? 1) !== 0,
+      settlement_reminder_frequency: saved.settlement_reminder_frequency || 'weekly',
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load notification preferences.' });
+  }
+});
+
+app.put('/api/notification-preferences', async (req, res) => {
+  const body = req.body || {};
+  const booleanPreferences = [
+    'expense_created', 'expense_updated', 'settlement_recorded',
+    'settlement_reminder', 'group_invitation', 'member_joined',
+    'recurring_generated', 'recurring_confirmation',
+  ];
+  const allowedFields = new Set([...booleanPreferences, 'settlement_reminder_frequency']);
+  const suppliedFields = Object.keys(body);
+  if (!suppliedFields.length || suppliedFields.some(key => !allowedFields.has(key)) ||
+      booleanPreferences.some(key => Object.prototype.hasOwnProperty.call(body, key) && typeof body[key] !== 'boolean') ||
+      (Object.prototype.hasOwnProperty.call(body, 'settlement_reminder_frequency') &&
+        !['off', 'daily', 'weekly'].includes(body.settlement_reminder_frequency))) {
+    return res.status(400).json({ error: 'Choose valid notification preferences and a daily, weekly, or off reminder frequency.' });
+  }
+  try {
+    const [existing] = await q(
+      'SELECT * FROM notification_preferences WHERE account_id = ?',
+      [req.account.id]
+    );
+    const defaults = Object.fromEntries(booleanPreferences.map(key => [key, true]));
+    const values = {
+      ...defaults,
+      ...existing,
+      ...body,
+      settlement_reminder_frequency: body.settlement_reminder_frequency ||
+        existing?.settlement_reminder_frequency || 'weekly',
+    };
+    await q(
+      `INSERT INTO notification_preferences
+       (account_id, expense_created, expense_updated, settlement_recorded,
+        settlement_reminder, group_invitation, member_joined, recurring_generated,
+        recurring_confirmation, settlement_reminder_frequency)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+        expense_created = VALUES(expense_created),
+        expense_updated = VALUES(expense_updated),
+        settlement_recorded = VALUES(settlement_recorded),
+        settlement_reminder = VALUES(settlement_reminder),
+        group_invitation = VALUES(group_invitation),
+        member_joined = VALUES(member_joined),
+        recurring_generated = VALUES(recurring_generated),
+        recurring_confirmation = VALUES(recurring_confirmation),
+        settlement_reminder_frequency = VALUES(settlement_reminder_frequency)`,
+      [
+        req.account.id,
+        ...booleanPreferences.map(key => Number(values[key]) !== 0 ? 1 : 0),
+        values.settlement_reminder_frequency,
+      ]
+    );
+    res.json({
+      ...Object.fromEntries(booleanPreferences.map(key => [key, Number(values[key]) !== 0])),
+      settlement_reminder_frequency: values.settlement_reminder_frequency,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not save notification preferences.' });
+  }
+});
+
+app.patch('/api/notifications/:notificationId/read', async (req, res) => {
+  const notificationId = Number(req.params.notificationId);
+  if (!Number.isSafeInteger(notificationId) || notificationId <= 0) {
+    return res.status(400).json({ error: 'Notification ID must be a positive integer.' });
+  }
+  try {
+    const result = await q(
+      'UPDATE notifications SET read_at = COALESCE(read_at, UTC_TIMESTAMP()) WHERE id = ? AND account_id = ?',
+      [notificationId, req.account.id]
+    );
+    if (!result.affectedRows) {
+      const [existing] = await q(
+        'SELECT id FROM notifications WHERE id = ? AND account_id = ?',
+        [notificationId, req.account.id]
+      );
+      if (!existing) return res.status(404).json({ error: 'Notification not found.' });
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not mark this notification as read.' });
+  }
+});
+
+app.post('/api/notifications/read-all', async (req, res) => {
+  try {
+    const result = await q(
+      'UPDATE notifications SET read_at = UTC_TIMESTAMP() WHERE account_id = ? AND read_at IS NULL',
+      [req.account.id]
+    );
+    res.json({ ok: true, count: result.affectedRows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not mark your notifications as read.' });
+  }
+});
+
+app.delete('/api/notifications/:notificationId', async (req, res) => {
+  const notificationId = Number(req.params.notificationId);
+  if (!Number.isSafeInteger(notificationId) || notificationId <= 0) {
+    return res.status(400).json({ error: 'Notification ID must be a positive integer.' });
+  }
+  try {
+    const result = await q(
+      'DELETE FROM notifications WHERE id = ? AND account_id = ?',
+      [notificationId, req.account.id]
+    );
+    if (!result.affectedRows) return res.status(404).json({ error: 'Notification not found.' });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not dismiss this notification.' });
+  }
+});
+
 app.get('/api/workspaces', async (req, res) => {
   try {
     const workspaces = await q(
@@ -943,18 +1232,42 @@ app.post('/api/invitations', async (req, res) => {
       `SELECT id FROM workspace_invitations
        WHERE workspace_id = ? AND accepted_at IS NULL AND expires_at > UTC_TIMESTAMP()
          AND ((? IS NOT NULL AND invitee_account_id = ?) OR email = ?)`,
-      [req.account.workspace_id, hasAccountId ? inviteeAccountId : null, inviteeAccountId, targetEmail]
+      [req.account.workspace_id, hasAccountId ? inviteeAccountId : null, hasAccountId ? inviteeAccountId : 0, targetEmail]
     );
     if (pending) {
       return res.status(202).json({ message: 'If the address can be invited, an invitation email will arrive shortly.' });
     }
 
     const token = crypto.randomBytes(32).toString('base64url');
-    await q(
-      `INSERT INTO workspace_invitations(workspace_id, invitee_account_id, email, token_hash, invited_by, expires_at)
-       VALUES(?, ?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 DAY))`,
-      [req.account.workspace_id, hasAccountId ? inviteeAccountId : null, targetEmail, hashSessionToken(token), req.account.id]
-    );
+    const connection = await pool.getConnection();
+    let invitationId;
+    try {
+      await connection.beginTransaction();
+      const [invitation] = await connection.execute(
+        `INSERT INTO workspace_invitations(workspace_id, invitee_account_id, email, token_hash, invited_by, expires_at)
+         VALUES(?, ?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 DAY))`,
+        [req.account.workspace_id, hasAccountId ? inviteeAccountId : null, targetEmail, hashSessionToken(token), req.account.id]
+      );
+      invitationId = invitation.insertId;
+      if (hasAccountId) {
+        await createNotifications(connection, {
+          workspaceId: req.account.workspace_id,
+          accountIds: [inviteeAccountId],
+          type: 'group_invitation',
+          title: 'Group invitation',
+          message: `${req.account.name} invited you to ${req.account.workspace_name}.`,
+          targetType: 'invitation',
+          targetId: invitationId,
+          dedupeKey: `group-invitation:${invitationId}`,
+        });
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
     const inviteUrl = `${appUrl}/?invite=${encodeURIComponent(token)}`;
     try {
       await sendEmail({
@@ -983,7 +1296,10 @@ app.post('/api/invitations', async (req, res) => {
 
 app.post('/api/invitations/accept', requireAuth, async (req, res) => {
   const token = req.body?.token;
-  if (typeof token !== 'string' || token.length < 20 || token.length > 128) {
+  const invitationId = Number(req.body?.invitationId);
+  const hasToken = typeof token === 'string' && token.length >= 20 && token.length <= 128;
+  const hasInvitationId = Number.isSafeInteger(invitationId) && invitationId > 0;
+  if (!hasToken && !hasInvitationId) {
     return res.status(400).json({ error: 'Invitation link is invalid or expired.' });
   }
   let connection;
@@ -991,10 +1307,18 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const [invitations] = await connection.execute(
-      `SELECT id, workspace_id FROM workspace_invitations
-       WHERE token_hash = ? AND invitee_account_id = ? AND accepted_at IS NULL
-         AND expires_at > UTC_TIMESTAMP() FOR UPDATE`,
-      [hashSessionToken(token), req.account.id]
+      `SELECT i.id, i.workspace_id, w.name AS workspace_name FROM workspace_invitations i
+       JOIN workspaces w ON w.id = i.workspace_id
+       WHERE ((? IS NOT NULL AND token_hash = ?) OR (? IS NOT NULL AND id = ?))
+         AND i.invitee_account_id = ? AND i.accepted_at IS NULL
+         AND i.expires_at > UTC_TIMESTAMP() FOR UPDATE`,
+      [
+        hasToken ? hashSessionToken(token) : null,
+        hasToken ? hashSessionToken(token) : '',
+        hasInvitationId ? invitationId : null,
+        hasInvitationId ? invitationId : 0,
+        req.account.id,
+      ]
     );
     const invitation = invitations[0];
     if (!invitation) {
@@ -1007,6 +1331,7 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
       [req.account.id, invitation.workspace_id]
     );
     let personId = existingMembership[0]?.person_id;
+    const joined = !personId;
     if (!personId) {
       const [availablePeople] = await connection.execute(
         `SELECT p.id FROM people p
@@ -1040,6 +1365,21 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
       'UPDATE auth_sessions SET workspace_id = ? WHERE token_hash = ? AND account_id = ?',
       [invitation.workspace_id, hashSessionToken(getSessionToken(req)), req.account.id]
     );
+    await connection.execute(
+      `UPDATE notifications SET read_at = COALESCE(read_at, UTC_TIMESTAMP())
+       WHERE account_id = ? AND target_type = 'invitation' AND target_id = ?`,
+      [req.account.id, invitation.id]
+    );
+    if (joined) {
+      await notifyWorkspaceMembers(connection, invitation.workspace_id, {
+        type: 'member_joined',
+        title: 'A member joined',
+        message: `${req.account.name} joined ${invitation.workspace_name}.`.slice(0, 500),
+        targetType: 'workspace',
+        targetId: invitation.workspace_id,
+        dedupeKey: `member-joined:${invitation.id}`,
+      }, req.account.id);
+    }
     await connection.commit();
     res.json({ ok: true, workspaceId: invitation.workspace_id });
   } catch (error) {
@@ -1590,6 +1930,15 @@ app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confir
       baseAmount,
       participants
     );
+    await notifyGroupMembers(connection, template.workspace_id, template.group_id, {
+      type: 'recurring_generated',
+      title: 'Recurring expense recorded',
+      message: `${template.title} was added to ${template.currency} group expenses.`,
+      targetType: 'expense',
+      targetId: expenseId,
+      targetDate: occurrenceDate,
+      dedupeKey: `recurring-generated:${template.id}:${occurrenceDate}`,
+    }, req.account.id);
     await connection.commit();
     inTransaction = false;
     res.status(201).json({ ok: true, expenseId, message: 'Recurring expense recorded.' });
@@ -1680,19 +2029,47 @@ app.patch('/api/expenses/:expenseId/category', async (req, res) => {
     return res.status(400).json({ error: 'Choose a valid expense category.' });
   }
 
+  let connection;
   try {
-    const expenses = await q(
-      `SELECT e.id FROM expenses e
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [expenses] = await connection.execute(
+      `SELECT e.id, e.group_id, e.category FROM expenses e
        JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
-       WHERE e.id = ?`,
+       WHERE e.id = ? FOR UPDATE`,
       [req.account.workspace_id, expenseId]
     );
-    if (!expenses.length) return res.status(404).json({ error: 'Expense not found.' });
-    await q('UPDATE expenses SET category = ? WHERE id = ?', [category, expenseId]);
+    if (!expenses.length) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Expense not found.' });
+    }
+    if (expenses[0].category === category) {
+      await connection.commit();
+      return res.json({ ok: true, message: 'Expense category is unchanged.' });
+    }
+    await connection.execute('UPDATE expenses SET category = ? WHERE id = ?', [category, expenseId]);
+    await notifyGroupMembers(connection, req.account.workspace_id, expenses[0].group_id, {
+      type: 'expense_updated',
+      title: 'Expense updated',
+      message: `The category for expense ${expenseId} was changed to ${category}.`,
+      targetType: 'expense',
+      targetId: expenseId,
+      dedupeKey: `expense-updated:${expenseId}:${crypto.randomUUID()}`,
+    }, req.account.id);
+    await connection.commit();
     res.json({ ok: true, message: 'Expense category updated.' });
   } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Expense update rollback failed', rollbackError);
+      }
+    }
     console.error(error);
     res.status(500).json({ error: 'Could not update this expense category.' });
+  } finally {
+    connection?.release();
   }
 });
 
@@ -1723,7 +2100,7 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const [expenses] = await connection.execute(
-      `SELECT e.id, e.paid_by
+      `SELECT e.id, e.paid_by, e.group_id, e.title, g.name AS group_name
        FROM expenses e
        JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
        JOIN people payer ON payer.id = e.paid_by AND payer.workspace_id = g.workspace_id
@@ -1780,11 +2157,19 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
     }
 
     for (const share of amounts) {
-      await connection.execute(
+      const [settlement] = await connection.execute(
         `INSERT INTO settlements(payer_id, payee_id, expense_id, amount, note)
          VALUES(?, ?, ?, ?, 'Expense settlement')`,
         [share.personId, expense.paid_by, expenseId, share.cents / 100]
       );
+      await notifyPeople(connection, req.account.workspace_id, [share.personId, expense.paid_by], {
+        type: 'settlement_recorded',
+        title: 'Settlement recorded',
+        message: `A share of the expense was settled in ${expense.group_name}.`,
+        targetType: 'expense',
+        targetId: expenseId,
+        dedupeKey: `settlement-recorded:${settlement.insertId}`,
+      }, req.account.id);
     }
     await connection.commit();
     res.status(201).json({ ok: true, count: amounts.length });
@@ -1863,11 +2248,19 @@ app.post('/api/settlements/bulk', async (req, res) => {
     }
 
     for (const payment of normalizedPayments) {
-      await connection.execute(
+      const [settlement] = await connection.execute(
         `INSERT INTO settlements(payer_id, payee_id, amount, note)
          VALUES(?, ?, ?, 'Personal balance settlement')`,
         [payment.payerId, payment.payeeId, payment.amountCents / 100]
       );
+      await notifyPeople(connection, req.account.workspace_id, [payment.payerId, payment.payeeId], {
+        type: 'settlement_recorded',
+        title: 'Settlement recorded',
+        message: 'A payment was recorded to clear a personal balance.',
+        targetType: 'settlement',
+        targetId: settlement.insertId,
+        dedupeKey: `settlement-recorded:${settlement.insertId}`,
+      }, req.account.id);
     }
     await connection.commit();
     res.status(201).json({ ok: true, count: normalizedPayments.length });
@@ -2045,6 +2438,14 @@ app.post('/api/expenses', async (req, res) => {
         [expense.insertId, personId, (baseShare + (index < remainder ? 1 : 0)) / 100]
       );
     }
+    await notifyGroupMembers(connection, req.account.workspace_id, normalizedGroupId, {
+      type: 'expense_created',
+      title: 'New expense',
+      message: `${title.trim()} was added to the group.`,
+      targetType: 'expense',
+      targetId: expense.insertId,
+      dedupeKey: `expense-created:${expense.insertId}`,
+    }, req.account.id);
     await connection.commit();
     inTransaction = false;
     res.status(201).json({ ok: true, id: expense.insertId });
@@ -2100,6 +2501,14 @@ app.post('/api/groups', async (req, res) => {
         [result.insertId, personId]
       );
     }
+    await notifyPeople(connection, req.account.workspace_id, normalizedMemberIds, {
+      type: 'member_joined',
+      title: 'You were added to a group',
+      message: `You are now a member of ${name.trim()}.`,
+      targetType: 'group',
+      targetId: result.insertId,
+      dedupeKey: `group-created-membership:${result.insertId}`,
+    }, req.account.id);
     await connection.commit();
     inTransaction = false;
     const [group] = await q('SELECT * FROM `groups` WHERE id = ?', [result.insertId]);
@@ -2137,7 +2546,7 @@ app.put('/api/groups/:groupId/members', async (req, res) => {
       q('SELECT id FROM `groups` WHERE id = ? AND workspace_id = ?', [groupId, req.account.workspace_id]),
       memberIds.length
         ? q(
-          `SELECT id FROM people WHERE workspace_id = ? AND id IN (${memberIds.map(() => '?').join(',')})`,
+          `SELECT id, name FROM people WHERE workspace_id = ? AND id IN (${memberIds.map(() => '?').join(',')})`,
           [req.account.workspace_id, ...memberIds]
         )
         : Promise.resolve([])
@@ -2150,12 +2559,37 @@ app.put('/api/groups/:groupId/members', async (req, res) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     inTransaction = true;
+    const [groupRows] = await connection.execute(
+      'SELECT id, name FROM `groups` WHERE id = ? AND workspace_id = ? FOR UPDATE',
+      [groupId, req.account.workspace_id]
+    );
+    if (!groupRows.length) {
+      await connection.rollback();
+      inTransaction = false;
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+    const [oldMembers] = await connection.execute(
+      'SELECT person_id FROM group_members WHERE group_id = ?',
+      [groupId]
+    );
+    const oldMemberIds = new Set(oldMembers.map(member => member.person_id));
     await connection.execute('DELETE FROM group_members WHERE group_id = ?', [groupId]);
     for (const personId of memberIds) {
       await connection.execute(
         'INSERT INTO group_members(group_id, person_id) VALUES(?, ?)',
         [groupId, personId]
       );
+    }
+    const addedMembers = people.filter(person => !oldMemberIds.has(person.id));
+    for (const person of addedMembers) {
+      await notifyGroupMembers(connection, req.account.workspace_id, groupId, {
+        type: 'member_joined',
+        title: 'A member joined a group',
+        message: `${person.name} joined ${groupRows[0].name}.`.slice(0, 500),
+        targetType: 'group',
+        targetId: groupId,
+        dedupeKey: `group-member-joined:${groupId}:${person.id}:${crypto.randomUUID()}`,
+      }, req.account.id);
     }
     await connection.commit();
     inTransaction = false;
@@ -2199,14 +2633,10 @@ app.post('/api/settlements', async (req, res) => {
     if (people.length !== 2) {
       return res.status(400).json({ error: 'Choose two users from your workspace.' });
     }
-    if (normalizedGroupId === null) {
-      await q(
-        'INSERT INTO settlements(payer_id, payee_id, amount, note) VALUES(?, ?, ?, ?)',
-        [normalizedPayerId, normalizedPayeeId, amountCents / 100, note.trim()]
-      );
-    } else {
-      connection = await pool.getConnection();
-      await connection.beginTransaction();
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    let settlementId;
+    if (normalizedGroupId !== null) {
       const [groupRows] = await connection.execute(
         'SELECT id FROM `groups` WHERE id = ? AND workspace_id = ? FOR UPDATE',
         [normalizedGroupId, req.account.workspace_id]
@@ -2232,12 +2662,29 @@ app.post('/api/settlements', async (req, res) => {
         await connection.rollback();
         return res.status(409).json({ error: 'The group balance changed. Refresh and try again.' });
       }
-      await connection.execute(
+      const [settlement] = await connection.execute(
         'INSERT INTO settlements(payer_id, payee_id, amount, group_id, note) VALUES(?, ?, ?, ?, ?)',
         [normalizedPayerId, normalizedPayeeId, amountCents / 100, normalizedGroupId, note.trim()]
       );
-      await connection.commit();
+      settlementId = settlement.insertId;
+    } else {
+      const [settlement] = await connection.execute(
+        'INSERT INTO settlements(payer_id, payee_id, amount, note) VALUES(?, ?, ?, ?)',
+        [normalizedPayerId, normalizedPayeeId, amountCents / 100, note.trim()]
+      );
+      settlementId = settlement.insertId;
     }
+    await notifyPeople(connection, req.account.workspace_id, [normalizedPayerId, normalizedPayeeId], {
+      type: 'settlement_recorded',
+      title: 'Settlement recorded',
+      message: normalizedGroupId === null
+        ? 'A personal balance settlement was recorded.'
+        : 'A group balance settlement was recorded.',
+      targetType: normalizedGroupId === null ? 'settlement' : 'group',
+      targetId: normalizedGroupId === null ? settlementId : normalizedGroupId,
+      dedupeKey: `settlement-recorded:${settlementId}`,
+    }, req.account.id);
+    await connection.commit();
     res.status(201).json({ ok: true });
   } catch (error) {
     if (connection) {
@@ -2270,6 +2717,9 @@ init()
     void runDueRecurringExpenses();
     const recurringInterval = setInterval(() => { void runDueRecurringExpenses(); }, 60 * 1000);
     recurringInterval.unref();
+    void runSettlementReminders();
+    const reminderInterval = setInterval(() => { void runSettlementReminders(); }, 15 * 60 * 1000);
+    reminderInterval.unref();
     app.listen(port, '0.0.0.0', () => console.log(`GroupBuk API listening on ${port}`));
   })
   .catch(error => {
