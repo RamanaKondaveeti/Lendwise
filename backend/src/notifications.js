@@ -7,9 +7,10 @@ const notificationPreferences = {
   member_joined: 'member_joined',
   recurring_generated: 'recurring_generated',
   recurring_confirmation: 'recurring_confirmation',
+  budget_alert: 'budget_alert',
 };
 
-const targetTypes = new Set(['expense', 'group', 'settlement', 'recurring', 'invitation', 'workspace']);
+const targetTypes = new Set(['expense', 'group', 'settlement', 'recurring', 'invitation', 'workspace', 'budget']);
 
 async function createNotifications(executor, {
   workspaceId,

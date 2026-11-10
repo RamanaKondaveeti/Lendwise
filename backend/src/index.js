@@ -622,6 +622,26 @@ async function init() {
     await pool.query(statement);
   }
   await ensureColumn('expenses', 'category', "VARCHAR(100) NOT NULL DEFAULT 'Other'");
+  await ensureColumn('notification_preferences', 'budget_alert', 'TINYINT(1) NOT NULL DEFAULT 1');
+  const [notificationTypeColumn] = await pool.query(
+    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'notification_type'`
+  );
+  if (notificationTypeColumn[0] && !notificationTypeColumn[0].COLUMN_TYPE.includes('budget_alert')) {
+    await pool.query(`ALTER TABLE notifications MODIFY notification_type ENUM(
+      'expense_created', 'expense_updated', 'settlement_recorded', 'settlement_reminder',
+      'group_invitation', 'member_joined', 'recurring_generated', 'recurring_confirmation', 'budget_alert'
+    ) NOT NULL`);
+  }
+  const [notificationTargetColumn] = await pool.query(
+    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'target_type'`
+  );
+  if (notificationTargetColumn[0] && !notificationTargetColumn[0].COLUMN_TYPE.includes('budget')) {
+    await pool.query(`ALTER TABLE notifications MODIFY target_type ENUM(
+      'expense', 'group', 'settlement', 'recurring', 'invitation', 'workspace', 'budget'
+    ) NOT NULL`);
+  }
   await q("UPDATE expenses SET category = 'Other' WHERE category IS NULL OR TRIM(category) = ''");
   await migrateWorkspaceOwnership();
   await q('DELETE FROM auth_sessions WHERE expires_at <= UTC_TIMESTAMP()');
@@ -983,6 +1003,66 @@ async function getBudgetUtilization(budget, executor = pool) {
   };
 }
 
+async function runBudgetAlerts() {
+  try {
+    const [budgets] = await pool.execute(
+      `SELECT b.*, DATE_FORMAT(b.start_date, '%Y-%m-%d') AS start_date,
+        DATE_FORMAT(b.end_date, '%Y-%m-%d') AS end_date
+       FROM budgets b WHERE b.is_active = TRUE AND b.is_paused = FALSE`
+    );
+    const today = new Date().toISOString().slice(0, 10);
+    for (const budget of budgets) {
+      const ranges = periodRanges(budget);
+      if (ranges.current.startDate > today || ranges.current.endDate <= ranges.current.startDate ||
+          (budget.end_date && String(budget.end_date) < today)) continue;
+      const utilization = await getBudgetUtilization(budget);
+      const percentUsed = utilization.currentPeriod.percentUsed;
+      const configured = Array.isArray(budget.alert_thresholds)
+        ? budget.alert_thresholds : JSON.parse(budget.alert_thresholds);
+      const supportedThresholds = [...new Set([...configured.map(Number), 80, 90, 100])];
+      const crossed = [...new Set(supportedThresholds.filter(value => Number.isFinite(value) && percentUsed >= value))];
+      if (percentUsed > 100) crossed.push('exceeded');
+      if (!crossed.length) continue;
+      let accountIds;
+      if (budget.budget_type === 'personal') {
+        const [accounts] = await pool.execute(
+          'SELECT account_id FROM workspace_members WHERE workspace_id = ? AND person_id = ?',
+          [budget.workspace_id, budget.person_id]
+        );
+        accountIds = accounts.map(row => row.account_id);
+      } else {
+        const [accounts] = await pool.execute(
+          `SELECT DISTINCT wm.account_id FROM group_members gm
+           JOIN people p ON p.id = gm.person_id AND p.workspace_id = ?
+           JOIN workspace_members wm ON wm.person_id = p.id AND wm.workspace_id = p.workspace_id
+           WHERE gm.group_id = ?`,
+          [budget.workspace_id, budget.group_id]
+        );
+        accountIds = accounts.map(row => row.account_id);
+      }
+      for (const threshold of crossed) {
+        const exceeded = threshold === 'exceeded';
+        const label = exceeded ? 'Budget exceeded' : `${threshold}% of budget used`;
+        await createNotifications(pool, {
+          workspaceId: budget.workspace_id,
+          accountIds,
+          type: 'budget_alert',
+          title: `${budget.name}: ${label}`,
+          message: exceeded
+            ? `${budget.name} is over its ${budget.period} limit (${percentUsed.toFixed(0)}% used).`
+            : `${budget.name} has reached ${threshold}% of its ${budget.period} limit (${percentUsed.toFixed(0)}% used).`,
+          targetType: 'budget',
+          targetId: budget.id,
+          targetDate: ranges.current.startDate,
+          dedupeKey: `budget:${budget.id}:${ranges.current.startDate}:${threshold}`,
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Budget alert processing failed', error);
+  }
+}
+
 app.post('/api/budgets', async (req, res) => {
   try {
     const data = validateBudgetInput(req.body);
@@ -1170,6 +1250,7 @@ app.get('/api/notification-preferences', async (req, res) => {
       member_joined: Number(saved.member_joined ?? 1) !== 0,
       recurring_generated: Number(saved.recurring_generated ?? 1) !== 0,
       recurring_confirmation: Number(saved.recurring_confirmation ?? 1) !== 0,
+      budget_alert: Number(saved.budget_alert ?? 1) !== 0,
       settlement_reminder_frequency: saved.settlement_reminder_frequency || 'weekly',
     });
   } catch (error) {
@@ -1183,7 +1264,7 @@ app.put('/api/notification-preferences', async (req, res) => {
   const booleanPreferences = [
     'expense_created', 'expense_updated', 'settlement_recorded',
     'settlement_reminder', 'group_invitation', 'member_joined',
-    'recurring_generated', 'recurring_confirmation',
+    'recurring_generated', 'recurring_confirmation', 'budget_alert',
   ];
   const allowedFields = new Set([...booleanPreferences, 'settlement_reminder_frequency']);
   const suppliedFields = Object.keys(body);
@@ -1210,8 +1291,8 @@ app.put('/api/notification-preferences', async (req, res) => {
       `INSERT INTO notification_preferences
        (account_id, expense_created, expense_updated, settlement_recorded,
         settlement_reminder, group_invitation, member_joined, recurring_generated,
-        recurring_confirmation, settlement_reminder_frequency)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        recurring_confirmation, budget_alert, settlement_reminder_frequency)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
         expense_created = VALUES(expense_created),
         expense_updated = VALUES(expense_updated),
@@ -1221,6 +1302,7 @@ app.put('/api/notification-preferences', async (req, res) => {
         member_joined = VALUES(member_joined),
         recurring_generated = VALUES(recurring_generated),
         recurring_confirmation = VALUES(recurring_confirmation),
+        budget_alert = VALUES(budget_alert),
         settlement_reminder_frequency = VALUES(settlement_reminder_frequency)`,
       [
         req.account.id,
@@ -3205,6 +3287,9 @@ init()
     void runSettlementReminders();
     const reminderInterval = setInterval(() => { void runSettlementReminders(); }, 15 * 60 * 1000);
     reminderInterval.unref();
+    void runBudgetAlerts();
+    const budgetAlertInterval = setInterval(() => { void runBudgetAlerts(); }, 60 * 1000);
+    budgetAlertInterval.unref();
     app.listen(port, '0.0.0.0', () => console.log(`GroupBuk API listening on ${port}`));
   })
   .catch(error => {

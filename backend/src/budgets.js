@@ -89,7 +89,7 @@ function validateBudgetInput(body, partial = false) {
     result.endDate = body.endDate || null;
   }
   if (!partial || Object.hasOwn(body, 'alertThresholds')) {
-    const thresholds = body.alertThresholds === undefined ? [80, 100] : body.alertThresholds;
+    const thresholds = body.alertThresholds === undefined ? [80, 90, 100] : body.alertThresholds;
     if (!Array.isArray(thresholds) || thresholds.length > 10 || thresholds.some(value => !Number.isInteger(value) || value < 1 || value > 1000)) throw new TypeError('Alert thresholds must be whole percentages from 1 to 1000.');
     result.alertThresholds = [...new Set(thresholds)].sort((a, b) => a - b);
   }

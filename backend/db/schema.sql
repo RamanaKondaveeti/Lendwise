@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
   member_joined TINYINT(1) NOT NULL DEFAULT 1,
   recurring_generated TINYINT(1) NOT NULL DEFAULT 1,
   recurring_confirmation TINYINT(1) NOT NULL DEFAULT 1,
+  budget_alert TINYINT(1) NOT NULL DEFAULT 1,
   settlement_reminder_frequency ENUM('off', 'daily', 'weekly') NOT NULL DEFAULT 'weekly',
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_notification_preferences_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
@@ -61,11 +62,11 @@ CREATE TABLE IF NOT EXISTS notifications (
   notification_type ENUM(
     'expense_created', 'expense_updated', 'settlement_recorded',
     'settlement_reminder', 'group_invitation', 'member_joined',
-    'recurring_generated', 'recurring_confirmation'
+    'recurring_generated', 'recurring_confirmation', 'budget_alert'
   ) NOT NULL,
   title VARCHAR(160) NOT NULL,
   message VARCHAR(500) NOT NULL,
-  target_type ENUM('expense', 'group', 'settlement', 'recurring', 'invitation', 'workspace') NOT NULL,
+  target_type ENUM('expense', 'group', 'settlement', 'recurring', 'invitation', 'workspace', 'budget') NOT NULL,
   target_id INT NULL,
   target_date DATE NULL,
   dedupe_key VARCHAR(190) NOT NULL,

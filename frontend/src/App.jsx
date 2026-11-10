@@ -112,8 +112,10 @@ const notificationLabels = {
   member_joined: 'Member joined',
   recurring_generated: 'Recurring expense generated',
   recurring_confirmation: 'Recurring amount confirmation',
+  budget_alert: 'Budget alerts',
 }
 const notificationIcon = type => {
+  if (type === 'budget_alert') return Wallet
   if (type.startsWith('expense_')) return ReceiptText
   if (type.startsWith('settlement_')) return ArrowLeftRight
   if (type.startsWith('recurring_')) return Repeat
@@ -260,7 +262,7 @@ function BudgetForm({ budget, groups, categories, currency, exchangeRate, onSubm
   const [type, setType] = useState(budget?.budget_type || 'personal')
   const thresholds = budget?.alert_thresholds
     ? (Array.isArray(budget.alert_thresholds) ? budget.alert_thresholds : JSON.parse(budget.alert_thresholds)).join(', ')
-    : '80, 100'
+    : '80, 90, 100'
   return (
     <form className="budget-form" onSubmit={onSubmit}>
       <div className="budget-form-grid">
@@ -727,6 +729,7 @@ function App() {
     member_joined: true,
     recurring_generated: true,
     recurring_confirmation: true,
+    budget_alert: true,
     settlement_reminder_frequency: 'weekly',
   })
   const [reloadKey, setReloadKey] = useState(0)
@@ -1047,7 +1050,7 @@ function App() {
   }, [tab, selectedGroupId, reloadKey])
 
   useEffect(() => {
-    if (!authUser || tab !== 'Budgets') return undefined
+    if (!authUser || (tab !== 'Budgets' && tab !== 'Overview')) return undefined
     let active = true
     setBudgetsLoading(true)
     request('/api/budgets')
@@ -1055,7 +1058,7 @@ function App() {
       .catch(error => { if (active) notify(error.message) })
       .finally(() => { if (active) setBudgetsLoading(false) })
     return () => { active = false }
-  }, [authUser?.id, tab, reloadKey])
+  }, [authUser?.id, authUser?.workspaceId, tab, reloadKey])
 
   useEffect(() => {
     if (!budgetHistoryId || tab !== 'Budgets') return undefined
@@ -1287,6 +1290,10 @@ function App() {
     setRecurringEditing(template)
     setModal(template ? 'recurring-edit' : 'recurring')
   }
+  const formatBudgetMoney = (budget, amount) => new Intl.NumberFormat(
+    budget.currency === 'INR' ? 'en-IN' : 'en-US',
+    { style: 'currency', currency: budget.currency },
+  ).format(Math.abs(Number(amount) * (budget.currency === 'USD' ? (Number.isFinite(exchangeRate) ? exchangeRate : 0) : 1)) || 0)
 
   async function saveBudget(event) {
     event.preventDefault()
@@ -1306,7 +1313,7 @@ function App() {
       startDate: form.get('startDate'),
       endDate: form.get('endDate') || null,
       category: form.get('category') || null,
-      alertThresholds: String(form.get('alertThresholds') || '80,100').split(',').map(value => Number(value.trim())),
+      alertThresholds: String(form.get('alertThresholds') || '80,90,100').split(',').map(value => Number(value.trim())),
       ...(type === 'group' ? { groupId: Number(form.get('groupId')) } : {}),
     }
     if (!payload.name || (payload.endDate && payload.endDate < payload.startDate) ||
@@ -1513,6 +1520,8 @@ function App() {
       openGroup(notification.target_id)
     } else if (notification.target_type === 'settlement') {
       setTab('Balances')
+    } else if (notification.target_type === 'budget') {
+      setTab('Budgets')
     } else if (notification.target_type === 'recurring') {
       const result = await refreshRecurring()
       const occurrence = result.occurrences.find(item =>
@@ -2282,6 +2291,26 @@ function App() {
               <span>Recorded expenses</span>
               <b>{activityLoading && !activityLoaded ? '—' : monthlyExpenses.length}</b>
             </div>
+          </section>
+          <section className="panel budget-overview-panel" aria-label="Budget overview">
+            <div className="budget-overview-heading">
+              <div><div className="section-title">Budget overview</div><div className="section-subtitle">{budgets.filter(budget => !budget.is_paused).length} active · {budgets.filter(budget => !budget.is_paused && budget.utilization.currentPeriod.percentUsed >= 100).length} exceeded</div></div>
+              <button type="button" className="budget-overview-link" onClick={() => setTab('Budgets')}>View budgets<ArrowRight size={14} /></button>
+            </div>
+            {budgets.filter(budget => !budget.is_paused).length ? (
+              <div className="budget-overview-list">
+                {budgets.filter(budget => !budget.is_paused).slice(0, 3).map(budget => {
+                  const utilization = budget.utilization.currentPeriod
+                  const pct = utilization.percentUsed
+                  const level = pct >= 100 ? 'red' : pct >= 80 ? 'amber' : 'green'
+                  return <div className="budget-overview-row" key={budget.id}>
+                    <div className="budget-overview-label"><b>{budget.name}</b><span>{pct >= 100 ? `${formatBudgetMoney(budget, Math.abs(utilization.remaining))} over` : `${formatBudgetMoney(budget, utilization.remaining)} remaining`}</span></div>
+                    <div className={`budget-overview-meter budget-overview-${level}`}><i style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} /></div>
+                    <span className={`budget-overview-percent budget-overview-text-${level}`}>{pct.toFixed(0)}%</span>
+                  </div>
+                })}
+              </div>
+            ) : <div className="budget-overview-empty">{budgetsLoading ? 'Loading budgets…' : 'No active budgets yet.'}</div>}
           </section>
           <section className="panel analytics-panel" aria-label="Monthly analytics">
             <div className="panel-heading analytics-heading">
