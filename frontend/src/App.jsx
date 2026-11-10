@@ -269,7 +269,7 @@ function BudgetForm({ budget, groups, categories, currency, exchangeRate, onSubm
         <label>Budget name<input name="name" required maxLength="120" defaultValue={budget?.name || ''} placeholder="e.g. Monthly groceries" /></label>
         <label>Budget type<select name="budgetType" value={type} onChange={event => setType(event.target.value)}><option value="personal">Personal</option><option value="group">Group</option></select></label>
         {type === 'group' && <label>Group<select name="groupId" required defaultValue={budget?.group_id || ''}><option value="" disabled>Select a group</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>}
-        <label>Amount<input name="amount" type="number" min="0.01" step="0.01" required defaultValue={budget ? (budget.currency === 'USD' ? Number(budget.amount) * (Number.isFinite(exchangeRate) ? exchangeRate : 1) : budget.amount) : ''} placeholder="0.00" /></label>
+        <label>Amount<input name="amount" type="number" min="0.01" step="0.01" required defaultValue={budget ? Number(budget.amount) / Number(budget.exchange_rate_to_inr || 1) : ''} placeholder="0.00" /></label>
         <label>Currency<select name="currency" defaultValue={budget?.currency || currency}><option value="INR">INR (₹)</option><option value="USD">USD ($)</option></select></label>
         <label>Period<select name="period" defaultValue={budget?.period || 'monthly'}><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
         <label>Start date<input name="startDate" type="date" required defaultValue={budget?.start_date?.slice(0, 10) || todayIso()} /></label>
@@ -1293,7 +1293,7 @@ function App() {
   const formatBudgetMoney = (budget, amount) => new Intl.NumberFormat(
     budget.currency === 'INR' ? 'en-IN' : 'en-US',
     { style: 'currency', currency: budget.currency },
-  ).format(Math.abs(Number(amount) * (budget.currency === 'USD' ? (Number.isFinite(exchangeRate) ? exchangeRate : 0) : 1)) || 0)
+  ).format(Math.abs(Number(amount) / Number(budget.exchange_rate_to_inr || 1)) || 0)
 
   async function saveBudget(event) {
     event.preventDefault()
@@ -1307,7 +1307,8 @@ function App() {
     const payload = {
       name: String(form.get('name') || '').trim(),
       budgetType: type,
-      amount: form.get('currency') === 'USD' ? amount / exchangeRate : amount,
+      amount,
+      exchangeRateToInr: form.get('currency') === 'USD' ? 1 / exchangeRate : 1,
       currency: form.get('currency'),
       period: form.get('period'),
       startDate: form.get('startDate'),
@@ -2692,7 +2693,7 @@ function App() {
                     {budgets.map(budget => {
                       const current = budget.utilization.currentPeriod
                       const previous = budget.utilization.previousPeriod
-                      const budgetFormat = amount => new Intl.NumberFormat(budget.currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: budget.currency }).format(Math.abs(Number(amount) * (budget.currency === 'USD' ? (Number.isFinite(exchangeRate) ? exchangeRate : 0) : 1)))
+                      const budgetFormat = amount => new Intl.NumberFormat(budget.currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: budget.currency }).format(Math.abs(Number(amount) / Number(budget.exchange_rate_to_inr || 1)))
                       const percent = current.percentUsed
                       const level = percent >= 100 ? 'red' : percent >= 80 ? 'amber' : 'green'
                       const change = current.spent - previous.spent
@@ -2719,8 +2720,8 @@ function App() {
                 ) : <div className="empty budget-empty">No budgets yet. Create a personal or group budget to start tracking spending.</div>}
               </section>
               <section className="budget-analytics-grid">
-                <article className="panel screen-panel budget-analytics-panel"><div className="section-title">Budget vs actual</div><div className="section-subtitle">Current period spending compared with each budget limit.</div>{budgets.length ? <div className="budget-analytics-list">{budgets.map(budget => { const spent = budget.utilization.currentPeriod.spent; const limit = Number(budget.amount); const money = value => new Intl.NumberFormat(budget.currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: budget.currency }).format(Math.abs(Number(value) * (budget.currency === 'USD' ? (Number.isFinite(exchangeRate) ? exchangeRate : 0) : 1))); return <div className="budget-analytics-row" key={budget.id}><div><b>{budget.name}</b><span>{money(spent)} / {money(limit)}</span></div><i className={`budget-analytics-meter budget-meter-${spent / limit >= 1 ? 'red' : spent / limit >= .8 ? 'amber' : 'green'}`}><b style={{ width: `${Math.min(100, Math.max(0, spent / limit * 100))}%` }} /></i></div> })}</div> : <div className="empty">Create a budget to see actual spending.</div>}</article>
-                <article className="panel screen-panel budget-analytics-panel"><div className="section-title">Category budget breakdown</div><div className="section-subtitle">Budgets and spending assigned to each category.</div>{budgets.some(budget => budget.category) ? <div className="budget-category-list">{budgets.filter(budget => budget.category).map(budget => { const money = value => new Intl.NumberFormat(budget.currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: budget.currency }).format(Math.abs(Number(value) * (budget.currency === 'USD' ? (Number.isFinite(exchangeRate) ? exchangeRate : 0) : 1))); return <div className="budget-category-row" key={budget.id}><span>{budget.category}</span><div><b>{money(budget.utilization.currentPeriod.spent)}</b><small> / {money(budget.amount)}</small></div><i><b style={{ width: `${Math.min(100, Math.max(0, budget.utilization.currentPeriod.percentUsed))}%` }} /></i></div> })}</div> : <div className="empty">Add category budgets to see the breakdown.</div>}</article>
+                <article className="panel screen-panel budget-analytics-panel"><div className="section-title">Budget vs actual</div><div className="section-subtitle">Current period spending compared with each budget limit.</div>{budgets.length ? <div className="budget-analytics-list">{budgets.map(budget => { const spent = budget.utilization.currentPeriod.spent; const limit = Number(budget.amount); const money = value => new Intl.NumberFormat(budget.currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: budget.currency }).format(Math.abs(Number(value) / Number(budget.exchange_rate_to_inr || 1))); return <div className="budget-analytics-row" key={budget.id}><div><b>{budget.name}</b><span>{money(spent)} / {money(limit)}</span></div><i className={`budget-analytics-meter budget-meter-${spent / limit >= 1 ? 'red' : spent / limit >= .8 ? 'amber' : 'green'}`}><b style={{ width: `${Math.min(100, Math.max(0, spent / limit * 100))}%` }} /></i></div> })}</div> : <div className="empty">Create a budget to see actual spending.</div>}</article>
+                <article className="panel screen-panel budget-analytics-panel"><div className="section-title">Category budget breakdown</div><div className="section-subtitle">Budgets and spending assigned to each category.</div>{budgets.some(budget => budget.category) ? <div className="budget-category-list">{budgets.filter(budget => budget.category).map(budget => { const money = value => new Intl.NumberFormat(budget.currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: budget.currency }).format(Math.abs(Number(value) / Number(budget.exchange_rate_to_inr || 1))); return <div className="budget-category-row" key={budget.id}><span>{budget.category}</span><div><b>{money(budget.utilization.currentPeriod.spent)}</b><small> / {money(budget.amount)}</small></div><i><b style={{ width: `${Math.min(100, Math.max(0, budget.utilization.currentPeriod.percentUsed))}%` }} /></i></div> })}</div> : <div className="empty">Add category budgets to see the breakdown.</div>}</article>
               </section>
             </div>
           )}

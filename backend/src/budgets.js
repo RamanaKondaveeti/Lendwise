@@ -1,5 +1,73 @@
 const { isValidReportDate } = require('./reports');
 
+function convertBudgetAmountToBase(amount, currency, exchangeRateToInr = 1) {
+  const numericAmount = Number(amount);
+  const rate = Number(exchangeRateToInr);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !['INR', 'USD'].includes(currency) ||
+      !Number.isFinite(rate) || rate <= 0 || (currency === 'INR' && Math.abs(rate - 1) > 0.000001)) {
+    throw new TypeError('Enter a positive amount with a valid currency exchange rate.');
+  }
+  const cents = Math.round(numericAmount * rate * 100);
+  if (!Number.isSafeInteger(cents) || cents <= 0 || cents > 999999999999) {
+    throw new TypeError('Budget amount is outside the supported range.');
+  }
+  return { amount: cents / 100, exchangeRateToInr: rate };
+}
+
+function buildBudgetSpendQuery(budget, range) {
+  const categoryCondition = budget.category ? ' AND e.category = ?' : '';
+  const parameters = [budget.workspace_id];
+  if (budget.budget_type === 'personal') {
+    parameters.push(budget.person_id, `${range.startDate} 00:00:00`, `${range.endDate} 00:00:00`);
+    if (budget.category) parameters.push(budget.category);
+    return {
+      sql: `SELECT COALESCE(SUM(s.amount), 0) AS spent
+        FROM expenses e JOIN splits s ON s.expense_id = e.id
+        JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+        WHERE s.person_id = ? AND e.created_at >= ? AND e.created_at < ?${categoryCondition}`,
+      parameters,
+    };
+  }
+  parameters.push(budget.group_id, `${range.startDate} 00:00:00`, `${range.endDate} 00:00:00`);
+  if (budget.category) parameters.push(budget.category);
+  return {
+    sql: `SELECT COALESCE(SUM(e.amount), 0) AS spent
+      FROM expenses e JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+      WHERE e.group_id = ? AND e.created_at >= ? AND e.created_at < ?${categoryCondition}`,
+    parameters,
+  };
+}
+
+async function getBudgetSpend(executor, budget, range) {
+  const query = buildBudgetSpendQuery(budget, range);
+  const [rows] = await executor.execute(query.sql, query.parameters);
+  return Number(rows[0]?.spent || 0);
+}
+
+function budgetAlertThresholdsCrossed(configured, percentUsed) {
+  const thresholds = [...new Set([...configured.map(Number), 80, 90, 100])];
+  const crossed = thresholds.filter(value => Number.isFinite(value) && percentUsed >= value);
+  if (percentUsed > 100) crossed.push('exceeded');
+  return crossed;
+}
+
+function budgetAlertDedupeKey(budgetId, periodStart, threshold) {
+  return `budget:${budgetId}:${periodStart}:${threshold}`;
+}
+
+function buildAccessibleBudgetQuery(budgetId, account) {
+  return {
+    sql: `SELECT b.*, DATE_FORMAT(b.start_date, '%Y-%m-%d') AS start_date,
+      DATE_FORMAT(b.end_date, '%Y-%m-%d') AS end_date FROM budgets b
+      WHERE b.id = ? AND b.workspace_id = ? AND b.is_active = TRUE
+        AND ((b.budget_type = 'personal' AND b.person_id = ?)
+          OR (b.budget_type = 'group' AND EXISTS (
+            SELECT 1 FROM group_members gm WHERE gm.group_id = b.group_id AND gm.person_id = ?
+          )))`,
+    parameters: [budgetId, account.workspace_id, account.person_id, account.person_id],
+  };
+}
+
 function currentPeriod(date, period) {
   const value = date instanceof Date ? new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
     : new Date(`${date}T00:00:00.000Z`);
@@ -67,9 +135,11 @@ function validateBudgetInput(body, partial = false) {
     result.category = body.category ? body.category.trim() : null;
   }
   if (!partial || Object.hasOwn(body, 'amount')) {
-    const cents = Math.round(Number(body.amount) * 100);
-    if (!Number.isFinite(Number(body.amount)) || !Number.isSafeInteger(cents) || cents <= 0 || cents > 999999999999) throw new TypeError('Budget amount must be positive.');
-    result.amount = cents / 100;
+    const currency = body.currency || 'INR';
+    const rate = currency === 'INR' ? 1 : body.exchangeRateToInr;
+    const converted = convertBudgetAmountToBase(body.amount, currency, rate);
+    result.amount = converted.amount;
+    result.exchangeRateToInr = converted.exchangeRateToInr;
   }
   if (!partial || Object.hasOwn(body, 'currency')) {
     if (!['INR', 'USD'].includes(body.currency || 'INR')) throw new TypeError('Currency must be INR or USD.');
@@ -96,4 +166,14 @@ function validateBudgetInput(body, partial = false) {
   return result;
 }
 
-module.exports = { currentPeriod, periodRanges, validateBudgetInput };
+module.exports = {
+  buildAccessibleBudgetQuery,
+  buildBudgetSpendQuery,
+  budgetAlertDedupeKey,
+  budgetAlertThresholdsCrossed,
+  convertBudgetAmountToBase,
+  currentPeriod,
+  getBudgetSpend,
+  periodRanges,
+  validateBudgetInput,
+};

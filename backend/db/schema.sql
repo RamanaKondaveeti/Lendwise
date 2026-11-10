@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS budgets (
   category VARCHAR(100) NULL,
   amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
   currency ENUM('INR', 'USD') NOT NULL DEFAULT 'INR',
+  exchange_rate_to_inr DECIMAL(15, 8) NOT NULL DEFAULT 1 CHECK (exchange_rate_to_inr > 0),
   period ENUM('weekly', 'monthly', 'yearly') NOT NULL,
   start_date DATE NOT NULL,
   end_date DATE NULL,

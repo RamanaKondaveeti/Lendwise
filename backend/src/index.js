@@ -20,7 +20,14 @@ const {
   nextOccurrenceDate,
   reserveOccurrence,
 } = require('./recurring');
-const { periodRanges, validateBudgetInput } = require('./budgets');
+const {
+  buildAccessibleBudgetQuery,
+  budgetAlertDedupeKey,
+  budgetAlertThresholdsCrossed,
+  getBudgetSpend,
+  periodRanges,
+  validateBudgetInput,
+} = require('./budgets');
 const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
@@ -623,6 +630,7 @@ async function init() {
   }
   await ensureColumn('expenses', 'category', "VARCHAR(100) NOT NULL DEFAULT 'Other'");
   await ensureColumn('notification_preferences', 'budget_alert', 'TINYINT(1) NOT NULL DEFAULT 1');
+  await ensureColumn('budgets', 'exchange_rate_to_inr', 'DECIMAL(15, 8) NOT NULL DEFAULT 1');
   const [notificationTypeColumn] = await pool.query(
     `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'notification_type'`
@@ -948,42 +956,13 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 });
 
 async function findAccessibleBudget(budgetId, account, executor = pool) {
-  const [rows] = await executor.execute(
-    `SELECT b.*, DATE_FORMAT(b.start_date, '%Y-%m-%d') AS start_date,
-       DATE_FORMAT(b.end_date, '%Y-%m-%d') AS end_date FROM budgets b
-     WHERE b.id = ? AND b.workspace_id = ? AND b.is_active = TRUE
-       AND ((b.budget_type = 'personal' AND b.person_id = ?)
-         OR (b.budget_type = 'group' AND EXISTS (
-           SELECT 1 FROM group_members gm WHERE gm.group_id = b.group_id AND gm.person_id = ?
-         )))`,
-    [budgetId, account.workspace_id, account.person_id, account.person_id]
-  );
+  const query = buildAccessibleBudgetQuery(budgetId, account);
+  const [rows] = await executor.execute(query.sql, query.parameters);
   return rows[0] || null;
 }
 
 async function budgetSpend(budget, range, executor = pool) {
-  const dateStart = `${range.startDate} 00:00:00`;
-  const dateEnd = `${range.endDate} 00:00:00`;
-  const category = budget.category;
-  if (budget.budget_type === 'personal') {
-    const [rows] = await executor.execute(
-      `SELECT COALESCE(SUM(s.amount), 0) AS spent
-       FROM expenses e JOIN splits s ON s.expense_id = e.id
-       JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
-       WHERE s.person_id = ? AND e.created_at >= ? AND e.created_at < ?
-         AND (? IS NULL OR e.category = ?)`,
-      [budget.workspace_id, budget.person_id, dateStart, dateEnd, category, category]
-    );
-    return Number(rows[0].spent || 0);
-  }
-  const [rows] = await executor.execute(
-    `SELECT COALESCE(SUM(e.amount), 0) AS spent
-     FROM expenses e JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
-     WHERE e.group_id = ? AND e.created_at >= ? AND e.created_at < ?
-       AND (? IS NULL OR e.category = ?)`,
-    [budget.workspace_id, budget.group_id, dateStart, dateEnd, category, category]
-  );
-  return Number(rows[0].spent || 0);
+  return getBudgetSpend(executor, budget, range);
 }
 
 async function getBudgetUtilization(budget, executor = pool) {
@@ -1019,9 +998,7 @@ async function runBudgetAlerts() {
       const percentUsed = utilization.currentPeriod.percentUsed;
       const configured = Array.isArray(budget.alert_thresholds)
         ? budget.alert_thresholds : JSON.parse(budget.alert_thresholds);
-      const supportedThresholds = [...new Set([...configured.map(Number), 80, 90, 100])];
-      const crossed = [...new Set(supportedThresholds.filter(value => Number.isFinite(value) && percentUsed >= value))];
-      if (percentUsed > 100) crossed.push('exceeded');
+      const crossed = budgetAlertThresholdsCrossed(configured, percentUsed);
       if (!crossed.length) continue;
       let accountIds;
       if (budget.budget_type === 'personal') {
@@ -1054,7 +1031,7 @@ async function runBudgetAlerts() {
           targetType: 'budget',
           targetId: budget.id,
           targetDate: ranges.current.startDate,
-          dedupeKey: `budget:${budget.id}:${ranges.current.startDate}:${threshold}`,
+          dedupeKey: budgetAlertDedupeKey(budget.id, ranges.current.startDate, threshold),
         });
       }
     }
@@ -1079,10 +1056,10 @@ app.post('/api/budgets', async (req, res) => {
     }
     const [result] = await pool.execute(
       `INSERT INTO budgets(workspace_id, created_by, name, budget_type, person_id, group_id, category,
-        amount, currency, period, start_date, end_date, alert_thresholds)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        amount, currency, exchange_rate_to_inr, period, start_date, end_date, alert_thresholds)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [req.account.workspace_id, req.account.person_id, data.name, data.budgetType, personId, groupId,
-        data.category, data.amount, data.currency, data.period, data.startDate, data.endDate, JSON.stringify(data.alertThresholds)]
+        data.category, data.amount, data.currency, data.exchangeRateToInr, data.period, data.startDate, data.endDate, JSON.stringify(data.alertThresholds)]
     );
     res.status(201).json({ id: result.insertId, message: 'Budget created.' });
   } catch (error) {
@@ -1093,7 +1070,7 @@ app.post('/api/budgets', async (req, res) => {
 
 app.get('/api/budgets', async (req, res) => {
   try {
-    const [budgets] = await q(
+    const budgets = await q(
       `SELECT b.*, DATE_FORMAT(b.start_date, '%Y-%m-%d') AS start_date,
        DATE_FORMAT(b.end_date, '%Y-%m-%d') AS end_date, g.name AS group_name
        FROM budgets b LEFT JOIN \`groups\` g ON g.id = b.group_id
@@ -1131,8 +1108,8 @@ app.put('/api/budgets/:budgetId', async (req, res) => {
       if (!groups.length) return res.status(403).json({ error: 'You must belong to this group to manage its budget.' });
       groupId = data.groupId; personId = null;
     }
-    await q(`UPDATE budgets SET name=?, budget_type=?, person_id=?, group_id=?, category=?, amount=?, currency=?, period=?, start_date=?, end_date=?, alert_thresholds=? WHERE id=? AND workspace_id=?`,
-      [data.name, data.budgetType, personId, groupId, data.category, data.amount, data.currency, data.period, data.startDate, data.endDate, JSON.stringify(data.alertThresholds), id, req.account.workspace_id]);
+    await q(`UPDATE budgets SET name=?, budget_type=?, person_id=?, group_id=?, category=?, amount=?, currency=?, exchange_rate_to_inr=?, period=?, start_date=?, end_date=?, alert_thresholds=? WHERE id=? AND workspace_id=?`,
+      [data.name, data.budgetType, personId, groupId, data.category, data.amount, data.currency, data.exchangeRateToInr, data.period, data.startDate, data.endDate, JSON.stringify(data.alertThresholds), id, req.account.workspace_id]);
     res.json({ ok: true, message: 'Budget updated.' });
   } catch (error) { if (error instanceof TypeError) return res.status(400).json({ error: error.message }); console.error(error); res.status(500).json({ error: 'Could not update this budget.' }); }
 });
