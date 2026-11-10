@@ -135,7 +135,10 @@
 .modal .participant-list label{display:flex;align-items:center;gap:7px;font-weight:400}
 .participant-list input{width:14px;height:14px;margin:0;accent-color:#426a49}
 .participant-list .avatar{flex:none}
-.participant-list .expense-share-option{display:grid;grid-template-columns:14px 20px minmax(0,1fr) minmax(76px,100px);gap:6px;min-width:0}
+.modal .participant-list .expense-share-option{display:grid;grid-template-columns:14px 20px minmax(0,1fr) minmax(76px,100px);gap:6px;min-width:0}
+.modal .participant-list .expense-share-percentage{grid-template-columns:14px 20px minmax(0,1fr) 76px minmax(70px,auto)}
+.percentage-calculated{justify-self:end;align-self:center;color:#426a49;font-size:9px;font-weight:700;white-space:nowrap}
+.percentage-allocation-summary{display:grid;gap:3px}
 .exact-share-input{width:100%;height:auto;min-width:0;margin:0;padding:6px 7px;border:1px solid #dfe9e3;border-radius:6px;background:#fff;color:#20352e;font:inherit;font-size:10px}
 .exact-allocation-summary{padding:9px 11px;border:1px solid #dfe9e3;border-radius:7px;background:#f7faf7;color:#52675b;font-size:10px}
 .exact-allocation-summary p{margin:3px 0}
@@ -196,7 +199,7 @@ footer svg{vertical-align:middle}
   .search kbd{display:none}
   .form-row{grid-template-columns:1fr 1fr}
 }
-@media(max-width:600px){.participant-list .expense-share-option{grid-template-columns:14px 20px minmax(0,1fr) 78px}.participant-list{grid-template-columns:1fr}}
+@media(max-width:600px){.modal .participant-list .expense-share-option{grid-template-columns:14px 20px minmax(0,1fr) 78px}.modal .participant-list .expense-share-percentage{grid-template-columns:14px 20px minmax(0,1fr) 68px 78px}.participant-list{grid-template-columns:1fr}}
 
 :root{color-scheme:light;color:#20352e;background:#f3f9f6}
 body{background:#f3f9f6;color:#20352e}
