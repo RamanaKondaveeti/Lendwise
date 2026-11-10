@@ -42,6 +42,7 @@ import {
   Trash2,
   Users,
   Utensils,
+  Wallet,
   ShoppingBasket,
   ShoppingBag,
   Zap,
@@ -251,6 +252,42 @@ function CategoryDonutChart({ categories, total, formatMoney }) {
           </div>
         )) : <div className="analytics-empty">No category expenses for this month.</div>}
       </div>
+    </div>
+  )
+}
+
+function BudgetForm({ budget, groups, categories, currency, exchangeRate, onSubmit, onCancel, busy }) {
+  const [type, setType] = useState(budget?.budget_type || 'personal')
+  const thresholds = budget?.alert_thresholds
+    ? (Array.isArray(budget.alert_thresholds) ? budget.alert_thresholds : JSON.parse(budget.alert_thresholds)).join(', ')
+    : '80, 100'
+  return (
+    <form className="budget-form" onSubmit={onSubmit}>
+      <div className="budget-form-grid">
+        <label>Budget name<input name="name" required maxLength="120" defaultValue={budget?.name || ''} placeholder="e.g. Monthly groceries" /></label>
+        <label>Budget type<select name="budgetType" value={type} onChange={event => setType(event.target.value)}><option value="personal">Personal</option><option value="group">Group</option></select></label>
+        {type === 'group' && <label>Group<select name="groupId" required defaultValue={budget?.group_id || ''}><option value="" disabled>Select a group</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>}
+        <label>Amount<input name="amount" type="number" min="0.01" step="0.01" required defaultValue={budget ? (budget.currency === 'USD' ? Number(budget.amount) * (Number.isFinite(exchangeRate) ? exchangeRate : 1) : budget.amount) : ''} placeholder="0.00" /></label>
+        <label>Currency<select name="currency" defaultValue={budget?.currency || currency}><option value="INR">INR (₹)</option><option value="USD">USD ($)</option></select></label>
+        <label>Period<select name="period" defaultValue={budget?.period || 'monthly'}><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
+        <label>Start date<input name="startDate" type="date" required defaultValue={budget?.start_date?.slice(0, 10) || todayIso()} /></label>
+        <label>End date (optional)<input name="endDate" type="date" defaultValue={budget?.end_date?.slice(0, 10) || ''} /></label>
+        <label>Category (optional)<select name="category" defaultValue={budget?.category || ''}><option value="">All categories</option>{categories.map(category => <option key={category}>{category}</option>)}</select></label>
+        <label className="budget-threshold-field">Alert thresholds (%)<input name="alertThresholds" required defaultValue={thresholds} pattern="\s*\d+(\s*,\s*\d+)*\s*" title="Enter percentages separated by commas, such as 80, 100" /><small>Separate percentages with commas. Default: 80, 100.</small></label>
+      </div>
+      <div className="budget-form-actions"><button type="button" className="button button-light" onClick={onCancel}>Cancel</button><button className="button button-dark" disabled={busy}>{busy ? 'Saving…' : budget ? 'Save changes' : 'Create budget'}</button></div>
+    </form>
+  )
+}
+
+function BudgetHistoryChart({ rows, formatMoney }) {
+  const max = Math.max(1, ...rows.map(row => Math.max(Number(row.spent), Number(row.budgetAmount))))
+  return (
+    <div className="budget-history-chart" role="img" aria-label="Budget history: actual spending compared with budget">
+      {rows.map((row, index) => <div className="budget-history-column" key={`${row.startDate}-${index}`}>
+        <div className="budget-history-bars"><i className="budget-history-limit" style={{ height: `${Math.max(4, Number(row.budgetAmount) / max * 100)}%` }} title={`Budget ${formatMoney(row.budgetAmount)}`} /><i className="budget-history-spend" style={{ height: `${Math.max(row.spent ? 4 : 0, Number(row.spent) / max * 100)}%` }} title={`Spent ${formatMoney(row.spent)}`} /></div>
+        <span>{new Intl.DateTimeFormat('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(`${row.startDate}T12:00:00Z`))}</span>
+      </div>)}
     </div>
   )
 }
@@ -697,6 +734,13 @@ function App() {
   const [currency, setCurrency] = useState(() => window.localStorage.getItem('groupbuk_currency') === 'USD' ? 'USD' : 'INR')
   const [exchangeRate, setExchangeRate] = useState(() => currency === 'INR' ? 1 : null)
   const [currencyLoading, setCurrencyLoading] = useState(false)
+  const [budgets, setBudgets] = useState([])
+  const [budgetsLoading, setBudgetsLoading] = useState(false)
+  const [budgetEditing, setBudgetEditing] = useState(null)
+  const [budgetFormOpen, setBudgetFormOpen] = useState(false)
+  const [budgetHistory, setBudgetHistory] = useState([])
+  const [budgetHistoryId, setBudgetHistoryId] = useState(null)
+  const [budgetBusy, setBudgetBusy] = useState(false)
 
   const setTheme = preference => {
     if (!themeOptions.has(preference)) return
@@ -1003,6 +1047,26 @@ function App() {
   }, [tab, selectedGroupId, reloadKey])
 
   useEffect(() => {
+    if (!authUser || tab !== 'Budgets') return undefined
+    let active = true
+    setBudgetsLoading(true)
+    request('/api/budgets')
+      .then(rows => { if (active) setBudgets(rows) })
+      .catch(error => { if (active) notify(error.message) })
+      .finally(() => { if (active) setBudgetsLoading(false) })
+    return () => { active = false }
+  }, [authUser?.id, tab, reloadKey])
+
+  useEffect(() => {
+    if (!budgetHistoryId || tab !== 'Budgets') return undefined
+    let active = true
+    request(`/api/budgets/${budgetHistoryId}/history?limit=12`)
+      .then(rows => { if (active) setBudgetHistory(rows) })
+      .catch(error => { if (active) notify(error.message) })
+    return () => { active = false }
+  }, [budgetHistoryId, tab, reloadKey])
+
+  useEffect(() => {
     if (!authUser || (tab !== 'Overview' && tab !== 'Recurring')) return undefined
     let active = true
     const loadRecurring = async () => {
@@ -1222,6 +1286,76 @@ function App() {
   function openRecurringEditor(template = null) {
     setRecurringEditing(template)
     setModal(template ? 'recurring-edit' : 'recurring')
+  }
+
+  async function saveBudget(event) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const amount = Number(form.get('amount'))
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(Math.round(amount * 100))) {
+      notify('Enter a valid budget amount greater than zero.')
+      return
+    }
+    const type = String(form.get('budgetType'))
+    const payload = {
+      name: String(form.get('name') || '').trim(),
+      budgetType: type,
+      amount: form.get('currency') === 'USD' ? amount / exchangeRate : amount,
+      currency: form.get('currency'),
+      period: form.get('period'),
+      startDate: form.get('startDate'),
+      endDate: form.get('endDate') || null,
+      category: form.get('category') || null,
+      alertThresholds: String(form.get('alertThresholds') || '80,100').split(',').map(value => Number(value.trim())),
+      ...(type === 'group' ? { groupId: Number(form.get('groupId')) } : {}),
+    }
+    if (!payload.name || (payload.endDate && payload.endDate < payload.startDate) ||
+        payload.alertThresholds.some(value => !Number.isInteger(value) || value < 1 || value > 1000)) {
+      notify('Check the budget name, date range, amount, and alert thresholds.')
+      return
+    }
+    if (form.get('currency') === 'USD' && (!Number.isFinite(exchangeRate) || exchangeRate <= 0)) {
+      notify('Select USD in the workspace currency switcher and wait for its rate before saving a USD budget.')
+      return
+    }
+    setBudgetBusy(true)
+    try {
+      const isEditing = Boolean(budgetEditing?.id)
+      const result = await request(isEditing ? `/api/budgets/${budgetEditing.id}` : '/api/budgets', {
+        method: isEditing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      setBudgetEditing(null)
+      setBudgetFormOpen(false)
+      setReloadKey(key => key + 1)
+      notify(result.message || (isEditing ? 'Budget updated.' : 'Budget created.'))
+    } catch (error) { notify(error.message) }
+    finally { setBudgetBusy(false) }
+  }
+
+  async function setBudgetPaused(budget, paused) {
+    setBudgetBusy(true)
+    try {
+      await request(`/api/budgets/${budget.id}/pause`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused }),
+      })
+      setReloadKey(key => key + 1)
+    } catch (error) { notify(error.message) }
+    finally { setBudgetBusy(false) }
+  }
+
+  async function removeBudget(budget) {
+    if (!window.confirm(`Delete “${budget.name}”? This will deactivate the budget.`)) return
+    setBudgetBusy(true)
+    try {
+      const result = await request(`/api/budgets/${budget.id}`, { method: 'DELETE' })
+      setReloadKey(key => key + 1)
+      if (budgetHistoryId === budget.id) { setBudgetHistoryId(null); setBudgetHistory([]) }
+      notify(result.message || 'Budget deleted.')
+    } catch (error) { notify(error.message) }
+    finally { setBudgetBusy(false) }
   }
 
   function openOccurrenceConfirmation(occurrence) {
@@ -1880,7 +2014,7 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav>
-          {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [CalendarClock, 'Recurring'], [FileBarChart, 'Reports'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
+          {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [Wallet, 'Budgets'], [CalendarClock, 'Recurring'], [FileBarChart, 'Reports'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
             <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => { setTab(name); setMobileNavOpen(false) }}>
               <Icon size={18} />{name}
               {name === 'Activity' && <span className="nav-count">{data.activityCount || 0}</span>}
@@ -2109,6 +2243,7 @@ function App() {
                 {tab === 'Users' && 'Everyone added to this workspace.'}
                 {tab === 'Groups' && 'Your shared circles and their expenses.'}
                 {tab === 'Activity' && 'Every expense recorded across your groups.'}
+                {tab === 'Budgets' && 'Plan spending, track progress, and compare periods.'}
                 {tab === 'Reports' && 'Build, preview, and export reports from your workspace records.'}
                 {tab === 'Balances' && 'See where everyone stands and record payments.'}
                 {tab === 'Group' && 'Expenses and totals for this group.'}
@@ -2511,6 +2646,52 @@ function App() {
                     </button>
                   </div>
                 )}
+              </section>
+            </div>
+          )}
+
+          {tab === 'Budgets' && (
+            <div className="budgets-page">
+              <section className="panel screen-panel budget-editor-panel">
+                <div className="panel-heading screen-panel-heading">
+                  <div><div className="section-title">Your budgets <span className="title-count">{budgets.length}</span></div><div className="section-subtitle">Actual expense shares for personal budgets and full expense amounts for group budgets.</div></div>
+                  {!budgetFormOpen && <button className="button button-dark" onClick={() => { setBudgetEditing(null); setBudgetFormOpen(true) }}><Plus size={15} />Create budget</button>}
+                </div>
+                {budgetFormOpen && <BudgetForm key={budgetEditing?.id || 'new-budget'} budget={budgetEditing} groups={groups.filter(group => group.members?.some(member => member.id === data?.currentUserId))} categories={expenseCategories} currency={currency} exchangeRate={exchangeRate} onSubmit={saveBudget} onCancel={() => { setBudgetEditing(null); setBudgetFormOpen(false) }} busy={budgetBusy} />}
+                {budgetsLoading && !budgets.length ? <LoadingSkeleton rows={3} label="Loading budgets" /> : budgets.length ? (
+                  <div className="budget-list">
+                    {budgets.map(budget => {
+                      const current = budget.utilization.currentPeriod
+                      const previous = budget.utilization.previousPeriod
+                      const budgetFormat = amount => new Intl.NumberFormat(budget.currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: budget.currency }).format(Math.abs(Number(amount) * (budget.currency === 'USD' ? (Number.isFinite(exchangeRate) ? exchangeRate : 0) : 1)))
+                      const percent = current.percentUsed
+                      const level = percent >= 100 ? 'red' : percent >= 80 ? 'amber' : 'green'
+                      const change = current.spent - previous.spent
+                      return (
+                        <article className={`budget-card budget-${level}`} key={budget.id}>
+                          <div className="budget-card-top">
+                            <div className="budget-card-title"><span className="budget-type-icon"><Wallet size={17} /></span><div><h3>{budget.name}</h3><p>{budget.budget_type === 'group' ? budget.group_name : 'Personal'}{budget.category ? ` · ${budget.category}` : ' · All categories'} · {budget.period}</p></div></div>
+                            <span className={`budget-status-pill budget-status-${level}`}>{percent.toFixed(0)}% used{budget.is_paused ? ' · Paused' : ''}</span>
+                          </div>
+                          <div className="budget-meter" role="progressbar" aria-label={`${budget.name} budget used`} aria-valuenow={Math.min(100, percent)} aria-valuemin="0" aria-valuemax="100"><i style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} /></div>
+                          <div className="budget-card-stats"><span><b>{budgetFormat(current.spent)}</b> spent</span><span>of {budgetFormat(current.budgetAmount)}</span><span>{budgetFormat(Math.max(0, current.remaining))} left</span></div>
+                          <div className="budget-compare-row"><span>Previous period: {budgetFormat(previous.spent)}</span><span className={change > 0 ? 'budget-change-up' : 'budget-change-down'}>{change > 0 ? '+' : change < 0 ? '−' : ''}{budgetFormat(Math.abs(change))} vs previous</span></div>
+                          <div className="budget-card-actions">
+                            <button type="button" className="button button-light" onClick={() => { setBudgetEditing(budget); setBudgetFormOpen(true) }}><Pencil size={14} />Edit</button>
+                            <button type="button" className="button button-light" disabled={budgetBusy} onClick={() => setBudgetPaused(budget, !budget.is_paused)}>{budget.is_paused ? <Play size={14} /> : <Pause size={14} />}{budget.is_paused ? 'Resume' : 'Pause'}</button>
+                            <button type="button" className="budget-delete-button" disabled={budgetBusy} onClick={() => removeBudget(budget)} aria-label={`Delete ${budget.name}`}><Trash2 size={15} /></button>
+                            <button type="button" className="budget-history-toggle" onClick={() => setBudgetHistoryId(id => id === budget.id ? null : budget.id)}>{budgetHistoryId === budget.id ? 'Hide history' : 'History'}</button>
+                          </div>
+                          {budgetHistoryId === budget.id && <div className="budget-history-panel"><div className="budget-chart-legend"><span><i className="legend-actual" />Actual</span><span><i className="legend-budget" />Budget</span></div>{budgetHistory.length ? <BudgetHistoryChart rows={budgetHistory} formatMoney={budgetFormat} /> : <div className="empty">No completed periods yet.</div>}</div>}
+                        </article>
+                      )
+                    })}
+                  </div>
+                ) : <div className="empty budget-empty">No budgets yet. Create a personal or group budget to start tracking spending.</div>}
+              </section>
+              <section className="budget-analytics-grid">
+                <article className="panel screen-panel budget-analytics-panel"><div className="section-title">Budget vs actual</div><div className="section-subtitle">Current period spending compared with each budget limit.</div>{budgets.length ? <div className="budget-analytics-list">{budgets.map(budget => { const spent = budget.utilization.currentPeriod.spent; const limit = Number(budget.amount); const money = value => new Intl.NumberFormat(budget.currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: budget.currency }).format(Math.abs(Number(value) * (budget.currency === 'USD' ? (Number.isFinite(exchangeRate) ? exchangeRate : 0) : 1))); return <div className="budget-analytics-row" key={budget.id}><div><b>{budget.name}</b><span>{money(spent)} / {money(limit)}</span></div><i className={`budget-analytics-meter budget-meter-${spent / limit >= 1 ? 'red' : spent / limit >= .8 ? 'amber' : 'green'}`}><b style={{ width: `${Math.min(100, Math.max(0, spent / limit * 100))}%` }} /></i></div> })}</div> : <div className="empty">Create a budget to see actual spending.</div>}</article>
+                <article className="panel screen-panel budget-analytics-panel"><div className="section-title">Category budget breakdown</div><div className="section-subtitle">Budgets and spending assigned to each category.</div>{budgets.some(budget => budget.category) ? <div className="budget-category-list">{budgets.filter(budget => budget.category).map(budget => { const money = value => new Intl.NumberFormat(budget.currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: budget.currency }).format(Math.abs(Number(value) * (budget.currency === 'USD' ? (Number.isFinite(exchangeRate) ? exchangeRate : 0) : 1))); return <div className="budget-category-row" key={budget.id}><span>{budget.category}</span><div><b>{money(budget.utilization.currentPeriod.spent)}</b><small> / {money(budget.amount)}</small></div><i><b style={{ width: `${Math.min(100, Math.max(0, budget.utilization.currentPeriod.percentUsed))}%` }} /></i></div> })}</div> : <div className="empty">Add category budgets to see the breakdown.</div>}</article>
               </section>
             </div>
           )}
