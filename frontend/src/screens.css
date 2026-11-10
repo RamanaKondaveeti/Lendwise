@@ -782,3 +782,5 @@ button:disabled{cursor:not-allowed}
   .report-total-strip b{font-size:11px}
   .report-pagination{align-items:flex-start}
 }
+
+html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d}html[data-theme='dark'] .budget-card.budget-amber{--budget-tone:#f4c76b;--budget-soft:#422b13}html[data-theme='dark'] .budget-card.budget-red{--budget-tone:#f18b8b;--budget-soft:#451a1a}html[data-theme='dark'] .budget-analytics-meter{--budget-tone:#65d391}html[data-theme='dark'] .budget-meter-amber{--budget-tone:#f4c76b}html[data-theme='dark'] .budget-meter-red{--budget-tone:#f18b8b}
