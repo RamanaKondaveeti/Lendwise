@@ -3212,15 +3212,54 @@ function App() {
                 <fieldset className="participant-field">
                   <legend>{expenseSplitMethod === 'exact' ? 'Participants and exact shares' : expenseSplitMethod === 'percentage' ? 'Participants and percentages' : 'Split equally between'}</legend>
                   <div className="participant-list">
-                    {(selectedExpenseGroup?.members || []).map(person => <label key={person.id} className={expenseSplitMethod === 'exact' ? 'expense-share-option' : expenseSplitMethod === 'percentage' ? 'expense-share-option expense-share-percentage' : ''}>
-                      <input type="checkbox" name="participants" value={person.id} checked={expenseParticipantIds.includes(person.id)} onChange={event => setExpenseParticipantIds(current => event.target.checked ? [...current, person.id] : current.filter(id => id !== person.id))} />
-                      <span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span><span className="expense-share-name">{person.name}</span>
-                      {expenseSplitMethod === 'exact' && expenseParticipantIds.includes(person.id) && <input className="exact-share-input" aria-label={`${person.name} exact share`} type="number" min="0" step="0.01" placeholder={`0.00 ${currency}`} value={expenseExactAmounts[person.id] ?? ''} onClick={event => event.stopPropagation()} onChange={event => setExpenseExactAmounts(current => ({ ...current, [person.id]: event.target.value }))} />}
-                      {expenseSplitMethod === 'percentage' && expenseParticipantIds.includes(person.id) && <>
-                        <input className="exact-share-input percentage-share-input" aria-label={`${person.name} percentage`} type="number" inputMode="decimal" min="0" max="100" step="0.01" placeholder="0.00%" value={expensePercentages[person.id] ?? ''} onClick={event => event.stopPropagation()} onChange={event => setExpensePercentages(current => ({ ...current, [person.id]: event.target.value }))} />
-                        <span className="percentage-calculated" aria-label="Calculated share amount" title="Calculated share amount">{formatCurrentCurrency((expensePercentageCents[expenseParticipantIds.indexOf(person.id)]?.cents || 0) / 100)}</span>
-                      </>}
-                    </label>)}
+                    {(selectedExpenseGroup?.members || []).map(person => {
+                      const selected = expenseParticipantIds.includes(person.id)
+                      const participantCheckboxId = `expense-participant-${person.id}`
+                      return <div key={person.id} className={`expense-share-option expense-share-${expenseSplitMethod}`}>
+                        <label className="expense-participant-toggle" htmlFor={participantCheckboxId}>
+                          <input
+                            id={participantCheckboxId}
+                            type="checkbox"
+                            name="participants"
+                            value={person.id}
+                            checked={selected}
+                            onChange={event => {
+                              const checked = event.target.checked
+                              setExpenseParticipantIds(current => checked
+                                ? current.includes(person.id) ? current : [...current, person.id]
+                                : current.filter(id => id !== person.id))
+                            }}
+                          />
+                          <span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span>
+                          <span className="expense-share-name">{person.name}</span>
+                        </label>
+                        {selected && expenseSplitMethod === 'exact' && <input
+                          className="exact-share-input"
+                          aria-label={`${person.name} exact share`}
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder={`0.00 ${currency}`}
+                          value={expenseExactAmounts[person.id] ?? ''}
+                          onChange={event => setExpenseExactAmounts(current => ({ ...current, [person.id]: event.target.value }))}
+                        />}
+                        {selected && expenseSplitMethod === 'percentage' && <>
+                          <input
+                            className="exact-share-input percentage-share-input"
+                            aria-label={`${person.name} percentage`}
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            placeholder="0.00%"
+                            value={expensePercentages[person.id] ?? ''}
+                            onChange={event => setExpensePercentages(current => ({ ...current, [person.id]: event.target.value }))}
+                          />
+                          <span className="percentage-calculated" aria-label={`Calculated share amount ${formatCurrentCurrency((expensePercentageCents[expenseParticipantIds.indexOf(person.id)]?.cents || 0) / 100)}`} title="Calculated share amount">{formatCurrentCurrency((expensePercentageCents[expenseParticipantIds.indexOf(person.id)]?.cents || 0) / 100)}</span>
+                        </>}
+                      </div>
+                    })}
                   </div>
                 </fieldset>
                 {expenseSplitMethod === 'equal' ? <p className="form-hint">Choose who shares this expense. Any extra cents are split fairly.</p> : expenseSplitMethod === 'exact' ? <div className="exact-allocation-summary" aria-live="polite">
