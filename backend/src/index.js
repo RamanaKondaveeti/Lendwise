@@ -978,8 +978,34 @@ async function getBudgetUtilization(budget, executor = pool) {
     currentPeriod: { ...ranges.current, spent, budgetAmount: amount, remaining: amount - spent, percentUsed: amount ? spent / amount * 100 : 0 },
     previousPeriod: { ...ranges.previous, spent: previousSpent, budgetAmount: amount, remaining: amount - previousSpent, percentUsed: amount ? previousSpent / amount * 100 : 0 },
     paused: Boolean(budget.is_paused),
-    alerts: budget.is_paused ? [] : (Array.isArray(budget.alert_thresholds) ? budget.alert_thresholds : JSON.parse(budget.alert_thresholds)).filter(threshold => spent / amount * 100 >= threshold),
+    alerts: budget.is_paused ? [] : budgetAlertThresholdsCrossed(
+      Array.isArray(budget.alert_thresholds) ? budget.alert_thresholds : JSON.parse(budget.alert_thresholds),
+      spent / amount * 100
+    ),
   };
+}
+
+async function attachBudgetAlertNotifications(budgets, accountId, executor = pool) {
+  if (!budgets.length) return budgets;
+  const periods = budgets.map(budget => budget.utilization.currentPeriod.startDate);
+  const ids = budgets.map(budget => budget.id);
+  const [notifications] = await executor.execute(
+    `SELECT target_id AS budget_id, DATE_FORMAT(target_date, '%Y-%m-%d') AS target_date,
+       dedupe_key, title, message, created_at
+     FROM notifications WHERE account_id = ? AND target_type = 'budget'
+       AND notification_type = 'budget_alert'
+       AND target_id IN (${ids.map(() => '?').join(',')})
+       AND target_date IN (${periods.map(() => '?').join(',')})
+     ORDER BY created_at DESC`,
+    [accountId, ...ids, ...periods]
+  );
+  return budgets.map(budget => ({
+    ...budget,
+    alertNotifications: notifications.filter(notification =>
+      Number(notification.budget_id) === Number(budget.id) &&
+      String(notification.target_date).slice(0, 10) === budget.utilization.currentPeriod.startDate
+    ),
+  }));
 }
 
 async function runBudgetAlerts() {
@@ -1019,15 +1045,24 @@ async function runBudgetAlerts() {
       }
       for (const threshold of crossed) {
         const exceeded = threshold === 'exceeded';
-        const label = exceeded ? 'Budget exceeded' : `${threshold}% of budget used`;
+        const label = exceeded ? 'Budget exceeded' : ({
+          80: 'Warning', 90: 'Near limit', 100: 'Budget reached',
+        }[threshold] || `${threshold}% of budget used`);
+        const rate = Number(budget.exchange_rate_to_inr || 1);
+        const money = value => new Intl.NumberFormat(budget.currency === 'INR' ? 'en-IN' : 'en-US', {
+          style: 'currency', currency: budget.currency,
+        }).format(Math.abs(Number(value) / rate));
+        const budgetAmount = Number(budget.amount);
+        const spent = utilization.currentPeriod.spent;
+        const remaining = budgetAmount - spent;
         await createNotifications(pool, {
           workspaceId: budget.workspace_id,
           accountIds,
           type: 'budget_alert',
           title: `${budget.name}: ${label}`,
           message: exceeded
-            ? `${budget.name} is over its ${budget.period} limit (${percentUsed.toFixed(0)}% used).`
-            : `${budget.name} has reached ${threshold}% of its ${budget.period} limit (${percentUsed.toFixed(0)}% used).`,
+            ? `${budget.name}: limit ${money(budgetAmount)}, spent ${money(spent)}, exceeded by ${money(Math.abs(remaining))}; ${percentUsed.toFixed(1)}% used.`
+            : `${budget.name}: limit ${money(budgetAmount)}, spent ${money(spent)}, ${money(Math.max(0, remaining))} remaining; ${percentUsed.toFixed(1)}% used.`,
           targetType: 'budget',
           targetId: budget.id,
           targetDate: ranges.current.startDate,
@@ -1080,8 +1115,8 @@ app.get('/api/budgets', async (req, res) => {
        ORDER BY b.created_at DESC`,
       [req.account.workspace_id, req.account.person_id, req.account.person_id]
     );
-    const result = await Promise.all(budgets.map(async budget => ({ ...budget, utilization: await getBudgetUtilization(budget) })));
-    res.json(result);
+    const withUtilization = await Promise.all(budgets.map(async budget => ({ ...budget, utilization: await getBudgetUtilization(budget) })));
+    res.json(await attachBudgetAlertNotifications(withUtilization, req.account.id));
   } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load budgets.' }); }
 });
 
@@ -1091,7 +1126,9 @@ app.get('/api/budgets/:budgetId', async (req, res) => {
   try {
     const budget = await findAccessibleBudget(id, req.account);
     if (!budget) return res.status(404).json({ error: 'Budget not found.' });
-    res.json({ ...budget, utilization: await getBudgetUtilization(budget) });
+    const withUtilization = { ...budget, utilization: await getBudgetUtilization(budget) };
+    const [withAlerts] = await attachBudgetAlertNotifications([withUtilization], req.account.id);
+    res.json(withAlerts);
   } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load this budget.' }); }
 });
 
@@ -1157,8 +1194,18 @@ app.get('/api/budgets/:budgetId/history', async (req, res) => {
       if (budget.period === 'weekly') start.setUTCDate(start.getUTCDate() - 7);
       else if (budget.period === 'monthly') start.setUTCMonth(start.getUTCMonth() - 1);
       else start.setUTCFullYear(start.getUTCFullYear() - 1);
-      const range = { startDate: start.toISOString().slice(0, 10), endDate: previousEnd };
-      if (budget.end_date && range.startDate >= String(budget.end_date).slice(0, 10)) continue;
+      const periodStart = start.toISOString().slice(0, 10);
+      const budgetStart = String(budget.start_date).slice(0, 10);
+      const rangeStart = periodStart < budgetStart ? budgetStart : periodStart;
+      let rangeEnd = previousEnd;
+      if (budget.end_date) {
+        const cappedEnd = new Date(`${String(budget.end_date).slice(0, 10)}T00:00:00.000Z`);
+        cappedEnd.setUTCDate(cappedEnd.getUTCDate() + 1);
+        rangeEnd = cappedEnd.toISOString().slice(0, 10) < rangeEnd
+          ? cappedEnd.toISOString().slice(0, 10) : rangeEnd;
+      }
+      if (rangeStart >= rangeEnd) continue;
+      const range = { startDate: rangeStart, endDate: rangeEnd };
       const spent = await budgetSpend(budget, range);
       history.unshift({ ...range, spent, budgetAmount: Number(budget.amount), percentUsed: spent / Number(budget.amount) * 100 });
       end.setTime(start.getTime());
@@ -1169,7 +1216,34 @@ app.get('/api/budgets/:budgetId/history', async (req, res) => {
 
 app.get('/api/budgets/:budgetId/alerts', async (req, res) => {
   const id = Number(req.params.budgetId);
-  try { const budget = await findAccessibleBudget(id, req.account); if (!budget) return res.status(404).json({ error: 'Budget not found.' }); const utilization = await getBudgetUtilization(budget); res.json(utilization.alerts.map(threshold => ({ threshold, percentUsed: utilization.currentPeriod.percentUsed, spent: utilization.currentPeriod.spent, budgetAmount: utilization.currentPeriod.budgetAmount }))); }
+  try {
+    const budget = await findAccessibleBudget(id, req.account);
+    if (!budget) return res.status(404).json({ error: 'Budget not found.' });
+    const utilization = await getBudgetUtilization(budget);
+    const periodStart = utilization.currentPeriod.startDate;
+    const [notifications] = await pool.execute(
+      `SELECT dedupe_key, title, message, created_at FROM notifications
+       WHERE account_id = ? AND target_type = 'budget' AND target_id = ?
+         AND notification_type = 'budget_alert' AND target_date = ?`,
+      [req.account.id, id, periodStart]
+    );
+    const byKey = new Map(notifications.map(item => [item.dedupe_key, item]));
+    res.json(utilization.alerts.map(threshold => {
+      const key = budgetAlertDedupeKey(id, periodStart, threshold);
+      const notification = byKey.get(key);
+      return {
+        threshold,
+        budgetName: budget.name,
+        percentUsed: utilization.currentPeriod.percentUsed,
+        spent: utilization.currentPeriod.spent,
+        budgetAmount: utilization.currentPeriod.budgetAmount,
+        remaining: utilization.currentPeriod.remaining,
+        alertTimestamp: notification?.created_at || null,
+        title: notification?.title || null,
+        message: notification?.message || null,
+      };
+    }));
+  }
   catch (error) { console.error(error); res.status(500).json({ error: 'Could not load budget alerts.' }); }
 });
 

@@ -1024,3 +1024,43 @@ html[data-theme="dark"] .app svg:not(.analytics-bar-chart):not(.analytics-donut)
   color: inherit;
   stroke: currentColor;
 }
+
+/* Keep the main dashboard and screen components in sync with the selected theme. */
+html[data-theme="dark"] .app :is(.panel, .screen-panel, .activity-panel, .groups-panel, .group-card, .balance-card, .workspace-error, .monthly-summary, .currency-switcher, .search, .select-button, .button-light, .modal input, .modal select, .modal textarea) {
+  background-color: var(--bg-card);
+  border-color: var(--border-primary);
+  color: var(--text-primary);
+}
+
+html[data-theme="dark"] .app :is(.welcome-row h1, .section-title, .group-card-name, .group-card strong, .activity-copy b, .activity-amount b, .group-name b, .group-total b, .balance-person b, .balance-value, .modal h2, .monthly-summary-stat b, .monthly-summary-select) {
+  color: var(--text-primary);
+}
+
+html[data-theme="dark"] .app :is(.workspace small, .profile small, .section-subtitle, .group-name span, .group-total span, .activity-copy span, .activity-payer span, .activity-amount span, .group-card-meta, .balance-person span, .balance-table-header, .balance-status, .form-hint, .muted, .nav-label, .eyebrow, .card-title, .crumb, .subtitle, .small-detail, .balance-foot) {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .app :is(.workspace, .group-row-button, .activity-row, .balance-person-row, .profile, .footer, .balance-note) {
+  border-color: var(--border-primary);
+}
+
+html[data-theme="dark"] .app :is(.total-card, .positive-card, .negative-card, .tip-card, .monthly-summary) {
+  background: var(--bg-card-hover);
+  border-color: var(--border-primary);
+}
+
+html[data-theme="dark"] .app :is(.card-symbol, .tip-icon, .workspace-icon, .top-avatar, .group-member) {
+  background: var(--success-bg);
+  color: var(--theme-success);
+}
+
+html[data-theme="dark"] .app :is(.search input, .range-select select, .monthly-summary-select select, .currency-switcher select) {
+  color: var(--text-primary);
+}
+
+/* The fixed sidebar needs its own scroll area when its contents exceed the viewport. */
+.sidebar {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+}
