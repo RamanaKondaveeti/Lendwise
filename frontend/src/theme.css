@@ -28,6 +28,16 @@ html[data-theme="dark"] {
   --theme-success: #75d6a5;
   --theme-warning: #e7bd72;
   --theme-error: #e39b83;
+  --theme-raised: #202c24;
+  --theme-hover: #26382c;
+  --theme-row: #1b2820;
+  --theme-row-alt: #202d25;
+  --theme-separator: #34463a;
+  --theme-positive: #83dfaa;
+  --theme-negative: #f0ad91;
+  --theme-caution: #f0cf83;
+  --theme-chart-track: #35473a;
+  --theme-button-secondary: #294536;
 }
 
 html,
@@ -686,4 +696,111 @@ html[data-theme="dark"] :is(input, select, textarea):user-invalid {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+html[data-theme="dark"] .app .suggested-settlement-row {
+  margin: 4px 0;
+  padding: 12px 10px;
+  border: 1px solid var(--theme-separator);
+  border-radius: 9px;
+  background: var(--theme-row);
+}
+
+html[data-theme="dark"] .app .suggested-settlement-row:nth-child(even) {
+  background: var(--theme-row-alt);
+}
+
+html[data-theme="dark"] .app .suggested-settlement-flow {
+  color: var(--theme-muted);
+}
+
+html[data-theme="dark"] .app .suggested-settlement-flow b,
+html[data-theme="dark"] .app .suggested-settlement-group {
+  color: var(--theme-text);
+}
+
+html[data-theme="dark"] .app .suggested-settlement-flow strong {
+  color: var(--theme-positive);
+}
+
+html[data-theme="dark"] .app .suggested-settlement-flow small {
+  color: var(--theme-muted);
+}
+
+html[data-theme="dark"] .app .suggested-settlement-action {
+  border-color: #3c674c;
+  background: var(--theme-button-secondary);
+  color: #e5f4e9;
+}
+
+html[data-theme="dark"] .app .suggested-settlement-action:hover:not(:disabled) {
+  border-color: var(--theme-positive);
+  background: #315640;
+  color: #ffffff;
+}
+
+html[data-theme="dark"] .app .balance-value.is-owed,
+html[data-theme="dark"] .app .balance-status.is-owed,
+html[data-theme="dark"] .app .balance-indicator,
+html[data-theme="dark"] .app .positive-card .amount,
+html[data-theme="dark"] .app .balance-value.is-owed b {
+  color: var(--theme-positive);
+}
+
+html[data-theme="dark"] .app .balance-value.is-owing,
+html[data-theme="dark"] .app .balance-status.is-owing,
+html[data-theme="dark"] .app .negative-card .amount,
+html[data-theme="dark"] .app .balance-value.is-owing b {
+  color: var(--theme-negative);
+}
+
+html[data-theme="dark"] .app .total-card.owes-card .amount {
+  color: var(--theme-negative);
+}
+
+html[data-theme="dark"] .app :is(.analytics-legend-row, .analytics-legend-name) {
+  color: var(--theme-muted);
+}
+
+html[data-theme="dark"] .app .analytics-legend-row b {
+  color: var(--theme-text);
+}
+
+html[data-theme="dark"] .app .analytics-donut-total {
+  fill: #f0f5f1;
+}
+
+html[data-theme="dark"] .sidebar .nav-label,
+html[data-theme="dark"] .sidebar .groups-label {
+  color: #bdcbc1;
+}
+
+html[data-theme="dark"] .sidebar .nav-item:not(.active):hover,
+html[data-theme="dark"] .sidebar .group-link:hover {
+  background: var(--theme-hover);
+  color: var(--theme-text);
+}
+
+html[data-theme="dark"] .sidebar .nav-item:not(.active):hover svg,
+html[data-theme="dark"] .sidebar .group-link:hover svg {
+  color: var(--theme-positive);
+}
+
+html[data-theme="dark"] .sidebar .nav-item.active {
+  background: #294536;
+  color: #b6edc9;
+}
+
+html[data-theme="dark"] .sidebar .nav-item.active svg {
+  color: #a4e7bd;
+}
+
+html[data-theme="dark"] .sidebar .theme-switcher {
+  border-color: var(--theme-separator);
+  background: var(--theme-raised);
+  color: #d7e6db;
+}
+
+html[data-theme="dark"] .sidebar .theme-switcher select {
+  color: #f0f5f1;
 }
