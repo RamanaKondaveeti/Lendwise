@@ -10,6 +10,11 @@ const helmet = require('helmet');
 const { calculateMinimalSettlements, validateGroupSettlement } = require('./settlements');
 const { createNotifications, reminderPeriodKey } = require('./notifications');
 const {
+  buildExpenseReportFilter,
+  buildSettlementReportFilter,
+  isValidReportDate,
+} = require('./reports');
+const {
   createExpenseAndSplits,
   dateOnly,
   nextOccurrenceDate,
@@ -2018,6 +2023,296 @@ app.get('/api/expenses', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Could not load expenses.' });
+  }
+});
+
+app.get('/api/reports', async (req, res) => {
+  const reportType = req.query.type;
+  const groupId = req.query.groupId && req.query.groupId !== 'all' ? Number(req.query.groupId) : null;
+  const memberId = req.query.memberId && req.query.memberId !== 'all' ? Number(req.query.memberId) : null;
+  const category = typeof req.query.category === 'string' && req.query.category !== 'all'
+    ? req.query.category.trim()
+    : null;
+  const startDate = typeof req.query.startDate === 'string' && req.query.startDate ? req.query.startDate : null;
+  const endDate = typeof req.query.endDate === 'string' && req.query.endDate ? req.query.endDate : null;
+  const limit = Number(req.query.limit || 5000);
+  const offset = Number(req.query.offset || 0);
+  const allowedTypes = new Set(['expense', 'monthly', 'group', 'member', 'settlement', 'outstanding']);
+  if (!allowedTypes.has(reportType) ||
+      (groupId !== null && (!Number.isInteger(groupId) || groupId <= 0)) ||
+      (memberId !== null && (!Number.isInteger(memberId) || memberId <= 0)) ||
+      (category && category.length > 100) ||
+      !isValidReportDate(startDate) || !isValidReportDate(endDate) ||
+      (startDate && endDate && startDate > endDate) ||
+      !Number.isInteger(limit) || limit < 1 || limit > 5000 ||
+      !Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) {
+    return res.status(400).json({ error: 'Choose a valid report, date range, group, member, category, limit, and offset.' });
+  }
+
+  try {
+    const workspaceId = req.account.workspace_id;
+    if (groupId !== null) {
+      const groups = await q('SELECT id FROM `groups` WHERE id = ? AND workspace_id = ?', [groupId, workspaceId]);
+      if (!groups.length) return res.status(404).json({ error: 'Group not found in this workspace.' });
+    }
+    if (memberId !== null) {
+      const people = await q('SELECT id FROM people WHERE id = ? AND workspace_id = ?', [memberId, workspaceId]);
+      if (!people.length) return res.status(404).json({ error: 'Member not found in this workspace.' });
+    }
+
+    if (reportType === 'outstanding') {
+      let balances = await getWorkspaceGroupBalances(workspaceId);
+      if (groupId !== null) balances = balances.filter(row => Number(row.group_id) === groupId);
+      if (memberId !== null) balances = balances.filter(row => Number(row.id) === memberId);
+      const records = balances.map(row => ({
+        date: new Date().toISOString().slice(0, 10),
+        group: row.group_name,
+        description: `${row.name} balance`,
+        category: '',
+        paid_by: '',
+        participants: row.name,
+        total_amount: 0,
+        personal_share: 0,
+        balance: Number(row.balance),
+        currency: 'INR',
+        settlement_status: Number(row.balance) > 0 ? 'Owes' : Number(row.balance) < 0 ? 'Owed' : 'Settled',
+      }));
+      return res.json({
+        reportType,
+        records,
+        totalRecords: records.length,
+        hasMore: false,
+        totals: {
+          total_amount: 0,
+          personal_share: 0,
+          balance: records.reduce((sum, row) => sum + row.balance, 0),
+        },
+      });
+    }
+
+    if (reportType === 'settlement') {
+      const { where, parameters } = buildSettlementReportFilter({
+        workspaceId, groupId, memberId, startDate, endDate,
+      });
+      const [count] = await q(
+        `SELECT COUNT(*) AS total_records, COALESCE(SUM(st.amount), 0) AS total_amount
+         FROM settlements st
+         JOIN people payer ON payer.id = st.payer_id AND payer.workspace_id = ?
+         JOIN people payee ON payee.id = st.payee_id AND payee.workspace_id = ?
+         LEFT JOIN \`groups\` g ON g.id = st.group_id
+         LEFT JOIN expenses linked_expense ON linked_expense.id = st.expense_id
+         LEFT JOIN \`groups\` linked_group ON linked_group.id = linked_expense.group_id
+         WHERE ${where}`,
+        [workspaceId, workspaceId, ...parameters]
+      );
+      const records = await q(
+        `SELECT DATE_FORMAT(st.created_at, '%Y-%m-%d') AS date,
+                COALESCE(g.name, linked_group.name, 'Workspace') AS group_name,
+                st.note AS description, '' AS category,
+                payer.name AS paid_by, payee.name AS payee,
+                CONCAT(payer.name, ' → ', payee.name) AS participants,
+                st.amount AS total_amount,
+                CASE WHEN st.payer_id = ? OR st.payee_id = ? THEN st.amount ELSE 0 END AS personal_share,
+                'INR' AS currency, 'Recorded' AS settlement_status,
+                st.id AS record_id
+         FROM settlements st
+         JOIN people payer ON payer.id = st.payer_id AND payer.workspace_id = ?
+         JOIN people payee ON payee.id = st.payee_id AND payee.workspace_id = ?
+         LEFT JOIN \`groups\` g ON g.id = st.group_id
+         LEFT JOIN expenses linked_expense ON linked_expense.id = st.expense_id
+         LEFT JOIN \`groups\` linked_group ON linked_group.id = linked_expense.group_id
+         WHERE ${where}
+         ORDER BY st.created_at DESC, st.id DESC
+         LIMIT ? OFFSET ?`,
+        [req.account.person_id, req.account.person_id, workspaceId, workspaceId, ...parameters, limit + 1, offset]
+      );
+      return res.json({
+        reportType,
+        records: records.slice(0, limit),
+        totalRecords: Number(count[0]?.total_records || 0),
+        hasMore: records.length > limit,
+        totals: {
+          total_amount: Number(count[0]?.total_amount || 0),
+          personal_share: 0,
+        },
+      });
+    }
+
+    const { where, parameters } = buildExpenseReportFilter({
+      workspaceId, groupId, memberId, category, startDate, endDate,
+    });
+    const [count] = await q(
+      `SELECT COUNT(*) AS total_records, COALESCE(SUM(e.amount), 0) AS total_amount,
+              COALESCE(SUM((SELECT s.amount FROM splits s
+                            WHERE s.expense_id = e.id AND s.person_id = ?
+                            LIMIT 1)), 0) AS personal_share
+       FROM expenses e JOIN \`groups\` g ON g.id = e.group_id
+       WHERE ${where}`,
+      [memberId || req.account.person_id, ...parameters]
+    );
+    const personalMemberId = memberId || req.account.person_id;
+    let records;
+    if (reportType === 'member') {
+      const memberParticipantFilter = memberId === null ? '' : 'AND s.person_id = ?';
+      const memberParameters = memberId === null ? parameters : [...parameters, memberId];
+      const [memberCount] = await q(
+        `SELECT COUNT(*) AS total_records, COALESCE(SUM(s.amount), 0) AS personal_share
+         FROM expenses e
+         JOIN \`groups\` g ON g.id = e.group_id
+         JOIN splits s ON s.expense_id = e.id
+         WHERE ${where} ${memberParticipantFilter}`,
+        memberParameters
+      );
+      const [memberTotals] = await q(
+        `SELECT COALESCE(SUM(report_expense.amount), 0) AS total_amount
+         FROM (
+           SELECT DISTINCT e.id, e.amount
+           FROM expenses e
+           JOIN \`groups\` g ON g.id = e.group_id
+           JOIN splits s ON s.expense_id = e.id
+           WHERE ${where} ${memberParticipantFilter}
+         ) report_expense`,
+        memberParameters
+      );
+      count[0] = { ...memberCount[0], total_amount: memberTotals[0]?.total_amount || 0 };
+      records = await q(
+        `SELECT DATE_FORMAT(e.created_at, '%Y-%m-%d') AS date,
+                g.name AS group_name, e.title AS description, e.category,
+                payer.name AS paid_by, participant.name AS participant,
+                (SELECT GROUP_CONCAT(CONCAT(other_participant.name, ' (', FORMAT(other_split.amount, 2), ')')
+                   ORDER BY other_participant.name SEPARATOR ', ')
+                 FROM splits other_split JOIN people other_participant
+                   ON other_participant.id = other_split.person_id AND other_participant.workspace_id = ?
+                 WHERE other_split.expense_id = e.id) AS participants,
+                e.amount AS total_amount, s.amount AS personal_share,
+                CASE WHEN e.paid_by = participant.id THEN e.amount ELSE 0 END AS paid_amount,
+                COALESCE((SELECT SUM(GREATEST(0, other_split.amount - COALESCE(
+                    (SELECT SUM(st.amount) FROM settlements st
+                     WHERE st.expense_id = e.id AND st.payer_id = other_split.person_id AND st.payee_id = e.paid_by), 0)))
+                  FROM splits other_split WHERE other_split.expense_id = e.id
+                    AND other_split.person_id <> e.paid_by), 0) AS outstanding_amount,
+                COALESCE((SELECT SUM(st.amount) FROM settlements st WHERE st.expense_id = e.id), 0) AS settled_amount,
+                'INR' AS currency, 'Recorded' AS settlement_status,
+                e.id AS expense_id, participant.id AS member_id
+         FROM expenses e
+         JOIN \`groups\` g ON g.id = e.group_id
+         JOIN splits s ON s.expense_id = e.id
+         JOIN people participant ON participant.id = s.person_id AND participant.workspace_id = ?
+         JOIN people payer ON payer.id = e.paid_by AND payer.workspace_id = ?
+         WHERE ${where} ${memberParticipantFilter}
+         ORDER BY participant.name, e.created_at DESC, e.id DESC
+         LIMIT ? OFFSET ?`,
+        [workspaceId, workspaceId, workspaceId, ...memberParameters, limit + 1, offset]
+      );
+      records = records.map(record => ({
+        ...record,
+        total_amount: Number(record.total_amount || 0),
+        personal_share: Number(record.personal_share || 0),
+        paid_amount: Number(record.paid_amount || 0),
+        settlement_status: Number(record.outstanding_amount) <= 0
+          ? 'Settled'
+          : Number(record.settled_amount) > 0 ? 'Partially settled' : 'Unpaid',
+      }));
+    } else {
+      records = await q(
+        `SELECT DATE_FORMAT(e.created_at, '%Y-%m-%d') AS date,
+                DATE_FORMAT(e.created_at, '%Y-%m') AS month,
+                g.name AS group_name, e.title AS description, e.category,
+                payer.name AS paid_by,
+                (SELECT GROUP_CONCAT(CONCAT(participant.name, ' (', FORMAT(s.amount, 2), ')')
+                   ORDER BY participant.name SEPARATOR ', ')
+                 FROM splits s JOIN people participant
+                   ON participant.id = s.person_id AND participant.workspace_id = ?
+                 WHERE s.expense_id = e.id) AS participants,
+                e.amount AS total_amount,
+                COALESCE((SELECT s.amount FROM splits s WHERE s.expense_id = e.id AND s.person_id = ? LIMIT 1), 0) AS personal_share,
+                COALESCE((SELECT SUM(GREATEST(0, s.amount - COALESCE(
+                    (SELECT SUM(st.amount) FROM settlements st
+                     WHERE st.expense_id = e.id AND st.payer_id = s.person_id AND st.payee_id = e.paid_by), 0)))
+                  FROM splits s WHERE s.expense_id = e.id AND s.person_id <> e.paid_by), 0) AS outstanding_amount,
+                COALESCE((SELECT SUM(st.amount) FROM settlements st WHERE st.expense_id = e.id), 0) AS settled_amount,
+                'INR' AS currency, e.id AS expense_id
+         FROM expenses e
+         JOIN \`groups\` g ON g.id = e.group_id
+         JOIN people payer ON payer.id = e.paid_by AND payer.workspace_id = ?
+         WHERE ${where}
+         ORDER BY e.created_at DESC, e.id DESC
+         LIMIT ? OFFSET ?`,
+        [workspaceId, personalMemberId, workspaceId, ...parameters, limit + 1, offset]
+      );
+      records = records.map(record => {
+        const settled = Number(record.settled_amount || 0);
+        return {
+          ...record,
+          total_amount: Number(record.total_amount || 0),
+          personal_share: Number(record.personal_share || 0),
+          outstanding_amount: Number(record.outstanding_amount || 0),
+          settlement_status: Number(record.outstanding_amount) <= 0
+            ? 'Settled'
+            : settled > 0 ? 'Partially settled' : 'Unpaid',
+        };
+      });
+    }
+
+    let breakdown = [];
+    if (reportType === 'monthly') {
+      breakdown = await q(
+        `SELECT DATE_FORMAT(e.created_at, '%Y-%m') AS period,
+                COUNT(*) AS expense_count, SUM(e.amount) AS total_amount,
+                COALESCE(SUM((SELECT s.amount FROM splits s
+                              WHERE s.expense_id = e.id AND s.person_id = ?
+                              LIMIT 1)), 0) AS personal_share
+         FROM expenses e JOIN \`groups\` g ON g.id = e.group_id
+         WHERE ${where}
+         GROUP BY DATE_FORMAT(e.created_at, '%Y-%m')
+         ORDER BY period DESC`,
+        [personalMemberId, ...parameters]
+      );
+    } else if (reportType === 'group') {
+      breakdown = await q(
+        `SELECT g.id AS group_id, g.name AS group_name,
+                COUNT(*) AS expense_count, SUM(e.amount) AS total_amount,
+                COALESCE(SUM((SELECT s.amount FROM splits s
+                              WHERE s.expense_id = e.id AND s.person_id = ?
+                              LIMIT 1)), 0) AS personal_share
+         FROM expenses e JOIN \`groups\` g ON g.id = e.group_id
+         WHERE ${where}
+         GROUP BY g.id, g.name
+         ORDER BY total_amount DESC, g.name`,
+        [personalMemberId, ...parameters]
+      );
+    } else if (reportType === 'member') {
+      const memberParticipantFilter = memberId === null ? '' : 'AND s.person_id = ?';
+      const memberParameters = memberId === null ? parameters : [...parameters, memberId];
+      breakdown = await q(
+        `SELECT participant.id AS member_id, participant.name AS member_name,
+                COUNT(DISTINCT e.id) AS expense_count, SUM(s.amount) AS share_amount,
+                COALESCE(SUM(CASE WHEN e.paid_by = participant.id THEN e.amount ELSE 0 END), 0) AS paid_amount
+         FROM expenses e
+         JOIN \`groups\` g ON g.id = e.group_id
+         JOIN splits s ON s.expense_id = e.id
+         JOIN people participant ON participant.id = s.person_id AND participant.workspace_id = ?
+         WHERE ${where} ${memberParticipantFilter}
+         GROUP BY participant.id, participant.name
+         ORDER BY share_amount DESC, participant.name`,
+        [workspaceId, ...memberParameters]
+      );
+    }
+
+    res.json({
+      reportType,
+      records: records.slice(0, limit),
+      totalRecords: Number(count[0]?.total_records || 0),
+      hasMore: records.length > limit,
+      breakdown,
+      totals: {
+        total_amount: Number(count[0]?.total_amount || 0),
+        personal_share: Number(count[0]?.personal_share || 0),
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not generate this report.' });
   }
 });
 

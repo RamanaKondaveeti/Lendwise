@@ -723,3 +723,58 @@ button:disabled{cursor:not-allowed}
   .notification-popover{right:-2px;max-height:72vh}
   .notification-open{gap:7px}
 }
+.reports-page{display:grid;gap:14px}
+.report-type-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.report-type-card{display:grid;grid-template-columns:32px minmax(0,1fr);align-content:start;align-items:center;gap:4px 9px;min-height:84px;padding:12px;border:1px solid #e3ebe5;border-radius:10px;background:#fff;color:#344a3a;text-align:left;cursor:pointer;transition:border-color .15s,background .15s}
+.report-type-card:hover,.report-type-card.selected{border-color:#85b998;background:#f4faf5}
+.report-type-icon{grid-row:span 2;display:grid;width:32px;height:32px;place-items:center;border-radius:9px;background:#e8f4eb;color:#36815e}
+.report-type-card>b{font-size:10px}
+.report-type-card>small{color:#819087;font-size:8px;line-height:1.4}
+.report-type-card:focus-visible,.report-generate-button:focus-visible{outline:2px solid #719978;outline-offset:2px}
+.report-filter-panel,.report-preview-panel{min-width:0}
+.report-currency-filter{display:flex;align-items:center;gap:7px;color:#77877c;font-size:9px}
+.report-currency-filter select,.report-filter-grid select,.report-filter-grid input{height:34px;padding:0 9px;border:1px solid #e0e9e2;border-radius:7px;background:#fff;color:#344a3a;font:inherit;font-size:10px}
+.report-filter-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end;gap:10px;margin-top:8px}
+.report-filter-grid>label{display:grid;gap:5px;min-width:0;color:#77877c;font-size:9px}
+.report-filter-grid>label select,.report-filter-grid>label input{width:100%;min-width:0}
+.report-filter-grid>label select:disabled,.report-filter-grid>label input:disabled{background:#f4f6f4;color:#9aa39a}
+.report-generate-button{height:34px;justify-content:center;gap:7px;font-size:10px}
+.report-generate-button .loading-icon{color:#fff}
+.report-export-actions{display:flex;align-items:center;gap:5px}
+.report-export-actions .button{height:31px;padding:0 9px;font-size:9px}
+.report-total-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}
+.report-total-strip>div{display:grid;gap:5px;padding:10px 12px;border:1px solid #e7eee8;border-radius:8px;background:#f8fbf8}
+.report-total-strip span{color:#77877c;font-size:8px}
+.report-total-strip b{color:#315d42;font-size:13px}
+.report-breakdown{display:grid;gap:8px;margin:8px 0 14px}
+.report-breakdown>.section-title{font-size:10px}
+.report-breakdown-grid{display:flex;gap:7px;overflow-x:auto;padding-bottom:3px}
+.report-breakdown-grid article{display:grid;flex:1;min-width:125px;gap:4px;padding:9px;border:1px solid #e7eee8;border-radius:8px;background:#fff}
+.report-breakdown-grid article>span{overflow:hidden;color:#526357;font-size:9px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.report-breakdown-grid article>b{color:#315d42;font-size:11px}
+.report-breakdown-grid article>small{color:#8b978d;font-size:8px}
+.report-empty{padding:24px}
+.report-table-wrap{max-height:520px;overflow:auto;border:1px solid #e8eee9;border-radius:8px}
+.report-table{width:100%;border-collapse:collapse;font-size:9px;text-align:left}
+.report-table th{position:sticky;top:0;z-index:1;padding:9px 10px;background:#f1f7f2;color:#64756a;font-size:8px;font-weight:700;white-space:nowrap}
+.report-table td{max-width:260px;padding:8px 10px;border-top:1px solid #eef2ef;color:#536459;vertical-align:top}
+.report-table tbody tr:hover{background:#f8fbf8}
+.report-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:10px;color:#819087;font-size:8px}
+.report-pagination .button{height:30px;padding:0 10px;font-size:9px}
+@media(max-width:800px){
+  .report-type-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:600px){
+  .report-type-grid{gap:6px}
+  .report-type-card{min-height:77px;padding:9px}
+  .report-type-card>b{font-size:9px}
+  .report-filter-panel .screen-panel-heading{align-items:flex-start}
+  .report-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .report-generate-button{grid-column:1/-1}
+  .report-export-actions{flex-wrap:wrap;justify-content:flex-end}
+  .report-export-actions .button{height:29px;padding:0 7px;font-size:8px}
+  .report-total-strip{gap:6px}
+  .report-total-strip>div{padding:8px}
+  .report-total-strip b{font-size:11px}
+  .report-pagination{align-items:flex-start}
+}

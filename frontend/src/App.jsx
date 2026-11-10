@@ -14,6 +14,10 @@ import {
   ChevronDown,
   CircleHelp,
   Coffee,
+  Download,
+  FileBarChart,
+  FileDown,
+  FileSpreadsheet,
   GraduationCap,
   HeartPulse,
   House,
@@ -40,6 +44,15 @@ import {
   X,
 } from 'lucide-react'
 import { calculateMonthlyAnalytics, monthValue } from './analytics.mjs'
+import {
+  convertReportRow,
+  presentReportRow,
+  reportCsv,
+  reportHeaders,
+  reportPdf,
+  reportTypes,
+  reportXlsx,
+} from './reports.mjs'
 
 const groupIcons = { mountain: Mountain, house: House, users: Users }
 const expenseCategories = [
@@ -124,6 +137,10 @@ const notificationTimestamp = value => new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
 }).format(new Date(value))
+const todayIso = () => {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
 
 function MonthlyExpenseChart({ series, selectedMonth, onSelectMonth, formatMoney }) {
   const maximum = Math.max(1, ...series.map(item => item.total))
@@ -612,6 +629,16 @@ function App() {
   const [activity, setActivity] = useState([])
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityLoaded, setActivityLoaded] = useState(false)
+  const [selectedReportType, setSelectedReportType] = useState('expense')
+  const [reportFilters, setReportFilters] = useState({
+    startDate: `${new Date().getFullYear()}-01-01`,
+    endDate: todayIso(),
+    groupId: 'all',
+    memberId: 'all',
+    category: 'all',
+  })
+  const [reportResult, setReportResult] = useState(null)
+  const [reportLoading, setReportLoading] = useState(false)
   const [recurringTemplates, setRecurringTemplates] = useState([])
   const [recurringOccurrences, setRecurringOccurrences] = useState([])
   const [recurringLoading, setRecurringLoading] = useState(false)
@@ -678,6 +705,91 @@ function App() {
     setRecurringTemplates(result.templates)
     setRecurringOccurrences(result.occurrences)
     return result
+  }
+
+  const reportQuery = (type, offset = 0, limit = 100) => {
+    const params = new URLSearchParams({
+      type,
+      limit: String(limit),
+      offset: String(offset),
+      currency,
+    })
+    Object.entries(reportFilters).forEach(([key, value]) => {
+      if (value && value !== 'all') params.set(key, value)
+    })
+    return `/api/reports?${params}`
+  }
+
+  async function runReport(offset = 0, append = false) {
+    setReportLoading(true)
+    try {
+      const result = await request(reportQuery(selectedReportType, offset))
+      setReportResult(previous => append && previous
+        ? { ...result, records: [...previous.records, ...result.records] }
+        : result)
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setReportLoading(false)
+    }
+  }
+
+  async function exportReport(format) {
+    if (!reportResult) return
+    if (!Number.isFinite(exchangeRate)) {
+      notify('Wait for the selected currency rate to load before exporting.')
+      return
+    }
+    setReportLoading(true)
+    try {
+      const records = [...reportResult.records]
+      const exportLimit = 5000
+      let offset = records.length
+      while (reportResult.hasMore && offset < exportLimit) {
+        const page = await request(reportQuery(selectedReportType, offset, Math.min(1000, exportLimit - offset)))
+        records.push(...page.records)
+        if (!page.hasMore || !page.records.length) break
+        offset += page.records.length
+      }
+      const type = reportTypes.find(item => item.id === selectedReportType)
+      const headers = reportHeaders(selectedReportType)
+      const rows = records.map(record => {
+        const converted = convertReportRow(presentReportRow(record), exchangeRate, currency)
+        return {
+          ...converted,
+          date: converted.date ? String(converted.date).slice(0, 10) : '',
+          month: converted.month || '',
+          total_amount: Number(converted.total_amount || 0),
+          personal_share: Number(converted.personal_share || 0),
+          paid_amount: Number(converted.paid_amount || 0),
+          balance: Number(converted.balance || 0),
+        }
+      })
+      const filename = `groupbuk-${selectedReportType}-${todayIso()}`
+      let blob
+      if (format === 'csv') {
+        blob = new Blob([`\uFEFF${reportCsv(headers, rows)}`], { type: 'text/csv;charset=utf-8' })
+      } else if (format === 'xlsx') {
+        blob = new Blob([reportXlsx(headers, rows, type?.label)], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+      } else {
+        blob = new Blob([reportPdf(headers, rows, type?.label)], { type: 'application/pdf' })
+      }
+      const link = document.createElement('a')
+      const url = URL.createObjectURL(blob)
+      link.href = url
+      link.download = `${filename}.${format}`
+      link.click()
+      URL.revokeObjectURL(url)
+      if (reportResult.totalRecords > exportLimit) {
+        notify(`Downloaded the first ${exportLimit.toLocaleString()} rows. Narrow filters to export the complete report.`)
+      }
+    } catch (error) {
+      notify(`Could not create the ${format.toUpperCase()} report: ${error.message}`)
+    } finally {
+      setReportLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -962,6 +1074,25 @@ function App() {
     analyticsGroup,
     analyticsCategory,
   ), [analyticsCategory, analyticsGroup, analyticsSource, data?.currentUserId, selectedMonth])
+  const reportColumns = reportHeaders(selectedReportType)
+  const visibleReportRows = (reportResult?.records || []).map(record =>
+    convertReportRow(presentReportRow(record), exchangeRate, currency)
+  )
+
+  function reportCell(record, key) {
+    if (['total_amount', 'personal_share', 'paid_amount', 'balance'].includes(key)) {
+      const amount = Number(record[key] || 0)
+      return key === 'balance' && amount !== 0
+        ? `${amount > 0 ? '−' : '+'}${formatMoney(amount)}`
+        : formatMoney(amount)
+    }
+    if (key === 'date') return record.date ? String(record.date).slice(0, 10) : ''
+    if (key === 'month') return record.month || ''
+    if (key === 'currency') return currency
+    if (key === 'group') return record.group_name || ''
+    if (key === 'member') return record.participant || record.description || ''
+    return record[key] ?? ''
+  }
 
   const visibleActivity = useMemo(() => {
     const source = tab === 'Overview' && !activityLoaded ? data?.activity || [] : activity
@@ -1668,7 +1799,7 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav>
-          {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [CalendarClock, 'Recurring'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
+          {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [CalendarClock, 'Recurring'], [FileBarChart, 'Reports'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
             <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => setTab(name)}>
               <Icon size={18} />{name}
               {name === 'Activity' && <span className="nav-count">{data.activityCount || 0}</span>}
@@ -1873,6 +2004,7 @@ function App() {
                 {tab === 'Users' && 'Everyone added to this workspace.'}
                 {tab === 'Groups' && 'Your shared circles and their expenses.'}
                 {tab === 'Activity' && 'Every expense recorded across your groups.'}
+                {tab === 'Reports' && 'Build, preview, and export reports from your workspace records.'}
                 {tab === 'Balances' && 'See where everyone stands and record payments.'}
                 {tab === 'Group' && 'Expenses and totals for this group.'}
                 {tab === 'Recurring' && 'Schedule shared expenses and review generated bills.'}
@@ -2108,6 +2240,172 @@ function App() {
                 </div>
               </section>
             </>
+          )}
+
+          {tab === 'Reports' && (
+            <div className="reports-page">
+              <section className="report-type-grid" aria-label="Report types">
+                {reportTypes.map(type => (
+                  <button
+                    type="button"
+                    className={`report-type-card ${selectedReportType === type.id ? 'selected' : ''}`}
+                    key={type.id}
+                    onClick={() => {
+                      setSelectedReportType(type.id)
+                      setReportResult(null)
+                    }}
+                  >
+                    <span className="report-type-icon"><FileBarChart size={17} /></span>
+                    <b>{type.label}</b>
+                    <small>{type.description}</small>
+                  </button>
+                ))}
+              </section>
+
+              <section className="panel screen-panel report-filter-panel">
+                <div className="panel-heading screen-panel-heading">
+                  <div>
+                    <div className="section-title">Report filters</div>
+                    <div className="section-subtitle">Amounts are stored in INR; USD exports use the current display rate.</div>
+                  </div>
+                  <label className="report-currency-filter">
+                    <span>Currency</span>
+                    <select value={currency} onChange={event => setCurrency(event.target.value)}>
+                      <option value="INR">INR</option>
+                      <option value="USD">USD</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="report-filter-grid">
+                  <label>
+                    <span>From</span>
+                    <input
+                      type="date"
+                      value={reportFilters.startDate}
+                      disabled={selectedReportType === 'outstanding'}
+                      onChange={event => setReportFilters(filters => ({ ...filters, startDate: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    <span>To</span>
+                    <input
+                      type="date"
+                      value={reportFilters.endDate}
+                      disabled={selectedReportType === 'outstanding'}
+                      onChange={event => setReportFilters(filters => ({ ...filters, endDate: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Group</span>
+                    <select value={reportFilters.groupId} onChange={event => setReportFilters(filters => ({ ...filters, groupId: event.target.value }))}>
+                      <option value="all">All groups</option>
+                      {groups.map(group => <option value={group.id} key={group.id}>{group.name}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Member</span>
+                    <select value={reportFilters.memberId} onChange={event => setReportFilters(filters => ({ ...filters, memberId: event.target.value }))}>
+                      <option value="all">All members</option>
+                      {people.map(person => <option value={person.id} key={person.id}>{person.name}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Category</span>
+                    <select
+                      value={reportFilters.category}
+                      disabled={['settlement', 'outstanding'].includes(selectedReportType)}
+                      onChange={event => setReportFilters(filters => ({ ...filters, category: event.target.value }))}
+                    >
+                      <option value="all">All categories</option>
+                      {categoryOptions.map(category => <option value={category} key={category}>{category}</option>)}
+                    </select>
+                  </label>
+                  <button className="button button-dark report-generate-button" disabled={reportLoading} onClick={() => runReport()}>
+                    {reportLoading ? <LoaderCircle className="loading-icon" size={15} /> : <FileBarChart size={15} />}
+                    Generate report
+                  </button>
+                </div>
+              </section>
+
+              <section className="panel screen-panel report-preview-panel">
+                <div className="panel-heading screen-panel-heading">
+                  <div>
+                    <div className="section-title">Report preview</div>
+                    <div className="section-subtitle">
+                      {reportResult
+                        ? `${reportResult.totalRecords.toLocaleString()} matching records · showing ${visibleReportRows.length.toLocaleString()}`
+                        : 'Generate a report to load matching records from your database.'}
+                    </div>
+                  </div>
+                  <div className="report-export-actions">
+                    <button className="button button-light" disabled={!reportResult || reportLoading || !Number.isFinite(exchangeRate)} onClick={() => exportReport('xlsx')}>
+                      <FileSpreadsheet size={14} />Excel
+                    </button>
+                    <button className="button button-light" disabled={!reportResult || reportLoading || !Number.isFinite(exchangeRate)} onClick={() => exportReport('csv')}>
+                      <FileDown size={14} />CSV
+                    </button>
+                    <button className="button button-light" disabled={!reportResult || reportLoading || !Number.isFinite(exchangeRate)} onClick={() => exportReport('pdf')}>
+                      <Download size={14} />PDF
+                    </button>
+                  </div>
+                </div>
+                {reportResult && (
+                  <div className="report-total-strip">
+                    <div><span>Total expense amount</span><b>{formatMoney(reportResult.totals.total_amount)}</b></div>
+                    <div><span>Personal / selected-member share</span><b>{formatMoney(reportResult.totals.personal_share)}</b></div>
+                    {reportResult.totals.balance !== undefined && (
+                      <div><span>Net outstanding balance</span><b>{formatMoney(reportResult.totals.balance)}</b></div>
+                    )}
+                  </div>
+                )}
+                {reportResult?.breakdown?.length > 0 && (
+                  <div className="report-breakdown">
+                    <div className="section-title">
+                      {selectedReportType === 'monthly' ? 'Monthly totals' : selectedReportType === 'group' ? 'Group totals' : 'Member contributions'}
+                    </div>
+                    <div className="report-breakdown-grid">
+                      {reportResult.breakdown.map((item, index) => (
+                        <article key={item.group_id || item.member_id || item.period || index}>
+                          <span>{item.period || item.group_name || item.member_name}</span>
+                          {item.expense_count !== undefined && <small>{Number(item.expense_count).toLocaleString()} expenses</small>}
+                          <b>{formatMoney(item.total_amount ?? item.share_amount)}</b>
+                          {item.personal_share !== undefined && <small>Your share · {formatMoney(item.personal_share)}</small>}
+                          {item.paid_amount !== undefined && <small>Paid by member · {formatMoney(item.paid_amount)}</small>}
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {!reportResult && <div className="empty report-empty">Choose a report and filters, then generate a preview.</div>}
+                {reportResult && visibleReportRows.length > 0 && (
+                  <div className="report-table-wrap">
+                    <table className="report-table">
+                      <thead><tr>{reportColumns.map(column => <th key={column.key}>{column.label}</th>)}</tr></thead>
+                      <tbody>
+                        {visibleReportRows.map((record, rowIndex) => (
+                          <tr key={`${record.expense_id || record.record_id || record.member_id || rowIndex}-${rowIndex}`}>
+                            {reportColumns.map(column => <td key={column.key}>{reportCell(record, column.key)}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {reportResult && !visibleReportRows.length && <div className="empty report-empty">No records match these filters.</div>}
+                {reportResult?.hasMore && (
+                  <div className="report-pagination">
+                    <span>Preview and exports are capped at 5,000 rows. Narrow filters for larger reports.</span>
+                    <button
+                      className="button button-light"
+                      disabled={reportLoading}
+                      onClick={() => runReport(reportResult.records.length, true)}
+                    >
+                      Load more
+                    </button>
+                  </div>
+                )}
+              </section>
+            </div>
           )}
 
           {tab === 'Recurring' && (
