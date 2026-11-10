@@ -20,6 +20,7 @@ const {
   nextOccurrenceDate,
   reserveOccurrence,
 } = require('./recurring');
+const { periodRanges, validateBudgetInput } = require('./budgets');
 const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
@@ -924,6 +925,195 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
     workspaceId: req.account.workspace_id,
     workspaceName: req.account.workspace_name
   });
+});
+
+async function findAccessibleBudget(budgetId, account, executor = pool) {
+  const [rows] = await executor.execute(
+    `SELECT b.*, DATE_FORMAT(b.start_date, '%Y-%m-%d') AS start_date,
+       DATE_FORMAT(b.end_date, '%Y-%m-%d') AS end_date FROM budgets b
+     WHERE b.id = ? AND b.workspace_id = ? AND b.is_active = TRUE
+       AND ((b.budget_type = 'personal' AND b.person_id = ?)
+         OR (b.budget_type = 'group' AND EXISTS (
+           SELECT 1 FROM group_members gm WHERE gm.group_id = b.group_id AND gm.person_id = ?
+         )))`,
+    [budgetId, account.workspace_id, account.person_id, account.person_id]
+  );
+  return rows[0] || null;
+}
+
+async function budgetSpend(budget, range, executor = pool) {
+  const dateStart = `${range.startDate} 00:00:00`;
+  const dateEnd = `${range.endDate} 00:00:00`;
+  const category = budget.category;
+  if (budget.budget_type === 'personal') {
+    const [rows] = await executor.execute(
+      `SELECT COALESCE(SUM(s.amount), 0) AS spent
+       FROM expenses e JOIN splits s ON s.expense_id = e.id
+       JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+       WHERE s.person_id = ? AND e.created_at >= ? AND e.created_at < ?
+         AND (? IS NULL OR e.category = ?)`,
+      [budget.workspace_id, budget.person_id, dateStart, dateEnd, category, category]
+    );
+    return Number(rows[0].spent || 0);
+  }
+  const [rows] = await executor.execute(
+    `SELECT COALESCE(SUM(e.amount), 0) AS spent
+     FROM expenses e JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+     WHERE e.group_id = ? AND e.created_at >= ? AND e.created_at < ?
+       AND (? IS NULL OR e.category = ?)`,
+    [budget.workspace_id, budget.group_id, dateStart, dateEnd, category, category]
+  );
+  return Number(rows[0].spent || 0);
+}
+
+async function getBudgetUtilization(budget, executor = pool) {
+  const ranges = periodRanges(budget);
+  const [spent, previousSpent] = await Promise.all([
+    budgetSpend(budget, ranges.current, executor),
+    budgetSpend(budget, ranges.previous, executor),
+  ]);
+  const amount = Number(budget.amount);
+  return {
+    budgetId: budget.id,
+    period: budget.period,
+    currentPeriod: { ...ranges.current, spent, budgetAmount: amount, remaining: amount - spent, percentUsed: amount ? spent / amount * 100 : 0 },
+    previousPeriod: { ...ranges.previous, spent: previousSpent, budgetAmount: amount, remaining: amount - previousSpent, percentUsed: amount ? previousSpent / amount * 100 : 0 },
+    paused: Boolean(budget.is_paused),
+    alerts: budget.is_paused ? [] : (Array.isArray(budget.alert_thresholds) ? budget.alert_thresholds : JSON.parse(budget.alert_thresholds)).filter(threshold => spent / amount * 100 >= threshold),
+  };
+}
+
+app.post('/api/budgets', async (req, res) => {
+  try {
+    const data = validateBudgetInput(req.body);
+    let groupId = null;
+    let personId = req.account.person_id;
+    if (data.budgetType === 'group') {
+      const [groups] = await q(
+        `SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id
+         WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`,
+        [data.groupId, req.account.workspace_id, req.account.person_id]
+      );
+      if (!groups.length) return res.status(403).json({ error: 'You must belong to this group to create its budget.' });
+      groupId = data.groupId; personId = null;
+    }
+    const [result] = await pool.execute(
+      `INSERT INTO budgets(workspace_id, created_by, name, budget_type, person_id, group_id, category,
+        amount, currency, period, start_date, end_date, alert_thresholds)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [req.account.workspace_id, req.account.person_id, data.name, data.budgetType, personId, groupId,
+        data.category, data.amount, data.currency, data.period, data.startDate, data.endDate, JSON.stringify(data.alertThresholds)]
+    );
+    res.status(201).json({ id: result.insertId, message: 'Budget created.' });
+  } catch (error) {
+    if (error instanceof TypeError) return res.status(400).json({ error: error.message });
+    console.error(error); res.status(500).json({ error: 'Could not create this budget.' });
+  }
+});
+
+app.get('/api/budgets', async (req, res) => {
+  try {
+    const [budgets] = await q(
+      `SELECT b.*, DATE_FORMAT(b.start_date, '%Y-%m-%d') AS start_date,
+       DATE_FORMAT(b.end_date, '%Y-%m-%d') AS end_date, g.name AS group_name
+       FROM budgets b LEFT JOIN \`groups\` g ON g.id = b.group_id
+       WHERE b.workspace_id = ? AND b.is_active = TRUE AND
+       ((b.budget_type = 'personal' AND b.person_id = ?) OR (b.budget_type = 'group' AND EXISTS
+         (SELECT 1 FROM group_members gm WHERE gm.group_id = b.group_id AND gm.person_id = ?)))
+       ORDER BY b.created_at DESC`,
+      [req.account.workspace_id, req.account.person_id, req.account.person_id]
+    );
+    const result = await Promise.all(budgets.map(async budget => ({ ...budget, utilization: await getBudgetUtilization(budget) })));
+    res.json(result);
+  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load budgets.' }); }
+});
+
+app.get('/api/budgets/:budgetId', async (req, res) => {
+  const id = Number(req.params.budgetId);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Choose a valid budget.' });
+  try {
+    const budget = await findAccessibleBudget(id, req.account);
+    if (!budget) return res.status(404).json({ error: 'Budget not found.' });
+    res.json({ ...budget, utilization: await getBudgetUtilization(budget) });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load this budget.' }); }
+});
+
+app.put('/api/budgets/:budgetId', async (req, res) => {
+  const id = Number(req.params.budgetId);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Choose a valid budget.' });
+  try {
+    const old = await findAccessibleBudget(id, req.account);
+    if (!old) return res.status(404).json({ error: 'Budget not found.' });
+    const data = validateBudgetInput(req.body);
+    let groupId = null; let personId = req.account.person_id;
+    if (data.budgetType === 'group') {
+      const [groups] = await q(`SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`, [data.groupId, req.account.workspace_id, req.account.person_id]);
+      if (!groups.length) return res.status(403).json({ error: 'You must belong to this group to manage its budget.' });
+      groupId = data.groupId; personId = null;
+    }
+    await q(`UPDATE budgets SET name=?, budget_type=?, person_id=?, group_id=?, category=?, amount=?, currency=?, period=?, start_date=?, end_date=?, alert_thresholds=? WHERE id=? AND workspace_id=?`,
+      [data.name, data.budgetType, personId, groupId, data.category, data.amount, data.currency, data.period, data.startDate, data.endDate, JSON.stringify(data.alertThresholds), id, req.account.workspace_id]);
+    res.json({ ok: true, message: 'Budget updated.' });
+  } catch (error) { if (error instanceof TypeError) return res.status(400).json({ error: error.message }); console.error(error); res.status(500).json({ error: 'Could not update this budget.' }); }
+});
+
+app.delete('/api/budgets/:budgetId', async (req, res) => {
+  const id = Number(req.params.budgetId);
+  try {
+    const budget = await findAccessibleBudget(id, req.account);
+    if (!budget) return res.status(404).json({ error: 'Budget not found.' });
+    await q('UPDATE budgets SET is_active = FALSE WHERE id = ? AND workspace_id = ?', [id, req.account.workspace_id]);
+    res.json({ ok: true, message: 'Budget deactivated.' });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not deactivate this budget.' }); }
+});
+
+app.patch('/api/budgets/:budgetId/pause', async (req, res) => {
+  const id = Number(req.params.budgetId);
+  try {
+    const budget = await findAccessibleBudget(id, req.account);
+    if (!budget) return res.status(404).json({ error: 'Budget not found.' });
+    if (typeof req.body?.paused !== 'boolean') return res.status(400).json({ error: 'Set paused to true or false.' });
+    await q('UPDATE budgets SET is_paused = ? WHERE id = ? AND workspace_id = ?', [req.body.paused, id, req.account.workspace_id]);
+    res.json({ ok: true, paused: req.body.paused });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not change the budget state.' }); }
+});
+
+app.get('/api/budgets/:budgetId/utilization', async (req, res) => {
+  const id = Number(req.params.budgetId);
+  try { const budget = await findAccessibleBudget(id, req.account); if (!budget) return res.status(404).json({ error: 'Budget not found.' }); res.json(await getBudgetUtilization(budget)); }
+  catch (error) { console.error(error); res.status(500).json({ error: 'Could not calculate budget utilization.' }); }
+});
+
+app.get('/api/budgets/:budgetId/history', async (req, res) => {
+  const id = Number(req.params.budgetId);
+  const limit = Number(req.query.limit || 12);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 60) return res.status(400).json({ error: 'History limit must be from 1 to 60.' });
+  try {
+    const budget = await findAccessibleBudget(id, req.account);
+    if (!budget) return res.status(404).json({ error: 'Budget not found.' });
+    const current = periodRanges(budget).current;
+    const end = new Date(`${current.startDate}T00:00:00.000Z`);
+    const history = [];
+    for (let i = 0; i < limit; i++) {
+      const previousEnd = end.toISOString().slice(0, 10);
+      const start = new Date(end);
+      if (budget.period === 'weekly') start.setUTCDate(start.getUTCDate() - 7);
+      else if (budget.period === 'monthly') start.setUTCMonth(start.getUTCMonth() - 1);
+      else start.setUTCFullYear(start.getUTCFullYear() - 1);
+      const range = { startDate: start.toISOString().slice(0, 10), endDate: previousEnd };
+      if (budget.end_date && range.startDate >= String(budget.end_date).slice(0, 10)) continue;
+      const spent = await budgetSpend(budget, range);
+      history.unshift({ ...range, spent, budgetAmount: Number(budget.amount), percentUsed: spent / Number(budget.amount) * 100 });
+      end.setTime(start.getTime());
+    }
+    res.json(history);
+  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load budget history.' }); }
+});
+
+app.get('/api/budgets/:budgetId/alerts', async (req, res) => {
+  const id = Number(req.params.budgetId);
+  try { const budget = await findAccessibleBudget(id, req.account); if (!budget) return res.status(404).json({ error: 'Budget not found.' }); const utilization = await getBudgetUtilization(budget); res.json(utilization.alerts.map(threshold => ({ threshold, percentUsed: utilization.currentPeriod.percentUsed, spent: utilization.currentPeriod.spent, budgetAmount: utilization.currentPeriod.budgetAmount }))); }
+  catch (error) { console.error(error); res.status(500).json({ error: 'Could not load budget alerts.' }); }
 });
 
 app.get('/api/notifications', async (req, res) => {

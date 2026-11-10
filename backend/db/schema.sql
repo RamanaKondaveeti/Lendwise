@@ -120,6 +120,33 @@ CREATE TABLE IF NOT EXISTS group_members (
   CONSTRAINT fk_group_members_person FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS budgets (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  workspace_id INT NOT NULL,
+  created_by INT NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  budget_type ENUM('personal', 'group') NOT NULL,
+  person_id INT NULL,
+  group_id INT NULL,
+  category VARCHAR(100) NULL,
+  amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
+  currency ENUM('INR', 'USD') NOT NULL DEFAULT 'INR',
+  period ENUM('weekly', 'monthly', 'yearly') NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NULL,
+  alert_thresholds JSON NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  is_paused BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_budgets_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+  CONSTRAINT fk_budgets_creator FOREIGN KEY (created_by) REFERENCES people(id),
+  CONSTRAINT fk_budgets_person FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE,
+  CONSTRAINT fk_budgets_group FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE,
+  INDEX idx_budgets_owner (workspace_id, person_id, is_active),
+  INDEX idx_budgets_group (workspace_id, group_id, is_active)
+);
+
 CREATE TABLE IF NOT EXISTS expenses (
   id INT AUTO_INCREMENT PRIMARY KEY,
   group_id INT NOT NULL,
