@@ -3,6 +3,7 @@ const frequencyMonths = {
   quarterly: 3,
   yearly: 12,
 };
+const { allocateExpenseSplits } = require('./expense-splits');
 
 function dateOnly(value) {
   if (value instanceof Date) {
@@ -52,11 +53,9 @@ function splitExpenseAmount(amount, participantIds, splitMethod = 'equal', perce
     throw new TypeError('A positive amount and unique participants are required.');
   }
   if (splitMethod === 'equal') {
-    const baseCents = Math.floor(totalCents / participantIds.length);
-    const remainder = totalCents % participantIds.length;
-    return participantIds.map((personId, index) => ({
+    return allocateExpenseSplits(totalCents, participantIds, 'equal').map(({ personId, cents }) => ({
       personId,
-      amount: (baseCents + (index < remainder ? 1 : 0)) / 100,
+      amount: cents / 100,
     }));
   }
   if (splitMethod !== 'custom' || !Array.isArray(percentages) || percentages.length !== participantIds.length) {

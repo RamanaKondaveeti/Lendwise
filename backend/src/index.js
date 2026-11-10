@@ -8,6 +8,7 @@ const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const { calculateMinimalSettlements, validateGroupSettlement } = require('./settlements');
+const { allocateExpenseSplits } = require('./expense-splits');
 const { createNotifications, reminderPeriodKey } = require('./notifications');
 const {
   buildExpenseReportFilter,
@@ -3010,19 +3011,24 @@ app.delete('/api/people/:id', async (req, res) => {
 
 app.post('/api/expenses', async (req, res) => {
   const { groupId, title, amount, paidBy, category = 'Other', participants } = req.body || {};
+  const splitMethod = req.body?.splitMethod ?? 'equal';
   const normalizedGroupId = Number(groupId);
   const normalizedPaidBy = Number(paidBy);
   const amountCents = Math.round(Number(amount) * 100);
-  const participantIds = Array.isArray(participants) ? participants.map(Number) : [];
+  let allocations = null;
+  try {
+    allocations = allocateExpenseSplits(amountCents, participants, splitMethod);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  const participantIds = allocations.map(allocation => allocation.personId);
   if (!Number.isInteger(normalizedGroupId) || normalizedGroupId <= 0 ||
       typeof title !== 'string' || !title.trim() ||
       typeof category !== 'string' || !category.trim() || category.length > 100 ||
       !Number.isFinite(Number(amount)) || !Number.isSafeInteger(amountCents) ||
       amountCents <= 0 || amountCents > 999999999999 ||
       !Number.isInteger(normalizedPaidBy) || normalizedPaidBy <= 0 ||
-      !Array.isArray(participants) || !participantIds.length ||
-      participantIds.some(id => !Number.isInteger(id) || id <= 0) ||
-      new Set(participantIds).size !== participantIds.length) {
+      !Array.isArray(participants) || !participantIds.length) {
     return res.status(400).json({ error: 'Add a title, positive amount, group, and participants.' });
   }
 
@@ -3053,12 +3059,10 @@ app.post('/api/expenses', async (req, res) => {
       'INSERT INTO expenses(group_id, title, amount, paid_by, category) VALUES(?, ?, ?, ?, ?)',
       [normalizedGroupId, title.trim(), amountCents / 100, normalizedPaidBy, category]
     );
-    const baseShare = Math.floor(amountCents / participantIds.length);
-    const remainder = amountCents % participantIds.length;
-    for (const [index, personId] of participantIds.entries()) {
+    for (const { personId, cents } of allocations) {
       await connection.execute(
         'INSERT INTO splits(expense_id, person_id, amount) VALUES(?, ?, ?)',
-        [expense.insertId, personId, (baseShare + (index < remainder ? 1 : 0)) / 100]
+        [expense.insertId, personId, cents / 100]
       );
     }
     await notifyGroupMembers(connection, req.account.workspace_id, normalizedGroupId, {

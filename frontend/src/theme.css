@@ -1025,6 +1025,13 @@ html[data-theme="dark"] .app svg:not(.analytics-bar-chart):not(.analytics-donut)
   stroke: currentColor;
 }
 
+html[data-theme="dark"] .app .exact-allocation-summary {
+  border-color: var(--theme-border);
+  background: var(--theme-surface);
+  color: var(--theme-text);
+}
+html[data-theme="dark"] .app .exact-allocation-error { color: #ff9292; }
+
 /* Keep the main dashboard and screen components in sync with the selected theme. */
 html[data-theme="dark"] .app :is(.panel, .screen-panel, .activity-panel, .groups-panel, .group-card, .balance-card, .workspace-error, .monthly-summary, .currency-switcher, .search, .select-button, .button-light, .modal input, .modal select, .modal textarea) {
   background-color: var(--bg-card);

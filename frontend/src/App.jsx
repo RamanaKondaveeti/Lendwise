@@ -682,6 +682,10 @@ function App() {
   const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [focusExpenseId, setFocusExpenseId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
+  const [expenseSplitMethod, setExpenseSplitMethod] = useState('equal')
+  const [expenseParticipantIds, setExpenseParticipantIds] = useState([])
+  const [expenseExactAmounts, setExpenseExactAmounts] = useState({})
+  const [expenseTotalInput, setExpenseTotalInput] = useState('')
   const [expenseToSettle, setExpenseToSettle] = useState(null)
   const [expenseToEdit, setExpenseToEdit] = useState(null)
   const [settlementPlan, setSettlementPlan] = useState([])
@@ -1172,6 +1176,20 @@ function App() {
   const owedByMe = myBalance > 0 ? myBalance : 0
   const selectedGroup = groups.find(group => group.id === Number(selectedGroupId))
   const selectedExpenseGroup = groups.find(group => group.id === Number(expenseGroupId))
+  const expenseTotalCents = /^\d+(?:\.\d{1,2})?$/.test(expenseTotalInput)
+    ? Math.round(Number(expenseTotalInput) * 100)
+    : null
+  const expenseExactAllocations = expenseParticipantIds.map(personId => {
+    const raw = expenseExactAmounts[personId] ?? ''
+    const valid = /^\d+(?:\.\d{1,2})?$/.test(raw)
+    return { personId, raw, cents: valid ? Math.round(Number(raw) * 100) : null, valid }
+  })
+  const expenseAllocatedCents = expenseExactAllocations.reduce((sum, allocation) => sum + (allocation.cents ?? 0), 0)
+  const expenseExactValid = expenseSplitMethod !== 'exact' || (
+    expenseTotalCents !== null && expenseParticipantIds.length > 0 &&
+    expenseExactAllocations.every(allocation => allocation.valid) &&
+    expenseAllocatedCents === expenseTotalCents && Number.isFinite(exchangeRate) && exchangeRate > 0
+  )
   const settlementGroup = groups.find(group => group.id === Number(settlementDefaults?.groupId))
   const settlementPeople = settlementGroup ? settlementGroup.balance_people || [] : people
   const suggestedSettlements = groups.flatMap(group => group.settlement_suggestions || [])
@@ -1184,6 +1202,10 @@ function App() {
       currency,
     }).format(Math.abs(Number(amount) * exchangeRate || 0))
   }
+  const formatCurrentCurrency = amount => new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en-US', {
+    style: 'currency',
+    currency,
+  }).format(Math.abs(Number(amount) || 0))
   const toStoredAmount = amount => Math.round((Number(amount) / exchangeRate) * 100) / 100
   const availableYears = [...new Set([
     currentMonth,
@@ -1257,6 +1279,10 @@ function App() {
       ? selectedGroup
       : groups.find(group => group.members?.length)
     setExpenseGroupId(defaultGroup?.id || '')
+    setExpenseSplitMethod('equal')
+    setExpenseParticipantIds((defaultGroup?.members || []).map(person => person.id))
+    setExpenseExactAmounts({})
+    setExpenseTotalInput('')
     setModal('expense')
   }
 
@@ -1795,6 +1821,27 @@ function App() {
       payload = { personIds: form.getAll('memberIds').map(Number) }
       successMessage = 'Group members updated.'
     } else if (modal === 'expense') {
+      if (!expenseExactValid) {
+        notify('Exact allocations must be valid and add up to the expense total.')
+        return
+      }
+      const selectedParticipants = expenseParticipantIds
+      const normalizedTotalCents = Math.round(toStoredAmount(form.get('amount')) * 100)
+      const exactCents = expenseSplitMethod === 'exact'
+        ? expenseExactAllocations.map(allocation => Math.floor(allocation.cents / exchangeRate))
+        : null
+      if (exactCents) {
+        let residual = normalizedTotalCents - exactCents.reduce((sum, cents) => sum + cents, 0)
+        const order = expenseExactAllocations
+          .map((allocation, index) => ({ index, fraction: allocation.cents / exchangeRate - exactCents[index] }))
+          .sort((left, right) => right.fraction - left.fraction)
+        for (let index = 0; residual > 0; index++, residual--) exactCents[order[index % order.length].index]++
+        const reverseOrder = [...order].reverse()
+        for (let index = 0; residual < 0; index++, residual++) {
+          const target = reverseOrder[index % reverseOrder.length].index
+          if (exactCents[target] > 0) exactCents[target]--
+        }
+      }
       url = '/api/expenses'
       payload = {
         groupId: Number(form.get('groupId')),
@@ -1802,7 +1849,10 @@ function App() {
         amount: toStoredAmount(form.get('amount')),
         paidBy: Number(form.get('paidBy')),
         category: form.get('category'),
-        participants: form.getAll('participants').map(Number),
+        splitMethod: expenseSplitMethod,
+        participants: expenseSplitMethod === 'exact'
+          ? selectedParticipants.map((personId, index) => ({ personId, amount: exactCents[index] / 100 }))
+          : selectedParticipants,
       }
       successMessage = 'Expense added.'
     } else if (modal === 'expense-category') {
@@ -3106,18 +3156,34 @@ function App() {
               <>
                 <label>What was it for?<input required name="title" maxLength="255" placeholder="Enter an expense name" /></label>
                 <div className="form-row">
-                <label>Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" disabled={!Number.isFinite(exchangeRate)} required /></label>
+                <label>Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" value={expenseTotalInput} onChange={event => setExpenseTotalInput(event.target.value)} disabled={!Number.isFinite(exchangeRate)} required /></label>
                   <label>Category<select name="category">{expenseCategories.map(category => <option key={category}>{category}</option>)}</select></label>
                 </div>
-                <label>Group<select name="groupId" required value={expenseGroupId} onChange={event => setExpenseGroupId(Number(event.target.value))}><option value="" disabled>Select a group</option>{groups.filter(group => group.members?.length).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
+                <label>Group<select name="groupId" required value={expenseGroupId} onChange={event => {
+                  const nextGroupId = Number(event.target.value)
+                  const nextGroup = groups.find(group => group.id === nextGroupId)
+                  setExpenseGroupId(nextGroupId)
+                  setExpenseParticipantIds((nextGroup?.members || []).map(person => person.id))
+                }}><option value="" disabled>Select a group</option>{groups.filter(group => group.members?.length).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
                 <label key={selectedExpenseGroup?.id}>Paid by<select name="paidBy" required defaultValue={selectedExpenseGroup?.members?.some(person => person.id === data.currentUserId) ? data.currentUserId : selectedExpenseGroup?.members?.[0]?.id || ''}>{(selectedExpenseGroup?.members || []).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
-                <fieldset className="participant-field" key={selectedExpenseGroup?.id}>
-                  <legend>Split equally between</legend>
+                <label>Split method<select value={expenseSplitMethod} onChange={event => setExpenseSplitMethod(event.target.value)}><option value="equal">Split equally</option><option value="exact">Exact amounts</option></select></label>
+                <fieldset className="participant-field">
+                  <legend>{expenseSplitMethod === 'exact' ? 'Participants and exact shares' : 'Split equally between'}</legend>
                   <div className="participant-list">
-                    {(selectedExpenseGroup?.members || []).map(person => <label key={person.id}><input type="checkbox" name="participants" value={person.id} defaultChecked /><span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span>{person.name}</label>)}
+                    {(selectedExpenseGroup?.members || []).map(person => <label key={person.id} className={expenseSplitMethod === 'exact' ? 'expense-share-option' : ''}>
+                      <input type="checkbox" name="participants" value={person.id} checked={expenseParticipantIds.includes(person.id)} onChange={event => setExpenseParticipantIds(current => event.target.checked ? [...current, person.id] : current.filter(id => id !== person.id))} />
+                      <span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span>{person.name}
+                      {expenseSplitMethod === 'exact' && expenseParticipantIds.includes(person.id) && <input className="exact-share-input" aria-label={`${person.name} exact share`} type="number" min="0" step="0.01" placeholder={`0.00 ${currency}`} value={expenseExactAmounts[person.id] ?? ''} onClick={event => event.stopPropagation()} onChange={event => setExpenseExactAmounts(current => ({ ...current, [person.id]: event.target.value }))} />}
+                    </label>)}
                   </div>
                 </fieldset>
-                <p className="form-hint">Choose who shares this expense. Any extra cents are split fairly.</p>
+                {expenseSplitMethod === 'equal' ? <p className="form-hint">Choose who shares this expense. Any extra cents are split fairly.</p> : <div className="exact-allocation-summary" aria-live="polite">
+                  <p>Allocated: {formatCurrentCurrency(expenseAllocatedCents / 100)} of {expenseTotalCents === null ? formatCurrentCurrency(0) : formatCurrentCurrency(expenseTotalCents / 100)}</p>
+                  {expenseTotalCents !== null && expenseAllocatedCents < expenseTotalCents && <p className="form-hint">Remaining: {formatCurrentCurrency((expenseTotalCents - expenseAllocatedCents) / 100)}</p>}
+                  {expenseTotalCents !== null && expenseAllocatedCents > expenseTotalCents && <p className="exact-allocation-error">Over-allocated by {formatCurrentCurrency((expenseAllocatedCents - expenseTotalCents) / 100)}.</p>}
+                  {(expenseTotalCents === null || expenseExactAllocations.some(allocation => !allocation.valid)) && <p className="exact-allocation-error">Enter a valid nonnegative amount (up to two decimal places) for each selected participant.</p>}
+                  {expenseTotalCents !== null && expenseAllocatedCents === expenseTotalCents && expenseExactValid && currency !== 'INR' && <p className="form-hint">Shares are converted to INR cents for storage; any paise rounding is distributed across the selected shares.</p>}
+                </div>}
               </>
             )}
 
@@ -3203,7 +3269,7 @@ function App() {
             )}
 
             {!(modal === 'invite' && manualInviteLink) && (
-              <button className="button button-dark modal-submit" disabled={busy}>
+              <button className="button button-dark modal-submit" disabled={busy || (modal === 'expense' && !expenseExactValid)}>
                 {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'expense-category' ? 'Save category' : modal === 'recurring' ? 'Create schedule' : modal === 'recurring-edit' ? 'Save schedule' : modal === 'recurring-confirm' ? 'Confirm & record expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
                 <ArrowRight size={15} />
               </button>
