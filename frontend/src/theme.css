@@ -163,6 +163,10 @@ html[data-theme="dark"] :where(.app *) {
   border-color: var(--theme-border);
 }
 
+html[data-theme="dark"] .app :is(h1, h2, h3, p, b, strong, span, small, label, td, th, li) {
+  color: var(--theme-text);
+}
+
 html[data-theme="dark"] .sidebar,
 html[data-theme="dark"] .topbar,
 html[data-theme="dark"] .panel,
@@ -205,6 +209,53 @@ html[data-theme="dark"] .workspace-menu button {
   color: var(--theme-text);
 }
 
+html[data-theme="dark"] .app :is(.group-action-button, .settle-expense-button, .sign-out-top-button, .sign-out-button, .notification-bell, .icon-button, .group-balance-note, .balance-note) {
+  background-color: var(--theme-card);
+  color: var(--theme-text);
+}
+
+html[data-theme="dark"] .app :is(.group-action-button, .settle-expense-button, .sign-out-top-button, .sign-out-button, .notification-bell, .icon-button) svg {
+  color: inherit;
+  stroke: currentColor;
+}
+
+html[data-theme="dark"] .app .group-balance-note {
+  background-color: #202e26;
+  color: var(--theme-muted);
+}
+
+html[data-theme="dark"] .app .button-dark {
+  background-color: #167f68;
+  border-color: #167f68;
+  color: #ffffff;
+}
+
+html[data-theme="dark"] .app .button-dark :is(span, b, strong, small) {
+  color: #ffffff;
+}
+
+html[data-theme="dark"] .app .nav-item.active,
+html[data-theme="dark"] .app .nav-item.active svg {
+  background-color: #203b2e;
+  color: #a5e0bb;
+}
+
+html[data-theme="dark"] .app :is(.view-all, .plain-link, .group-card-link, .inline-link:hover, .nav-item.active) {
+  color: #a5e0bb;
+}
+
+html[data-theme="dark"] .app :is(.section-subtitle, .subtitle, .crumb, .empty, .form-hint, .workspace-menu-empty, .report-pagination, .notification-empty, footer, .card-title, .small-detail, .balance-foot, .balance-note, .group-balance-note) {
+  color: var(--theme-muted);
+}
+
+html[data-theme="dark"] .app :is(.status-settled, .status-paid-by-you, .balance-status.is-owed, .balance-value.is-owed, .expense-settled, .analytics-change-down) {
+  color: var(--theme-success);
+}
+
+html[data-theme="dark"] .app :is(.status-partially-paid, .balance-status.is-owing, .balance-value.is-owing, .analytics-change-up) {
+  color: var(--theme-warning);
+}
+
 html[data-theme="dark"] .app :is(input, select, textarea) {
   border-color: var(--theme-border);
   background-color: var(--theme-card);
@@ -220,6 +271,10 @@ html[data-theme="dark"] .app :is(.search input, .range-select select, .monthly-s
 html[data-theme="dark"] .app option {
   background: var(--theme-card);
   color: var(--theme-text);
+}
+
+html[data-theme="dark"] .app :is(.report-table-wrap, .activity-list, .notification-list, .expense-settlement-list, .settlement-plan) {
+  scrollbar-color: #536b5b #1d2922;
 }
 
 html[data-theme="dark"] .workspace-menu button:hover:not(:disabled),
