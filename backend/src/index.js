@@ -2740,6 +2740,186 @@ app.patch('/api/expenses/:expenseId/category', async (req, res) => {
   }
 });
 
+app.put('/api/expenses/:expenseId', async (req, res) => {
+  const expenseId = Number(req.params.expenseId);
+  const body = req.body || {};
+  const { title, amount, paidBy, category } = body;
+  const participants = body.participants ?? body.allocations;
+  const splitMethod = body.splitMethod;
+  const amountCents = Math.round(Number(amount) * 100);
+  if (!Number.isInteger(expenseId) || expenseId <= 0 ||
+      typeof title !== 'string' || !title.trim() || title.trim().length > 255 ||
+      typeof category !== 'string' || !category.trim() || category.trim().length > 100 ||
+      typeof amount !== 'number' || !Number.isFinite(amount) ||
+      !Number.isSafeInteger(amountCents) || amountCents <= 0 || amountCents > 999999999999 ||
+      !Number.isInteger(Number(paidBy)) || Number(paidBy) <= 0 ||
+      !['equal', 'exact', 'percentage', 'shares', 'itemwise'].includes(splitMethod)) {
+    return res.status(400).json({ error: 'Provide a valid title, positive amount, category, payer, and split method.' });
+  }
+  const normalizedPaidBy = Number(paidBy);
+  let allocationDetails;
+  try {
+    allocationDetails = splitMethod === 'itemwise'
+      ? allocateItemWiseSplits(amountCents, body.items)
+      : { allocations: allocateExpenseSplits(amountCents, participants, splitMethod), items: [] };
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  const participantIds = allocationDetails.allocations.map(row => row.personId);
+
+  let connection;
+  let inTransaction = false;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    inTransaction = true;
+    const [expenses] = await connection.execute(
+      `SELECT e.id, e.group_id, e.paid_by, g.name AS group_name
+       FROM expenses e JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+       WHERE e.id = ? FOR UPDATE`,
+      [req.account.workspace_id, expenseId]
+    );
+    if (!expenses.length) {
+      await connection.rollback(); inTransaction = false;
+      return res.status(404).json({ error: 'Expense not found.' });
+    }
+    const current = expenses[0];
+    await connection.execute('SELECT person_id FROM splits WHERE expense_id = ? FOR UPDATE', [expenseId]);
+    const [settlements] = await connection.execute(
+      `SELECT id, payer_id, payee_id, amount FROM settlements
+       WHERE expense_id = ? ORDER BY id FOR UPDATE`, [expenseId]
+    );
+    if (settlements.length && Number(current.paid_by) !== normalizedPaidBy) {
+      await connection.rollback(); inTransaction = false;
+      return res.status(409).json({ error: 'The payer cannot be changed while this expense has recorded settlements.' });
+    }
+
+    const [members] = await connection.execute(
+      `SELECT gm.person_id AS id FROM group_members gm
+       JOIN people p ON p.id = gm.person_id AND p.workspace_id = ?
+       WHERE gm.group_id = ? AND gm.person_id IN (${[normalizedPaidBy, ...participantIds].map(() => '?').join(',')})`,
+      [req.account.workspace_id, current.group_id, normalizedPaidBy, ...participantIds]
+    );
+    if (members.length !== new Set([normalizedPaidBy, ...participantIds]).size) {
+      await connection.rollback(); inTransaction = false;
+      return res.status(400).json({ error: 'Choose a group member as payer and participants.' });
+    }
+
+    const settledByParticipant = new Map();
+    for (const settlement of settlements) {
+      if (Number(settlement.payee_id) !== Number(current.paid_by)) {
+        await connection.rollback(); inTransaction = false;
+        return res.status(409).json({ error: 'This expense has settlement records that do not match its current payer; it cannot be edited safely.' });
+      }
+      const payerId = Number(settlement.payer_id);
+      settledByParticipant.set(payerId, (settledByParticipant.get(payerId) || 0) + Math.round(Number(settlement.amount) * 100));
+    }
+    const proposedByParticipant = new Map(allocationDetails.allocations.map(row => [row.personId, row.cents]));
+    for (const [personId, settledCents] of settledByParticipant) {
+      if (!proposedByParticipant.has(personId)) {
+        await connection.rollback(); inTransaction = false;
+        return res.status(409).json({ error: 'A participant with recorded payments cannot be removed from this expense.' });
+      }
+      if (proposedByParticipant.get(personId) < settledCents) {
+        await connection.rollback(); inTransaction = false;
+        return res.status(409).json({ error: 'A participant share cannot be reduced below the amount already settled.' });
+      }
+    }
+    if (amountCents < settledByParticipant.values().reduce((sum, cents) => sum + cents, 0)) {
+      await connection.rollback(); inTransaction = false;
+      return res.status(409).json({ error: 'The expense amount cannot be reduced below its recorded settlement total.' });
+    }
+
+    await connection.execute(
+      'UPDATE expenses SET title = ?, amount = ?, category = ?, paid_by = ?, split_method = ? WHERE id = ?',
+      [title.trim(), amountCents / 100, category.trim(), normalizedPaidBy, splitMethod, expenseId]
+    );
+    await connection.execute('DELETE FROM splits WHERE expense_id = ?', [expenseId]);
+    for (const row of allocationDetails.allocations) {
+      await connection.execute('INSERT INTO splits(expense_id, person_id, amount) VALUES(?, ?, ?)',
+        [expenseId, row.personId, row.cents / 100]);
+    }
+    await connection.execute('DELETE FROM expense_items WHERE expense_id = ?', [expenseId]);
+    for (const item of allocationDetails.items) {
+      const [inserted] = await connection.execute(
+        `INSERT INTO expense_items(expense_id, item_name, quantity, unit_price, total_amount, allocation_method)
+         VALUES(?, ?, ?, ?, ?, ?)`,
+        [expenseId, item.itemName, item.quantityMillis / 1000, item.unitPriceCents / 100, item.totalCents / 100, item.allocationMethod]
+      );
+      for (const allocation of item.allocations) {
+        await connection.execute(
+          'INSERT INTO expense_item_allocations(expense_item_id, person_id, allocation_amount) VALUES(?, ?, ?)',
+          [inserted.insertId, allocation.personId, allocation.cents / 100]
+        );
+      }
+    }
+    await notifyGroupMembers(connection, req.account.workspace_id, current.group_id, {
+      type: 'expense_updated', title: 'Expense updated',
+      message: `${title.trim()} was updated in ${current.group_name}.`,
+      targetType: 'expense', targetId: expenseId,
+      dedupeKey: `expense-updated:${expenseId}:${crypto.randomUUID()}`,
+    }, req.account.id);
+
+    const [expenseRows] = await connection.execute(
+      `SELECT e.id, e.group_id, e.title, e.amount, e.category, e.split_method, e.created_at,
+              e.paid_by AS payer_id, p.name AS payer, p.initials, p.color, g.name AS group_name
+       FROM expenses e JOIN people p ON p.id = e.paid_by AND p.workspace_id = ?
+       JOIN \`groups\` g ON g.id = e.group_id WHERE e.id = ?`,
+      [req.account.workspace_id, expenseId]
+    );
+    const [shareRows] = await connection.execute(
+      `SELECT s.person_id, p.name, s.amount,
+              COALESCE(SUM(st.amount), 0) AS settled_amount
+       FROM splits s JOIN people p ON p.id = s.person_id AND p.workspace_id = ?
+       LEFT JOIN settlements st ON st.expense_id = s.expense_id
+         AND st.payer_id = s.person_id AND st.payee_id = ?
+       WHERE s.expense_id = ? GROUP BY s.person_id, p.name, s.amount ORDER BY p.name, p.id`,
+      [req.account.workspace_id, normalizedPaidBy, expenseId]
+    );
+    const [itemRows] = await connection.execute(
+      `SELECT i.id, i.item_name, i.quantity, i.unit_price, i.total_amount, i.allocation_method,
+              a.person_id, p.name AS person_name, a.allocation_amount
+       FROM expense_items i LEFT JOIN expense_item_allocations a ON a.expense_item_id = i.id
+       LEFT JOIN people p ON p.id = a.person_id AND p.workspace_id = ?
+       WHERE i.expense_id = ? ORDER BY i.id, p.name, p.id`,
+      [req.account.workspace_id, expenseId]
+    );
+    const output = expenseRows[0];
+    output.shares = shareRows.map(row => {
+      const shareCents = Math.round(Number(row.amount) * 100);
+      const settledCents = Math.round(Number(row.settled_amount) * 100);
+      return { person_id: row.person_id, name: row.name, amount: shareCents / 100,
+        settled_amount: settledCents / 100, outstanding_amount: Math.max(0, shareCents - settledCents) / 100 };
+    });
+    output.outstanding_amount = output.shares.filter(row => Number(row.person_id) !== normalizedPaidBy)
+      .reduce((sum, row) => sum + row.outstanding_amount, 0);
+    const itemMap = new Map();
+    for (const row of itemRows) {
+      let item = itemMap.get(row.id);
+      if (!item) {
+        item = { id: row.id, item_name: row.item_name, quantity: Number(row.quantity),
+          unit_price: Number(row.unit_price), total_amount: Number(row.total_amount),
+          allocation_method: row.allocation_method, allocations: [] };
+        itemMap.set(row.id, item);
+      }
+      if (row.person_id !== null) item.allocations.push({ person_id: row.person_id, name: row.person_name, amount: Number(row.allocation_amount) });
+    }
+    output.items = [...itemMap.values()];
+    await connection.commit();
+    inTransaction = false;
+    await runBudgetAlerts(req.account.workspace_id);
+    return res.json(output);
+  } catch (error) {
+    if (inTransaction) {
+      try { await connection.rollback(); } catch (rollbackError) { console.error('Expense update rollback failed', rollbackError); }
+    }
+    console.error(error);
+    return res.status(500).json({ error: 'Could not update this expense.' });
+  } finally {
+    connection?.release();
+  }
+});
+
 app.post('/api/expenses/:expenseId/settle', async (req, res) => {
   const expenseId = Number(req.params.expenseId);
   const legacyPersonIds = Array.isArray(req.body?.personIds) ? req.body.personIds.map(Number) : null;
