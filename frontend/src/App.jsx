@@ -331,7 +331,7 @@ function GroupAnalyticsDashboard({ analytics, loading, error, period, setPeriod,
   return (
     <section className="group-analytics" aria-label="Group analytics">
       <div className="panel-heading screen-panel-heading">
-        <div><div className="section-title">Group analytics</div><div className="section-subtitle">Spending and contributions in INR base currency.</div></div>
+        <div><div className="section-title">Group analytics</div><div className="section-subtitle">Amounts use the stored INR base values and workspace currency display.</div></div>
         <div className="group-analytics-filters">
           <label><span className="sr-only">Analytics period</span><select value={period} onChange={event => setPeriod(event.target.value)}>
             <option value="7d">Last 7 Days</option><option value="30d">Last 30 Days</option><option value="90d">Last 90 Days</option><option value="all">All Time</option><option value="custom">Custom Dates</option>
