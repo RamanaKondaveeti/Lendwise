@@ -51,6 +51,7 @@ import {
 } from 'lucide-react'
 import { calculateMonthlyAnalytics, monthValue } from './analytics.mjs'
 import { isSupportedCurrency, supportedCurrencies } from './currencies.mjs'
+import { isIosSafari, isStandalone, promptInstall, registerServiceWorker } from './pwa.mjs'
 import {
   convertReportRow,
   presentReportRow,
@@ -877,6 +878,16 @@ function App() {
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false)
   const [manualInviteLink, setManualInviteLink] = useState('')
   const [tab, setTab] = useState('Overview')
+  const [installPromptEvent, setInstallPromptEvent] = useState(null)
+  const [appInstalled, setAppInstalled] = useState(() => isStandalone({
+    displayModeMatches: window.matchMedia?.('(display-mode: standalone)').matches,
+    legacyStandalone: window.navigator.standalone,
+  }))
+  const [isOnline, setIsOnline] = useState(() => window.navigator.onLine)
+  const [iosInstallHelpOpen, setIosInstallHelpOpen] = useState(false)
+  const [pwaRegistration, setPwaRegistration] = useState(null)
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+  const reloadForUpdate = useRef(false)
   const [themePreference, setThemePreference] = useState(storedThemePreference)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [selectedGroupId, setSelectedGroupId] = useState(null)
@@ -1016,6 +1027,42 @@ function App() {
     media.addEventListener?.('change', applyTheme)
     return () => media.removeEventListener?.('change', applyTheme)
   }, [themePreference])
+
+  useEffect(() => {
+    const updateOnline = () => setIsOnline(window.navigator.onLine)
+    const handleInstallPrompt = event => {
+      event.preventDefault()
+      setInstallPromptEvent(event)
+    }
+    const handleInstalled = () => {
+      setAppInstalled(true)
+      setInstallPromptEvent(null)
+    }
+    const handleControllerChange = () => {
+      if (reloadForUpdate.current) window.location.reload()
+    }
+    const handleWorkerMessage = event => {
+      if (event.data?.type === 'GROUPBUK_SW_ACTIVATED') setUpdateAvailable(true)
+    }
+    window.addEventListener('online', updateOnline)
+    window.addEventListener('offline', updateOnline)
+    window.addEventListener('beforeinstallprompt', handleInstallPrompt)
+    window.addEventListener('appinstalled', handleInstalled)
+    window.navigator.serviceWorker?.addEventListener('controllerchange', handleControllerChange)
+    window.navigator.serviceWorker?.addEventListener('message', handleWorkerMessage)
+    registerServiceWorker(window.navigator, registration => {
+      setPwaRegistration(registration)
+      setUpdateAvailable(true)
+    }).then(registration => setPwaRegistration(registration)).catch(() => {})
+    return () => {
+      window.removeEventListener('online', updateOnline)
+      window.removeEventListener('offline', updateOnline)
+      window.removeEventListener('beforeinstallprompt', handleInstallPrompt)
+      window.removeEventListener('appinstalled', handleInstalled)
+      window.navigator.serviceWorker?.removeEventListener('controllerchange', handleControllerChange)
+      window.navigator.serviceWorker?.removeEventListener('message', handleWorkerMessage)
+    }
+  }, [])
 
   useEffect(() => {
     if (!mobileNavOpen) return undefined
@@ -2480,6 +2527,19 @@ function App() {
     }
   }
 
+  const iosSafariAvailable = isIosSafari({
+    userAgent: window.navigator.userAgent,
+    platform: window.navigator.platform,
+    maxTouchPoints: window.navigator.maxTouchPoints,
+    standalone: appInstalled,
+  })
+  const installApp = async () => {
+    if (!installPromptEvent) { setIosInstallHelpOpen(true); return }
+    const outcome = await promptInstall(installPromptEvent)
+    if (outcome === 'accepted') setAppInstalled(true)
+    setInstallPromptEvent(null)
+  }
+
   if (!authChecked) {
     return (
       <main className="startup-state">
@@ -2517,6 +2577,9 @@ function App() {
               <b>GroupBuk</b>
             </div>
             <div className="auth-heading">
+              {!isOnline && <div className="pwa-offline-auth" role="status">You’re offline. Sign in and account data need an internet connection.</div>}
+              {!appInstalled && (installPromptEvent || iosSafariAvailable) && <button type="button" className="button button-light pwa-auth-install" onClick={installApp}><Download size={15} />Install GroupBuk</button>}
+              {iosInstallHelpOpen && <div className="pwa-install-help" role="status"><b>Install GroupBuk on iPhone</b><span>In Safari, tap Share, then choose <strong>Add to Home Screen</strong>.</span><button type="button" className="pwa-help-close" aria-label="Close install instructions" onClick={() => setIosInstallHelpOpen(false)}><X size={16} /></button></div>}
               <span className="eyebrow">{authMode === 'signup' ? 'GET STARTED' : authMode === 'reset' ? 'ACCOUNT SECURITY' : authMode === 'forgot' ? 'ACCOUNT RECOVERY' : 'WELCOME BACK'}</span>
               <h2>{authMode === 'signup' ? 'Create your account' : authMode === 'reset' ? 'Choose a new password' : authMode === 'forgot' ? 'Reset your password' : 'Sign in to GroupBuk'}</h2>
               <p>{authMode === 'signup' ? invitationToken ? 'Create your account to join the invited workspace.' : 'A private workspace will be created for your account.' : authMode === 'reset' ? 'Use at least 12 characters for your new password.' : authMode === 'forgot' ? 'We’ll email you a secure password reset link.' : 'Pick up right where your group left off.'}</p>
@@ -2701,6 +2764,7 @@ function App() {
               </select>
               <small aria-live="polite">{currencyLoading ? 'Updating rate…' : currency === 'INR' ? 'Base currency' : Number.isFinite(exchangeRate) ? 'Converted' : 'Rate unavailable'}</small>
             </label>
+            {!appInstalled && (installPromptEvent || iosSafariAvailable) && <button type="button" className="button button-light pwa-install-action" onClick={async () => { await installApp(); setInstallPromptEvent(null) }}><Download size={15} />Install GroupBuk</button>}
             <SiteShareButtons
               url={`${window.location.origin}${window.location.pathname}`}
               onInstagram={shareSiteOnInstagram}
@@ -2843,6 +2907,13 @@ function App() {
         </header>
 
         <div className="content">
+          {updateAvailable && <div className="pwa-update-banner" role="status"><span>A new version of GroupBuk is ready.</span><button type="button" className="button button-light" onClick={() => {
+            if (pwaRegistration?.waiting) {
+              reloadForUpdate.current = true
+              pwaRegistration.waiting.postMessage({ type: 'SKIP_WAITING' })
+            } else window.location.reload()
+          }}>Reload to update</button></div>}
+          {iosInstallHelpOpen && <div className="pwa-install-help" role="status"><button type="button" className="pwa-help-close" aria-label="Close install instructions" onClick={() => setIosInstallHelpOpen(false)}><X size={16} /></button><b>Install GroupBuk on iPhone</b><span>In Safari, tap Share, then choose <strong>Add to Home Screen</strong>.</span></div>}
           <div className="welcome-row">
             <div>
               <div className="eyebrow"><span className="live-dot" />{today}</div>
@@ -3652,6 +3723,10 @@ function App() {
           <footer><span>Shared expenses, kept in sync.</span><span><CircleHelp size={13} /> Data saved to your database</span></footer>
         </div>
       </main>
+
+      {!isOnline && <div className="pwa-offline-screen" role="status" aria-live="assertive">
+        <div className="pwa-offline-card"><span className="pwa-offline-symbol">⌁</span><h2>You’re offline</h2><p>GroupBuk’s app shell is available, but financial data needs an internet connection. Reconnect to view current balances, expenses, and settlements.</p><small>No transactions are saved while offline.</small></div>
+      </div>}
 
       {modal && (
         <div className="overlay" onMouseDown={event => !busy && event.target === event.currentTarget && setModal('')}>
