@@ -395,7 +395,7 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onE
                 {date(expense.created_at)}
                 <i>·</i>
                 <span className="activity-category-label">{expense.category || 'Other'}</span>
-                {isVoided && <span className="voided-expense-badge" title={expense.voided_by_name ? `Voided by ${expense.voided_by_name}` : 'Voided'}>VOIDED</span>}
+                {isVoided && <span className="voided-expense-badge" title={expense.voided_by_name ? `Deleted by ${expense.voided_by_name}` : 'Deleted'}>DELETED</span>}
               </span>
             </div>
             <div className="activity-payer">
@@ -404,7 +404,7 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onE
             </div>
             <div className="activity-amount">
               <b>{formatMoney(expense.amount)}</b>
-              <span>{isVoided ? 'Voided · excluded from balances' : showSettlement
+              <span>{isVoided ? 'Deleted · excluded from balances' : showSettlement
                 ? expense.outstanding_amount > 0 ? `${formatMoney(expense.outstanding_amount)} unpaid` : 'settled'
                 : showShare
                   ? `Your share ${formatMoney(userShare?.amount || 0)}`
@@ -424,8 +424,8 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onE
                   </button>
                 )}
                 {onVoidExpense && !isVoided && canVoidExpense?.(expense) && (
-                  <button className="void-expense-button" type="button" disabled={voidingExpenseId === expense.id} title="Void expense" aria-label={`Void expense ${expense.title}`} onClick={() => onVoidExpense(expense)}>
-                    {voidingExpenseId === expense.id ? 'Voiding…' : 'Void'}
+                  <button className="void-expense-button" type="button" disabled={voidingExpenseId === expense.id} title="Delete expense" aria-label={`Delete expense ${expense.title}`} onClick={() => onVoidExpense(expense)}>
+                    {voidingExpenseId === expense.id ? 'Deleting…' : 'Delete'}
                   </button>
                 )}
                 {showSettlement && !isVoided && (expense.outstanding_amount > 0
@@ -1547,19 +1547,19 @@ function App() {
 
   async function voidExpense(expense) {
     const confirmed = window.confirm(
-      `Void “${expense.title}” (${formatMoney(expense.amount)})? This will remove it from group balances and totals. The expense will remain in history.`
+      `Delete “${expense.title}” (${formatMoney(expense.amount)})? This removes it from group balances and totals. The expense and its history will be retained.`
     )
     if (!confirmed) return
     setVoidingExpenseId(expense.id)
     try {
-      const result = await request(`/api/expenses/${expense.id}`, { method: 'DELETE' })
+      await request(`/api/expenses/${expense.id}`, { method: 'DELETE' })
       await refresh()
       setReloadKey(key => key + 1)
       if (reportResult) await runReport()
-      notify(result.message || 'Expense voided.')
+      notify('Expense deleted from active group totals. Its history is retained.')
     } catch (error) {
       notify(error.status === 409
-        ? `This expense could not be voided: ${error.message}`
+        ? `This expense could not be deleted: ${error.message}`
         : error.message)
     } finally {
       setVoidingExpenseId(null)
@@ -3290,7 +3290,7 @@ function App() {
                 <div className="activity-controls">
                   <label className="activity-voided-toggle">
                     <input type="checkbox" checked={showVoidedExpenses} onChange={event => setShowVoidedExpenses(event.target.checked)} />
-                    <span>Show voided</span>
+                    <span>Show deleted</span>
                   </label>
                   <label className="select-button range-select">
                     <span>Category</span>
