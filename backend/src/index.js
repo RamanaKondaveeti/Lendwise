@@ -33,6 +33,8 @@ const {
   validateBudgetInput,
 } = require('./budgets');
 const { buildGroupAnalyticsFilter } = require('./group-analytics');
+const { normalizeActivityQuery, activityTypeClause } = require('./group-activity');
+const { supportedCurrencies, currencyEnumSql, isSupportedCurrency } = require('./currencies');
 const { validTripInput } = require('./trips');
 const { maxReceiptBytes, prepareReceiptForTextract, scanReceipt, supportedTypes, validateReceiptFile } = require('./receipt-ocr');
 const envPath = path.resolve(__dirname, '../../.env');
@@ -233,6 +235,16 @@ function setSessionCookie(res, token, maxAgeSeconds = sessionDurationSeconds) {
   res.setHeader(
     'Set-Cookie',
     `${sessionCookieName}=${token}; HttpOnly; SameSite=Strict; Path=/${persistence}${secure}`
+  );
+}
+
+async function recordGroupActivity(executor, event) {
+  await executor.execute(
+    `INSERT INTO group_activity(group_id, activity_type, actor_id, entity_type, entity_id, entity_name, description, amount, metadata)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [event.groupId, event.activityType, event.actorId || null, event.entityType, event.entityId,
+      String(event.entityName || '').slice(0, 255), String(event.description || '').slice(0, 500),
+      event.amount ?? null, event.metadata ? JSON.stringify(event.metadata) : null]
   );
 }
 
@@ -643,6 +655,20 @@ async function init() {
   const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
   for (const statement of schema.split(';').map(part => part.trim()).filter(Boolean)) {
     await pool.query(statement);
+  }
+  await ensureColumn('settlements', 'created_by', 'INT NULL');
+  const [settlementCreatorFk] = await pool.query(
+    `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'settlements' AND CONSTRAINT_NAME = 'fk_settlements_creator'`
+  );
+  if (!settlementCreatorFk.length) await pool.query('ALTER TABLE settlements ADD CONSTRAINT fk_settlements_creator FOREIGN KEY (created_by) REFERENCES people(id) ON DELETE SET NULL');
+  for (const table of ['budgets', 'recurring_expenses']) {
+    const [currencyColumn] = await pool.query(
+      `SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'currency'`, [table]
+    );
+    if (currencyColumn[0] && !currencyColumn[0].COLUMN_TYPE.includes('EUR')) {
+      await pool.query(`ALTER TABLE \`${table}\` MODIFY currency ENUM(${currencyEnumSql}) NOT NULL DEFAULT 'INR'`);
+    }
   }
   await ensureColumn('expenses', 'category', "VARCHAR(100) NOT NULL DEFAULT 'Other'");
   await ensureColumn('expenses', 'split_method', "ENUM('equal', 'exact', 'percentage', 'shares', 'itemwise') NOT NULL DEFAULT 'equal'");
@@ -2028,7 +2054,7 @@ app.post('/api/recurring-expenses', async (req, res) => {
       exchangeRateToInr >= 10000000 || baseAmount > 9999999999.99 ||
       !Number.isSafeInteger(Math.round(amount * 100)) ||
       !Number.isSafeInteger(Math.round(baseAmount * 100)) || baseAmount <= 0 ||
-      !['INR', 'USD'].includes(currency) ||
+      !isSupportedCurrency(currency) ||
       (currency === 'INR' && Math.abs(exchangeRateToInr - 1) > 0.000001) ||
       !['weekly', 'monthly', 'quarterly', 'yearly'].includes(frequency) ||
       !['equal', 'custom'].includes(splitMethod) ||
@@ -2153,7 +2179,7 @@ app.put('/api/recurring-expenses/:templateId', async (req, res) => {
       exchangeRateToInr >= 10000000 || baseAmount > 9999999999.99 ||
       !Number.isSafeInteger(Math.round(amount * 100)) ||
       !Number.isSafeInteger(Math.round(baseAmount * 100)) || baseAmount <= 0 ||
-      !['INR', 'USD'].includes(currency) ||
+      !isSupportedCurrency(currency) ||
       (currency === 'INR' && Math.abs(exchangeRateToInr - 1) > 0.000001) ||
       !['weekly', 'monthly', 'quarterly', 'yearly'].includes(frequency) ||
       !['equal', 'custom'].includes(splitMethod) ||
@@ -2806,7 +2832,7 @@ app.patch('/api/expenses/:expenseId/category', async (req, res) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const [expenses] = await connection.execute(
-      `SELECT e.id, e.group_id, e.category, e.voided_at FROM expenses e
+      `SELECT e.id, e.group_id, e.title, e.category, e.voided_at FROM expenses e
        JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
        WHERE e.id = ? FOR UPDATE`,
       [req.account.workspace_id, expenseId]
@@ -2824,6 +2850,7 @@ app.patch('/api/expenses/:expenseId/category', async (req, res) => {
       return res.json({ ok: true, message: 'Expense category is unchanged.' });
     }
     await connection.execute('UPDATE expenses SET category = ? WHERE id = ?', [category, expenseId]);
+    await recordGroupActivity(connection, { groupId: expenses[0].group_id, activityType: 'expense_edited', actorId: req.account.person_id, entityType: 'expense', entityId: expenseId, entityName: expenses[0].title, description: `edited the category for ${expenses[0].title}` });
     await notifyGroupMembers(connection, req.account.workspace_id, expenses[0].group_id, {
       type: 'expense_updated',
       title: 'Expense updated',
@@ -2971,6 +2998,7 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
         body.receiptDate === undefined ? current.receipt_date : body.receiptDate || null,
         body.taxAmount === undefined ? current.tax_amount : body.taxAmount, expenseId]
     );
+    await recordGroupActivity(connection, { groupId: current.group_id, activityType: 'expense_edited', actorId: req.account.person_id, entityType: 'expense', entityId: expenseId, entityName: title.trim(), description: `edited expense ${title.trim()}`, amount: amountCents / 100 });
     await connection.execute('DELETE FROM splits WHERE expense_id = ?', [expenseId]);
     for (const row of allocationDetails.allocations) {
       await connection.execute('INSERT INTO splits(expense_id, person_id, amount) VALUES(?, ?, ?)',
@@ -3099,6 +3127,7 @@ app.delete('/api/expenses/:expenseId', async (req, res) => {
       'UPDATE expenses SET voided_at = UTC_TIMESTAMP(), voided_by = ? WHERE id = ? AND voided_at IS NULL',
       [req.account.person_id, expenseId]
     );
+    await recordGroupActivity(connection, { groupId: expense.group_id, activityType: 'expense_deleted', actorId: req.account.person_id, entityType: 'expense', entityId: expenseId, entityName: expense.title, description: `deleted expense ${expense.title}`, amount: expense.amount });
     await notifyGroupMembers(connection, req.account.workspace_id, expense.group_id, {
       type: 'expense_updated',
       title: 'Expense voided',
@@ -3214,10 +3243,11 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
 
     for (const share of amounts) {
       const [settlement] = await connection.execute(
-        `INSERT INTO settlements(payer_id, payee_id, expense_id, amount, note)
-         VALUES(?, ?, ?, ?, 'Expense settlement')`,
-        [share.personId, expense.paid_by, expenseId, share.cents / 100]
+        `INSERT INTO settlements(payer_id, payee_id, expense_id, amount, note, created_by)
+         VALUES(?, ?, ?, ?, 'Expense settlement', ?)`,
+        [share.personId, expense.paid_by, expenseId, share.cents / 100, req.account.person_id]
       );
+      await recordGroupActivity(connection, { groupId: expense.group_id, activityType: 'settlement_recorded', actorId: req.account.person_id, entityType: 'settlement', entityId: settlement.insertId, entityName: 'Settlement', description: `recorded a settlement for ${expense.title}`, amount: share.cents / 100 });
       await notifyPeople(connection, req.account.workspace_id, [share.personId, expense.paid_by], {
         type: 'settlement_recorded',
         title: 'Settlement recorded',
@@ -3512,6 +3542,7 @@ app.post('/api/expenses', async (req, res) => {
       'INSERT INTO expenses(group_id, trip_id, receipt_date, tax_amount, title, amount, paid_by, category, split_method) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [normalizedGroupId, requestedTripId, receiptDate, taxAmount, title.trim(), amountCents / 100, normalizedPaidBy, category, splitMethod]
     );
+    await recordGroupActivity(connection, { groupId: normalizedGroupId, activityType: 'expense_created', actorId: req.account.person_id, entityType: 'expense', entityId: expense.insertId, entityName: title.trim(), description: `added expense ${title.trim()}`, amount: amountCents / 100 });
     for (const { personId, cents } of allocations) {
       await connection.execute(
         'INSERT INTO splits(expense_id, person_id, amount) VALUES(?, ?, ?)',
@@ -3560,6 +3591,70 @@ app.post('/api/expenses', async (req, res) => {
   }
 });
 
+app.get('/api/groups/:groupId/activity', async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  if (!Number.isInteger(groupId) || groupId <= 0) return res.status(400).json({ error: 'Provide a valid group ID.' });
+  let options;
+  try { options = normalizeActivityQuery(req.query); }
+  catch (error) { return res.status(400).json({ error: error.message }); }
+  try {
+    const [authorized] = await pool.execute(
+      `SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id
+       WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`,
+      [groupId, req.account.workspace_id, req.account.person_id]
+    );
+    if (!authorized.length) return res.status(404).json({ error: 'Group not found.' });
+    const eventSql = `
+      SELECT CONCAT('event:', a.id) AS id, a.group_id AS groupId, a.activity_type AS activityType,
+             a.actor_id AS actorId, actor.name AS actorName, a.description, a.entity_type AS entityType,
+             a.entity_id AS entityId, a.entity_name AS entityName, a.amount, a.created_at AS createdAt, a.metadata
+      FROM group_activity a LEFT JOIN people actor ON actor.id = a.actor_id AND actor.workspace_id = ?
+      WHERE a.group_id = ?
+      UNION ALL
+      SELECT CONCAT('expense-created:', e.id), e.group_id, 'expense_created', NULL, NULL,
+             CONCAT('added expense ', e.title), 'expense', e.id, e.title, e.amount, e.created_at, NULL
+      FROM expenses e WHERE e.group_id = ? AND NOT EXISTS (
+        SELECT 1 FROM group_activity a WHERE a.group_id = e.group_id AND a.entity_type = 'expense' AND a.entity_id = e.id AND a.activity_type = 'expense_created'
+      )
+      UNION ALL
+      SELECT CONCAT('expense-deleted:', e.id), e.group_id, 'expense_deleted', e.voided_by, actor.name,
+             CONCAT('deleted expense ', e.title), 'expense', e.id, e.title, e.amount, e.voided_at, NULL
+      FROM expenses e LEFT JOIN people actor ON actor.id = e.voided_by AND actor.workspace_id = ?
+      WHERE e.group_id = ? AND e.voided_at IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM group_activity a WHERE a.group_id = e.group_id AND a.entity_type = 'expense' AND a.entity_id = e.id AND a.activity_type = 'expense_deleted'
+      )
+      UNION ALL
+      SELECT CONCAT('settlement:', s.id), COALESCE(s.group_id, e.group_id), 'settlement_recorded', s.created_by, actor.name,
+             'recorded a settlement', 'settlement', s.id, 'Settlement', s.amount, s.created_at, NULL
+      FROM settlements s LEFT JOIN expenses e ON e.id = s.expense_id
+      LEFT JOIN people actor ON actor.id = s.created_by AND actor.workspace_id = ?
+      WHERE COALESCE(s.group_id, e.group_id) = ? AND NOT EXISTS (
+        SELECT 1 FROM group_activity a WHERE a.group_id = COALESCE(s.group_id, e.group_id) AND a.entity_type = 'settlement' AND a.entity_id = s.id AND a.activity_type = 'settlement_recorded'
+      )
+      UNION ALL
+      SELECT CONCAT('trip-created:', t.id), t.group_id, 'trip_created', t.created_by, actor.name,
+             CONCAT('created trip ', t.name), 'trip', t.id, t.name, NULL, t.created_at, NULL
+      FROM trips t LEFT JOIN people actor ON actor.id = t.created_by AND actor.workspace_id = ?
+      WHERE t.group_id = ? AND NOT EXISTS (
+        SELECT 1 FROM group_activity a WHERE a.group_id = t.group_id AND a.entity_type = 'trip' AND a.entity_id = t.id AND a.activity_type = 'trip_created'
+      )`;
+    const filters = ['groupId IS NOT NULL'];
+    const params = [req.account.workspace_id, groupId, groupId, req.account.workspace_id, groupId,
+      req.account.workspace_id, groupId, req.account.workspace_id, groupId];
+    const typeClause = activityTypeClause(options.type);
+    if (typeClause) filters.push(typeClause[0]);
+    if (options.startDate) { filters.push('createdAt >= ?'); params.push(`${options.startDate} 00:00:00`); }
+    if (options.endDate) { filters.push('createdAt < DATE_ADD(?, INTERVAL 1 DAY)'); params.push(options.endDate); }
+    const combined = `SELECT * FROM (${eventSql}) events WHERE ${filters.join(' AND ')}`;
+    const [countRows] = await pool.execute(`SELECT COUNT(*) AS total FROM (${combined}) filtered`, [...params]);
+    const [rows] = await pool.execute(`${combined} ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?`, [...params, options.limit, options.offset]);
+    res.json({ items: rows.map(row => ({ ...row, amount: row.amount === null ? null : Number(row.amount), metadata: row.metadata || undefined })), total: Number(countRows[0]?.total || 0), limit: options.limit, offset: options.offset });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load group activity.' });
+  }
+});
+
 app.post('/api/groups/:groupId/trips', async (req, res) => {
   const groupId = Number(req.params.groupId);
   const body = req.body || {};
@@ -3567,6 +3662,7 @@ app.post('/api/groups/:groupId/trips', async (req, res) => {
       !isValidReportDate(body.startDate) || !isValidReportDate(body.endDate)) {
     return res.status(400).json({ error: 'Provide a trip name, valid dates, and valid details.' });
   }
+  let connection;
   try {
     const [groups] = await q(
       `SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id
@@ -3574,18 +3670,23 @@ app.post('/api/groups/:groupId/trips', async (req, res) => {
       [groupId, req.account.workspace_id, req.account.person_id]
     );
     if (!groups.length) return res.status(404).json({ error: 'Group not found.' });
-    const [result] = await pool.execute(
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [result] = await connection.execute(
       `INSERT INTO trips(group_id, name, destination, description, start_date, end_date, budget_amount, created_by, status)
        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [groupId, body.name.trim(), body.destination?.trim() || null, body.description?.trim() || null,
         body.startDate, body.endDate, body.budgetAmount ?? null, req.account.person_id, body.status || 'planned']
     );
+    await recordGroupActivity(connection, { groupId, activityType: 'trip_created', actorId: req.account.person_id, entityType: 'trip', entityId: result.insertId, entityName: body.name.trim(), description: `created trip ${body.name.trim()}` });
+    await connection.commit();
     const [rows] = await pool.execute('SELECT * FROM trips WHERE id = ?', [result.insertId]);
     res.status(201).json(rows[0]);
   } catch (error) {
+    await connection?.rollback();
     console.error(error);
     res.status(500).json({ error: 'Could not create this trip.' });
-  }
+  } finally { connection?.release(); }
 });
 
 app.get('/api/groups/:groupId/trips', async (req, res) => {
@@ -3651,6 +3752,18 @@ app.put('/api/trips/:tripId', async (req, res) => {
         body.description === undefined ? current.description : body.description?.trim() || null, startDate, endDate,
         body.budgetAmount === undefined ? current.budget_amount : body.budgetAmount, body.status ?? current.status, tripId]
     );
+    const updatedName = body.name === undefined ? current.name : body.name.trim();
+    const updatedStatus = body.status ?? current.status;
+    const updatedAny = updatedName !== current.name || updatedStatus !== current.status ||
+      (body.destination !== undefined && (body.destination?.trim() || null) !== current.destination) ||
+      (body.description !== undefined && (body.description?.trim() || null) !== current.description) ||
+      body.startDate !== undefined || body.endDate !== undefined || body.budgetAmount !== undefined;
+    if (updatedAny) await recordGroupActivity(connection, {
+      groupId: current.group_id,
+      activityType: updatedStatus === 'cancelled' && current.status !== 'cancelled' ? 'trip_cancelled' : 'trip_updated',
+      actorId: req.account.person_id, entityType: 'trip', entityId: tripId, entityName: updatedName,
+      description: updatedStatus === 'cancelled' && current.status !== 'cancelled' ? `cancelled trip ${updatedName}` : `updated trip ${updatedName}`,
+    });
     await connection.commit();
     const [rows] = await pool.execute('SELECT * FROM trips WHERE id = ?', [tripId]); res.json(rows[0]);
   } catch (error) { await connection?.rollback(); console.error(error); res.status(500).json({ error: 'Could not update this trip.' }); }
@@ -4016,10 +4129,11 @@ app.post('/api/settlements', async (req, res) => {
         return res.status(409).json({ error: 'The group balance changed. Refresh and try again.' });
       }
       const [settlement] = await connection.execute(
-        'INSERT INTO settlements(payer_id, payee_id, amount, group_id, note) VALUES(?, ?, ?, ?, ?)',
-        [normalizedPayerId, normalizedPayeeId, amountCents / 100, normalizedGroupId, note.trim()]
+        'INSERT INTO settlements(payer_id, payee_id, amount, group_id, note, created_by) VALUES(?, ?, ?, ?, ?, ?)',
+        [normalizedPayerId, normalizedPayeeId, amountCents / 100, normalizedGroupId, note.trim(), req.account.person_id]
       );
       settlementId = settlement.insertId;
+      await recordGroupActivity(connection, { groupId: normalizedGroupId, activityType: 'settlement_recorded', actorId: req.account.person_id, entityType: 'settlement', entityId: settlementId, entityName: 'Settlement', description: 'recorded a group settlement', amount: amountCents / 100 });
     } else {
       const [settlement] = await connection.execute(
         'INSERT INTO settlements(payer_id, payee_id, amount, note) VALUES(?, ?, ?, ?)',

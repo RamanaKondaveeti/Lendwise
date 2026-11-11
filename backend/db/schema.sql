@@ -121,6 +121,24 @@ CREATE TABLE IF NOT EXISTS group_members (
   CONSTRAINT fk_group_members_person FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS group_activity (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  group_id INT NOT NULL,
+  activity_type ENUM('expense_created', 'expense_edited', 'expense_deleted', 'settlement_recorded', 'trip_created', 'trip_updated', 'trip_cancelled') NOT NULL,
+  actor_id INT NULL,
+  entity_type ENUM('expense', 'settlement', 'trip') NOT NULL,
+  entity_id INT NOT NULL,
+  entity_name VARCHAR(255) NOT NULL,
+  description VARCHAR(500) NOT NULL,
+  amount DECIMAL(12, 2) NULL,
+  metadata JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_group_activity_group FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE,
+  CONSTRAINT fk_group_activity_actor FOREIGN KEY (actor_id) REFERENCES people(id) ON DELETE SET NULL,
+  INDEX idx_group_activity_timeline (group_id, created_at, id),
+  INDEX idx_group_activity_type (group_id, activity_type, created_at)
+);
+
 CREATE TABLE IF NOT EXISTS trips (
   id INT AUTO_INCREMENT PRIMARY KEY,
   group_id INT NOT NULL,
@@ -150,7 +168,7 @@ CREATE TABLE IF NOT EXISTS budgets (
   group_id INT NULL,
   category VARCHAR(100) NULL,
   amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
-  currency ENUM('INR', 'USD') NOT NULL DEFAULT 'INR',
+  currency ENUM('INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'SGD', 'JPY', 'CHF') NOT NULL DEFAULT 'INR',
   exchange_rate_to_inr DECIMAL(15, 8) NOT NULL DEFAULT 1 CHECK (exchange_rate_to_inr > 0),
   period ENUM('weekly', 'monthly', 'yearly') NOT NULL,
   start_date DATE NOT NULL,
@@ -234,7 +252,7 @@ CREATE TABLE IF NOT EXISTS recurring_expenses (
   description TEXT NULL,
   amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
   base_amount DECIMAL(12, 2) NOT NULL CHECK (base_amount > 0),
-  currency ENUM('INR', 'USD') NOT NULL,
+  currency ENUM('INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'SGD', 'JPY', 'CHF') NOT NULL,
   exchange_rate_to_inr DECIMAL(15, 8) NOT NULL CHECK (exchange_rate_to_inr > 0),
   category VARCHAR(100) NOT NULL DEFAULT 'Other',
   split_method ENUM('equal', 'custom') NOT NULL DEFAULT 'equal',
@@ -286,6 +304,7 @@ CREATE TABLE IF NOT EXISTS settlements (
   payee_id INT NOT NULL,
   expense_id INT NULL,
   group_id INT NULL,
+  created_by INT NULL,
   amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
   note VARCHAR(255) NOT NULL DEFAULT 'Settlement',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -293,6 +312,7 @@ CREATE TABLE IF NOT EXISTS settlements (
   CONSTRAINT fk_settlements_payee FOREIGN KEY (payee_id) REFERENCES people(id),
   CONSTRAINT fk_settlements_expense FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,
   CONSTRAINT fk_settlements_group FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE,
+  CONSTRAINT fk_settlements_creator FOREIGN KEY (created_by) REFERENCES people(id) ON DELETE SET NULL,
   INDEX idx_settlements_expense (expense_id),
   INDEX idx_settlements_group (group_id)
 );

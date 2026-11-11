@@ -50,6 +50,7 @@ import {
   X,
 } from 'lucide-react'
 import { calculateMonthlyAnalytics, monthValue } from './analytics.mjs'
+import { isSupportedCurrency, supportedCurrencies } from './currencies.mjs'
 import {
   convertReportRow,
   presentReportRow,
@@ -389,7 +390,62 @@ function GroupAnalyticsDashboard({ analytics, loading, error, period, setPeriod,
   )
 }
 
-function BudgetForm({ budget, groups, categories, currency, exchangeRate, onSubmit, onCancel, busy }) {
+function GroupActivityFeed({ groupId, formatMoney, onExpense, onTrip }) {
+  const [type, setType] = useState('all')
+  const [range, setRange] = useState('week')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [items, setItems] = useState([])
+  const [offset, setOffset] = useState(0)
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const limit = 25
+  const [reload, setReload] = useState(0)
+  useEffect(() => {
+    if (!groupId) return undefined
+    const controller = new AbortController()
+    let active = true
+    setLoading(true)
+    setError('')
+    const params = new URLSearchParams({ type, limit: String(limit), offset: String(offset) })
+    if (range === 'today' || range === 'week' || range === 'month') {
+      const now = new Date()
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      if (range === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+      if (range === 'month') start.setDate(1)
+      const localDate = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+      params.set('startDate', localDate(start))
+      params.set('endDate', localDate(now))
+    } else if (range === 'custom') {
+      if (startDate) params.set('startDate', startDate)
+      if (endDate) params.set('endDate', endDate)
+    }
+    request(`/api/groups/${groupId}/activity?${params}`, { signal: controller.signal })
+      .then(result => { if (active) { setItems(current => offset ? [...current, ...result.items] : result.items); setTotal(result.total) } })
+      .catch(err => { if (active && err.name !== 'AbortError') setError(err.message) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false; controller.abort() }
+  }, [groupId, type, range, startDate, endDate, offset, reload])
+  useEffect(() => { setItems([]); setOffset(0) }, [groupId, type, range, startDate, endDate])
+  const iconFor = activityType => activityType.startsWith('expense') ? <ReceiptText size={17} /> : activityType.startsWith('settlement') ? <ArrowLeftRight size={17} /> : <Plane size={17} />
+  return <section className="panel screen-panel group-activity-feed">
+    <div className="panel-heading screen-panel-heading"><div><div className="section-title">Group Activity Feed</div><div className="section-subtitle">A timeline of expenses, settlements, and trip changes.</div></div><div className="activity-controls">
+      <label className="select-button range-select"><span>Type</span><select value={type} onChange={event => { setOffset(0); setType(event.target.value) }}><option value="all">All</option><option value="expense">Expenses</option><option value="settlement">Settlements</option><option value="trip">Trips</option><option value="edit">Edits</option><option value="delete">Deleted expenses</option></select></label>
+      <label className="select-button range-select"><span>Date</span><select value={range} onChange={event => { setOffset(0); setRange(event.target.value) }}><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="all">All time</option><option value="custom">Custom</option></select></label>
+      {range === 'custom' && <><input aria-label="Start date" type="date" value={startDate} max={endDate || undefined} onChange={event => { setOffset(0); setStartDate(event.target.value) }} /><input aria-label="End date" type="date" value={endDate} min={startDate || undefined} onChange={event => { setOffset(0); setEndDate(event.target.value) }} /></>}
+      <button type="button" className="button button-light" onClick={() => setReload(value => value + 1)}>Refresh</button>
+    </div></div>
+    {loading && !items.length ? <div className="empty" role="status"><LoaderCircle className="loading-icon" size={20} />Loading group activity…</div> : error ? <div className="empty" role="alert">{error}<button className="button button-light" onClick={() => setReload(value => value + 1)}>Retry</button></div> : !items.length ? <div className="empty">No group activity in this date range.</div> : <>
+      <div className="group-activity-timeline">{items.map(item => <article className="group-activity-item" key={item.id}><div className="group-activity-icon">{iconFor(item.activityType)}</div><div className="group-activity-copy"><b>{item.actorName || 'Actor unavailable'} </b><span>{item.description}</span><small>{new Date(item.createdAt).toLocaleString()}</small></div><div className="group-activity-entity">{item.entityType === 'trip' ? <button type="button" onClick={() => onTrip(item.entityId)}>{item.entityName}</button> : item.entityType === 'expense' ? <button type="button" onClick={() => onExpense(item.entityId)}>{item.entityName}</button> : <span>{item.entityName}</span>}{item.amount !== null && item.amount !== undefined && <b>{formatMoney(item.amount)}</b>}</div></article>)}</div>
+      {items.length < total && <div className="group-activity-more"><button className="button button-light" disabled={loading} onClick={() => setOffset(value => value + limit)}>{loading ? 'Loading…' : 'Load more'}</button></div>}
+    </>}
+  </section>
+}
+
+function BudgetForm({ budget, groups, categories, currency, exchangeRate, onCurrencyChange, onSubmit, onCancel, busy }) {
+  const [selectedCurrency, setSelectedCurrency] = useState(budget?.currency || currency)
+  useEffect(() => { onCurrencyChange(selectedCurrency) }, [selectedCurrency, onCurrencyChange])
   const [type, setType] = useState(budget?.budget_type || 'personal')
   const thresholds = budget?.alert_thresholds
     ? (Array.isArray(budget.alert_thresholds) ? budget.alert_thresholds : JSON.parse(budget.alert_thresholds)).join(', ')
@@ -400,8 +456,8 @@ function BudgetForm({ budget, groups, categories, currency, exchangeRate, onSubm
         <label>Budget name<input name="name" required maxLength="120" defaultValue={budget?.name || ''} placeholder="e.g. Monthly groceries" /></label>
         <label>Budget type<select name="budgetType" value={type} onChange={event => setType(event.target.value)}><option value="personal">Personal</option><option value="group">Group</option></select></label>
         {type === 'group' && <label>Group<select name="groupId" required defaultValue={budget?.group_id || ''}><option value="" disabled>Select a group</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>}
-        <label>Amount<input name="amount" type="number" min="0.01" step="0.01" required defaultValue={budget ? Number(budget.amount) / Number(budget.exchange_rate_to_inr || 1) : ''} placeholder="0.00" /></label>
-        <label>Currency<select name="currency" defaultValue={budget?.currency || currency}><option value="INR">INR (₹)</option><option value="USD">USD ($)</option></select></label>
+        <label>Amount<input name="amount" type="number" min="0.01" step="0.01" required disabled={selectedCurrency !== 'INR' && !Number.isFinite(exchangeRate)} defaultValue={budget ? Number(budget.amount) / Number(budget.exchange_rate_to_inr || 1) : ''} placeholder="0.00" /></label>
+        <label>Currency<select name="currency" value={selectedCurrency} onChange={event => { setSelectedCurrency(event.target.value); onCurrencyChange(event.target.value) }}>{supportedCurrencies.map(code => <option key={code} value={code}>{code}</option>)}</select></label>
         <label>Period<select name="period" defaultValue={budget?.period || 'monthly'}><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
         <label>Start date<input name="startDate" type="date" required defaultValue={budget?.start_date?.slice(0, 10) || todayIso()} /></label>
         <label>End date (optional)<input name="endDate" type="date" defaultValue={budget?.end_date?.slice(0, 10) || ''} /></label>
@@ -516,10 +572,11 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onE
   )
 }
 
-function RecurringExpenseFields({ groups, currency, exchangeRate, initial, currentUserId }) {
+function RecurringExpenseFields({ groups, currency, exchangeRate, initial, currentUserId, onCurrencyChange }) {
   const [groupId, setGroupId] = useState(Number(initial?.group_id || groups.find(group => group.members?.length)?.id || ''))
   const [splitMethod, setSplitMethod] = useState(initial?.split_method || 'equal')
   const [configuredCurrency, setConfiguredCurrency] = useState(initial?.currency || currency)
+  useEffect(() => { onCurrencyChange(configuredCurrency) }, [configuredCurrency, onCurrencyChange])
   const initialGroup = groups.find(group => Number(group.id) === groupId)
   const [participantIds, setParticipantIds] = useState(
     initial?.participants?.map(participant => Number(participant.person_id)) ||
@@ -570,18 +627,17 @@ function RecurringExpenseFields({ groups, currency, exchangeRate, initial, curre
       </label>
       <div className="form-row">
         <label>Expected amount
-          <input name="amount" type="number" min="0.01" step="0.01" defaultValue={initial?.amount || ''} placeholder="0.00" required disabled={configuredCurrency === 'USD' && !Number.isFinite(exchangeRateToInr)} />
+          <input name="amount" type="number" min="0.01" step="0.01" defaultValue={initial?.amount || ''} placeholder="0.00" required disabled={configuredCurrency !== 'INR' && !Number.isFinite(exchangeRateToInr)} />
         </label>
         <label>Currency
-          <select name="currency" value={configuredCurrency} onChange={event => setConfiguredCurrency(event.target.value)}>
-            <option value="INR">INR</option>
-            <option value="USD">USD</option>
+          <select name="currency" value={configuredCurrency} onChange={event => { setConfiguredCurrency(event.target.value); onCurrencyChange(event.target.value) }}>
+            {supportedCurrencies.map(code => <option key={code} value={code}>{code}</option>)}
           </select>
         </label>
       </div>
       <input type="hidden" name="exchangeRateToInr" value={exchangeRateToInr || ''} />
-      {configuredCurrency === 'USD' && !Number.isFinite(exchangeRateToInr) &&
-        <p className="form-hint">A current USD exchange rate is required to save this recurring expense.</p>}
+      {configuredCurrency !== 'INR' && !Number.isFinite(exchangeRateToInr) &&
+        <p className="form-hint">A current {configuredCurrency} exchange rate is required to save this recurring expense.</p>}
       <label>Category
         <select name="category" defaultValue={initial?.category || 'Other'}>
           {expenseCategories.map(category => <option key={category}>{category}</option>)}
@@ -915,7 +971,7 @@ function App() {
   })
   const [reloadKey, setReloadKey] = useState(0)
   const [selectedMonth, setSelectedMonth] = useState(() => monthValue(new Date()))
-  const [currency, setCurrency] = useState(() => window.localStorage.getItem('groupbuk_currency') === 'USD' ? 'USD' : 'INR')
+  const [currency, setCurrency] = useState(() => isSupportedCurrency(window.localStorage.getItem('groupbuk_currency')) ? window.localStorage.getItem('groupbuk_currency') : 'INR')
   const [exchangeRate, setExchangeRate] = useState(() => currency === 'INR' ? 1 : null)
   const [currencyLoading, setCurrencyLoading] = useState(false)
   const [budgets, setBudgets] = useState([])
@@ -1234,7 +1290,7 @@ function App() {
   }, [tab, selectedGroupId, selectedTripId, groupExpenseTripFilter, reloadKey, showVoidedExpenses])
 
   useEffect(() => {
-    if (!selectedGroupId || tab !== 'Group') return undefined
+    if (!selectedGroupId || !['Group', 'GroupActivity'].includes(tab)) return undefined
     let active = true
     request(`/api/groups/${selectedGroupId}/trips`).then(rows => { if (active) setGroupTrips(rows) }).catch(error => { if (active) setNotice(error.message) })
     return () => { active = false }
@@ -1342,7 +1398,7 @@ function App() {
   }, [tab, authUser?.workspaceId])
 
   useEffect(() => {
-    if (tab !== 'Activity' || !activityLoaded || !focusExpenseId) return undefined
+    if (!['Activity', 'Group'].includes(tab) || !activityLoaded || !focusExpenseId) return undefined
     const row = document.getElementById(`expense-${focusExpenseId}`)
     if (!row) return undefined
     row.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1366,11 +1422,11 @@ function App() {
     let active = true
     setCurrencyLoading(true)
     setExchangeRate(null)
-    fetch('https://api.frankfurter.dev/v1/latest?base=INR&symbols=USD', { signal: controller.signal })
+    fetch(`https://api.frankfurter.dev/v2/rate/INR/${currency}`, { signal: controller.signal })
       .then(async response => {
         if (!response.ok) throw new Error('Could not load the latest exchange rate.')
         const result = await response.json()
-        const rate = Number(result.rates?.USD)
+        const rate = Number(result.rate)
         if (!Number.isFinite(rate) || rate <= 0) throw new Error('The exchange-rate response was invalid.')
         return rate
       })
@@ -1780,7 +1836,7 @@ function App() {
       name: String(form.get('name') || '').trim(),
       budgetType: type,
       amount,
-      exchangeRateToInr: form.get('currency') === 'USD' ? 1 / exchangeRate : 1,
+      exchangeRateToInr: form.get('currency') === 'INR' ? 1 : 1 / exchangeRate,
       currency: form.get('currency'),
       period: form.get('period'),
       startDate: form.get('startDate'),
@@ -1794,8 +1850,8 @@ function App() {
       notify('Check the budget name, date range, amount, and alert thresholds.')
       return
     }
-    if (form.get('currency') === 'USD' && (!Number.isFinite(exchangeRate) || exchangeRate <= 0)) {
-      notify('Select USD in the workspace currency switcher and wait for its rate before saving a USD budget.')
+    if (form.get('currency') !== 'INR' && (!Number.isFinite(exchangeRate) || exchangeRate <= 0)) {
+      notify(`Wait for the ${form.get('currency')} exchange rate before saving this budget.`)
       return
     }
     setBudgetBusy(true)
@@ -2531,7 +2587,7 @@ function App() {
   }).format(new Date())
   const firstName = currentUser?.name?.split(' ')[0] || 'there'
   const activeTrip = groupTrips.find(trip => Number(trip.id) === Number(selectedTripId))
-  const pageTitle = tab === 'Group' ? selectedGroup?.name || 'Group' : tab === 'Trip' ? activeTrip?.name || 'Trip' : tab
+  const pageTitle = tab === 'Group' ? selectedGroup?.name || 'Group' : tab === 'GroupActivity' ? `${selectedGroup?.name || 'Group'} Activity` : tab === 'Trip' ? activeTrip?.name || 'Trip' : tab
 
   return (
     <div className={`app ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
@@ -2641,8 +2697,7 @@ function App() {
             <label className="currency-switcher" title="Choose the currency for displayed amounts">
               <span>Currency</span>
               <select value={currency} onChange={event => setCurrency(event.target.value)} aria-label="Currency">
-                <option value="INR">INR</option>
-                <option value="USD">USD</option>
+                {supportedCurrencies.map(code => <option key={code} value={code}>{code}</option>)}
               </select>
               <small aria-live="polite">{currencyLoading ? 'Updating rate…' : currency === 'INR' ? 'Base currency' : Number.isFinite(exchangeRate) ? 'Converted' : 'Rate unavailable'}</small>
             </label>
@@ -2813,6 +2868,11 @@ function App() {
           </div>
 
           {notice && <div className="toast" role="status" aria-live="polite"><Check size={16} />{notice}</div>}
+
+          {tab === 'GroupActivity' && selectedGroup && <>
+            <div className="panel-heading screen-panel-heading"><button type="button" className="button button-light" onClick={() => setTab('Group')}>Back to {selectedGroup.name}</button></div>
+            <GroupActivityFeed groupId={selectedGroup.id} formatMoney={formatMoney} onExpense={expenseId => { setGroupExpenseTripFilter(''); setFocusExpenseId(Number(expenseId)); setTab('Group') }} onTrip={tripId => openTrip(tripId)} />
+          </>}
 
           {tab === 'Overview' && (
             <>
@@ -3081,13 +3141,12 @@ function App() {
                 <div className="panel-heading screen-panel-heading">
                   <div>
                     <div className="section-title">Report filters</div>
-                    <div className="section-subtitle">Amounts are stored in INR; USD exports use the current display rate.</div>
+                    <div className="section-subtitle">Amounts are stored in INR; exports use the selected currency rate.</div>
                   </div>
                   <label className="report-currency-filter">
                     <span>Currency</span>
                     <select value={currency} onChange={event => setCurrency(event.target.value)}>
-                      <option value="INR">INR</option>
-                      <option value="USD">USD</option>
+                      {supportedCurrencies.map(code => <option key={code} value={code}>{code}</option>)}
                     </select>
                   </label>
                 </div>
@@ -3232,7 +3291,7 @@ function App() {
                   <div><div className="section-title">Your budgets <span className="title-count">{budgets.length}</span></div><div className="section-subtitle">Actual expense shares for personal budgets and full expense amounts for group budgets.</div></div>
                   {!budgetFormOpen && <button className="button button-dark" onClick={() => { setBudgetEditing(null); setBudgetFormOpen(true) }}><Plus size={15} />Create budget</button>}
                 </div>
-                {budgetFormOpen && <BudgetForm key={budgetEditing?.id || 'new-budget'} budget={budgetEditing} groups={groups.filter(group => group.members?.some(member => member.id === data?.currentUserId))} categories={expenseCategories} currency={currency} exchangeRate={exchangeRate} onSubmit={saveBudget} onCancel={() => { setBudgetEditing(null); setBudgetFormOpen(false) }} busy={budgetBusy} />}
+                {budgetFormOpen && <BudgetForm key={budgetEditing?.id || 'new-budget'} budget={budgetEditing} groups={groups.filter(group => group.members?.some(member => member.id === data?.currentUserId))} categories={expenseCategories} currency={currency} exchangeRate={exchangeRate} onCurrencyChange={setCurrency} onSubmit={saveBudget} onCancel={() => { setBudgetEditing(null); setBudgetFormOpen(false) }} busy={budgetBusy} />}
                 {budgetsLoading && !budgets.length ? <LoadingSkeleton rows={3} label="Loading budgets" /> : budgets.length ? (
                   <div className="budget-list">
                     {budgets.map(budget => {
@@ -3464,7 +3523,7 @@ function App() {
                 onRecordSettlement={payment => openGroupSettlement(selectedGroup, payment)}
               />
               <section className="panel screen-panel trips-panel">
-                <div className="panel-heading screen-panel-heading"><div><div className="section-title">Trips <span className="title-count">{groupTrips.length}</span></div><div className="section-subtitle">Plan travel spending and keep trip expenses together.</div></div><div className="trip-controls"><select aria-label="Filter trips by status" value={tripStatusFilter} onChange={event => setTripStatusFilter(event.target.value)}><option value="all">All statuses</option>{['planned', 'active', 'completed', 'cancelled'].map(status => <option key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</option>)}</select><button type="button" className="button button-dark" onClick={() => { setTripEditing(null); setModal('trip-create') }}><Plus size={15} />Create Trip</button></div></div>
+                <div className="panel-heading screen-panel-heading"><div><div className="section-title">Trips <span className="title-count">{groupTrips.length}</span></div><div className="section-subtitle">Plan travel spending and keep trip expenses together.</div></div><div className="trip-controls"><button type="button" className="button button-light" onClick={() => setTab('GroupActivity')}>Activity Feed</button><select aria-label="Filter trips by status" value={tripStatusFilter} onChange={event => setTripStatusFilter(event.target.value)}><option value="all">All statuses</option>{['planned', 'active', 'completed', 'cancelled'].map(status => <option key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</option>)}</select><button type="button" className="button button-dark" onClick={() => { setTripEditing(null); setModal('trip-create') }}><Plus size={15} />Create Trip</button></div></div>
                 {groupTrips.filter(trip => tripStatusFilter === 'all' || trip.status === tripStatusFilter).length ? <div className="trip-card-grid">{groupTrips.filter(trip => tripStatusFilter === 'all' || trip.status === tripStatusFilter).map(trip => { const spent = Number(trip.spent || 0); const budget = trip.budget_amount === null ? null : Number(trip.budget_amount); const percent = budget > 0 ? Math.min(100, spent / budget * 100) : 0; return <article className="trip-card" key={trip.id}><button type="button" className="trip-card-open" onClick={() => openTrip(trip.id)}><span className={`trip-status trip-status-${trip.status}`}>{trip.status}</span><b>{trip.name}</b><span>{trip.destination || 'Destination not set'}</span><small>{date(trip.start_date)} – {date(trip.end_date)}</small><strong>{budget === null ? `${formatMoney(spent)} spent` : `${formatMoney(spent)} / ${formatMoney(budget)}`}</strong>{budget !== null && <i className="trip-progress"><b style={{ width: `${percent}%` }} /></i>}</button><button className="button button-light trip-edit" type="button" onClick={() => { setTripEditing(trip); setModal('trip-edit') }}>Edit</button></article> })}</div> : <div className="empty">No trips match this status. Create a trip to get started.</div>}
               </section>
               <section className="panel screen-panel group-members-panel">
@@ -3885,6 +3944,7 @@ function App() {
                   exchangeRate={exchangeRate}
                   initial={recurringEditing}
                   currentUserId={data.currentUserId}
+                  onCurrencyChange={setCurrency}
                 />
               </>
             )}

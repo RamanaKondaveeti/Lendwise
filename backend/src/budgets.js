@@ -1,9 +1,10 @@
 const { isValidReportDate } = require('./reports');
+const { isSupportedCurrency, supportedCurrencies } = require('./currencies');
 
 function convertBudgetAmountToBase(amount, currency, exchangeRateToInr = 1) {
   const numericAmount = Number(amount);
   const rate = Number(exchangeRateToInr);
-  if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !['INR', 'USD'].includes(currency) ||
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !isSupportedCurrency(currency) ||
       !Number.isFinite(rate) || rate <= 0 || (currency === 'INR' && Math.abs(rate - 1) > 0.000001)) {
     throw new TypeError('Enter a positive amount with a valid currency exchange rate.');
   }
@@ -142,7 +143,7 @@ function validateBudgetInput(body, partial = false) {
     result.exchangeRateToInr = converted.exchangeRateToInr;
   }
   if (!partial || Object.hasOwn(body, 'currency')) {
-    if (!['INR', 'USD'].includes(body.currency || 'INR')) throw new TypeError('Currency must be INR or USD.');
+    if (!isSupportedCurrency(body.currency || 'INR')) throw new TypeError(`Currency must be one of ${supportedCurrencies.join(', ')}.`);
     result.currency = body.currency || 'INR';
   }
   if (!partial || Object.hasOwn(body, 'period')) {
