@@ -39,6 +39,7 @@ import {
   Search,
   Settings2,
   Sun,
+  Tag,
   Trash2,
   Users,
   Utensils,
@@ -161,6 +162,25 @@ const shareCountCents = (totalCents, allocations) => {
     : left.remainder > right.remainder ? -1 : 1)
   for (let index = 0; remaining > 0; index++, remaining--) shares[order[index % order.length].index].cents++
   return shares
+}
+const percentageInputsFromAmounts = amounts => {
+  const cents = amounts.map(value => Math.max(0, Math.round(Number(value || 0) * 100)))
+  const total = cents.reduce((sum, value) => sum + value, 0)
+  if (!total) return cents.map(() => '0.00')
+  const units = cents.map((value, index) => {
+    const product = value * 10000
+    return { index, value: Math.floor(product / total), remainder: product % total }
+  })
+  let remaining = 10000 - units.reduce((sum, value) => sum + value.value, 0)
+  const order = [...units].sort((left, right) => right.remainder - left.remainder || left.index - right.index)
+  for (let index = 0; index < remaining; index++) units[order[index].index].value++
+  return units.sort((left, right) => left.index - right.index).map(value => (value.value / 100).toFixed(2))
+}
+const shareInputsFromAmounts = amounts => {
+  const cents = amounts.map(value => Math.max(0, Math.round(Number(value || 0) * 100)))
+  const gcd = (left, right) => right ? gcd(right, left % right) : left
+  const divisor = cents.reduce((value, amount) => amount ? (value ? gcd(value, amount) : amount) : value, 0)
+  return cents.map(value => String(divisor ? Math.max(1, Math.round(value / divisor)) : 1))
 }
 const monthName = value => new Intl.DateTimeFormat('en-US', {
   month: 'long',
@@ -341,7 +361,7 @@ async function request(url, options) {
   return body
 }
 
-function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onEditCategory, showSettlement = false, showShare = false, formatMoney }) {
+function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onEditCategory, onEditExpense, showSettlement = false, showShare = false, formatMoney }) {
   if (!expenses.length) return <div className="empty">No expenses to show yet.</div>
 
   return (
@@ -389,11 +409,16 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onE
                   : 'total'}</span>
               {showShare && <span className={`settlement-status status-${settlementStatus.toLowerCase().replace(/\s+/g, '-')}`}>{settlementStatus}</span>}
             </div>
-            {(onEditCategory || showSettlement) && (
+            {(onEditCategory || onEditExpense || showSettlement) && (
               <div className="activity-row-actions">
+                {onEditExpense && (
+                  <button className="edit-category-button" type="button" title="Edit expense" aria-label={`Edit expense ${expense.title}`} onClick={() => onEditExpense(expense)}>
+                    <Pencil size={14} />
+                  </button>
+                )}
                 {onEditCategory && (
                   <button className="edit-category-button" type="button" title="Edit category" aria-label={`Edit category for ${expense.title}`} onClick={() => onEditCategory(expense)}>
-                    <Pencil size={14} />
+                    <Tag size={14} />
                   </button>
                 )}
                 {showSettlement && (expense.outstanding_amount > 0
@@ -718,6 +743,7 @@ function App() {
   const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [focusExpenseId, setFocusExpenseId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
+  const [expensePaidBy, setExpensePaidBy] = useState('')
   const [expenseSplitMethod, setExpenseSplitMethod] = useState('equal')
   const [expenseParticipantIds, setExpenseParticipantIds] = useState([])
   const [expenseExactAmounts, setExpenseExactAmounts] = useState({})
@@ -1408,6 +1434,9 @@ function App() {
       ? selectedGroup
       : groups.find(group => group.members?.length)
     setExpenseGroupId(defaultGroup?.id || '')
+    setExpensePaidBy(defaultGroup?.members?.some(person => person.id === data.currentUserId)
+      ? data.currentUserId
+      : defaultGroup?.members?.[0]?.id || '')
     setExpenseSplitMethod('equal')
     setExpenseParticipantIds((defaultGroup?.members || []).map(person => person.id))
     setExpenseExactAmounts({})
@@ -1415,7 +1444,52 @@ function App() {
     setExpenseShares({})
     setExpenseItems([])
     setExpenseTotalInput('')
+    setExpenseToEdit(null)
     setModal('expense')
+  }
+
+  function openExpenseEdit(expense) {
+    const participants = (expense.shares || []).map(share => Number(share.person_id))
+    const rate = Number.isFinite(exchangeRate) && exchangeRate > 0 ? exchangeRate : 1
+    setExpenseToEdit(expense)
+    setExpenseGroupId(Number(expense.group_id))
+    setExpensePaidBy(Number(expense.payer_id))
+    setExpenseSplitMethod(expense.split_method || 'equal')
+    setExpenseParticipantIds(participants)
+    setExpenseTotalInput((Number(expense.amount) * rate).toFixed(2))
+    setExpenseExactAmounts(Object.fromEntries((expense.shares || []).map(share => [
+      Number(share.person_id), (Number(share.amount) * rate).toFixed(2),
+    ])))
+    const participantAmounts = (expense.shares || []).map(share => Number(share.amount))
+    const percentages = percentageInputsFromAmounts(participantAmounts)
+    const shareCounts = shareInputsFromAmounts(participantAmounts)
+    setExpensePercentages(Object.fromEntries(participants.map((personId, index) => [personId, percentages[index]])))
+    setExpenseShares(Object.fromEntries(participants.map((personId, index) => [personId, shareCounts[index]])))
+    setExpenseItems((expense.items || []).map(item => {
+      const allocations = item.allocations || []
+      const itemAmounts = allocations.map(allocation => Number(allocation.amount))
+      const itemPercentages = percentageInputsFromAmounts(itemAmounts)
+      const itemShares = shareInputsFromAmounts(itemAmounts)
+      const itemParticipantIds = allocations.map(allocation => Number(allocation.person_id))
+      return {
+        itemName: item.item_name,
+        quantity: String(Number(item.quantity)),
+        unitPrice: (Number(item.unit_price) * rate).toFixed(2),
+        allocationMethod: item.allocation_method,
+        participantIds: itemParticipantIds,
+        allocations: Object.fromEntries(itemParticipantIds.map((personId, index) => [
+          personId,
+          item.allocation_method === 'exact'
+            ? (itemAmounts[index] * rate).toFixed(2)
+            : item.allocation_method === 'percentage'
+              ? itemPercentages[index]
+              : item.allocation_method === 'shares'
+                ? itemShares[index]
+                : '',
+        ])),
+      }
+    }))
+    setModal('expense-edit')
   }
 
   function updateExpenseItem(index, update) {
@@ -1922,7 +1996,7 @@ function App() {
 
   async function submit(event) {
     event.preventDefault()
-    if (['expense', 'expense-settlement', 'settlement'].includes(modal) && !Number.isFinite(exchangeRate)) {
+    if (['expense', 'expense-edit', 'expense-settlement', 'settlement'].includes(modal) && !Number.isFinite(exchangeRate)) {
       notify('A current currency rate is required before saving this amount.')
       return
     }
@@ -1969,7 +2043,7 @@ function App() {
       url = `/api/groups/${selectedGroupId}/members`
       payload = { personIds: form.getAll('memberIds').map(Number) }
       successMessage = 'Group members updated.'
-    } else if (modal === 'expense') {
+    } else if (modal === 'expense' || modal === 'expense-edit') {
       if (!expenseSplitValid) {
         notify('Split allocations must be valid and match the selected split method.')
         return
@@ -1993,9 +2067,9 @@ function App() {
           if (exactCents[target] > 0) exactCents[target]--
         }
       }
-      url = '/api/expenses'
+      url = modal === 'expense-edit' ? `/api/expenses/${expenseToEdit.id}` : '/api/expenses'
       payload = {
-        groupId: Number(form.get('groupId')),
+        groupId: modal === 'expense-edit' ? Number(expenseToEdit.group_id) : Number(form.get('groupId')),
         title: form.get('title'),
         amount: expenseSplitMethod === 'itemwise' ? expenseItemwiseTotalCents / 100 : toStoredAmount(form.get('amount')),
         paidBy: Number(form.get('paidBy')),
@@ -2031,7 +2105,7 @@ function App() {
             })),
         })) : undefined,
       }
-      successMessage = 'Expense added.'
+      successMessage = modal === 'expense-edit' ? 'Expense updated.' : 'Expense added.'
     } else if (modal === 'expense-category') {
       url = `/api/expenses/${expenseToEdit.id}/category`
       payload = { category: form.get('category') }
@@ -2090,7 +2164,7 @@ function App() {
     try {
       const submittedModal = modal
       const result = await request(url, {
-        method: submittedModal === 'members' || submittedModal === 'recurring-edit'
+        method: submittedModal === 'members' || submittedModal === 'recurring-edit' || submittedModal === 'expense-edit'
           ? 'PUT'
           : submittedModal === 'expense-category'
             ? 'PATCH'
@@ -2108,7 +2182,9 @@ function App() {
       }
       notify(result.message || successMessage)
     } catch (error) {
-      notify(error.message)
+      notify(error.status === 409 && modal === 'expense-edit'
+        ? `Unable to save these changes because they conflict with recorded settlements: ${error.message}`
+        : error.message)
     } finally {
       setBusy(false)
     }
@@ -3201,6 +3277,7 @@ function App() {
                   onGroupClick={openGroup}
                   onSettleExpense={openExpenseSettlement}
                   onEditCategory={openExpenseCategoryEdit}
+                  onEditExpense={openExpenseEdit}
                   formatMoney={formatMoney}
                   showSettlement
                 />}
@@ -3253,11 +3330,11 @@ function App() {
       </main>
 
       {modal && (
-        <div className="overlay" onMouseDown={event => event.target === event.currentTarget && setModal('')}>
-          <form className={`modal${modal === 'expense' ? ' expense-modal' : ''}`} onSubmit={submit}>
+        <div className="overlay" onMouseDown={event => !busy && event.target === event.currentTarget && setModal('')}>
+          <form className={`modal${['expense', 'expense-edit'].includes(modal) ? ' expense-modal' : ''}`} onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'recurring' ? 'Create recurring expense' : modal === 'recurring-edit' ? 'Edit recurring expense' : modal === 'recurring-confirm' ? 'Confirm recurring amount' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
-              <button type="button" className="close" aria-label="Close" onClick={() => setModal('')}><X size={18} /></button>
+              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-edit' ? 'Edit Expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'recurring' ? 'Create recurring expense' : modal === 'recurring-edit' ? 'Edit recurring expense' : modal === 'recurring-confirm' ? 'Confirm recurring amount' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
+              <button type="button" className="close" aria-label="Close" disabled={busy} onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
             {modal === 'person' && (
@@ -3335,25 +3412,29 @@ function App() {
               </>
             )}
 
-            {modal === 'expense' && (
+            {(modal === 'expense' || modal === 'expense-edit') && (
               <>
-                <label>What was it for?<input required name="title" maxLength="255" placeholder="Enter an expense name" /></label>
+                <fieldset className="expense-fields" disabled={busy}>
+                <label>What was it for?<input required name="title" maxLength="255" placeholder="Enter an expense name" defaultValue={modal === 'expense-edit' ? expenseToEdit?.title || '' : ''} /></label>
                 <div className="form-row">
                 <label>Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" value={expenseSplitMethod === 'itemwise' ? expenseItemwiseDisplayTotal : expenseTotalInput} onChange={event => setExpenseTotalInput(event.target.value)} readOnly={expenseSplitMethod === 'itemwise'} disabled={!Number.isFinite(exchangeRate)} required /></label>
-                  <label>Category<select name="category">{expenseCategories.map(category => <option key={category}>{category}</option>)}</select></label>
+                  <label>Category<select name="category" defaultValue={modal === 'expense-edit' ? expenseToEdit?.category || 'Other' : 'Food & Dining'}>{[...new Set([...expenseCategories, ...(modal === 'expense-edit' ? [expenseToEdit?.category || 'Other'] : [])])].map(category => <option key={category}>{category}</option>)}</select></label>
                 </div>
                 <label>Group<select name="groupId" required value={expenseGroupId} onChange={event => {
                   const nextGroupId = Number(event.target.value)
                   const nextGroup = groups.find(group => group.id === nextGroupId)
                   setExpenseGroupId(nextGroupId)
                   setExpenseParticipantIds((nextGroup?.members || []).map(person => person.id))
+                  setExpensePaidBy(nextGroup?.members?.some(person => person.id === data.currentUserId)
+                    ? data.currentUserId
+                    : nextGroup?.members?.[0]?.id || '')
                   const nextMemberIds = new Set((nextGroup?.members || []).map(person => person.id))
                   setExpenseItems(current => current.map(item => ({
                     ...item,
                     participantIds: item.participantIds.filter(personId => nextMemberIds.has(personId)),
                   })))
-                }}><option value="" disabled>Select a group</option>{groups.filter(group => group.members?.length).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
-                <label key={selectedExpenseGroup?.id}>Paid by<select name="paidBy" required defaultValue={selectedExpenseGroup?.members?.some(person => person.id === data.currentUserId) ? data.currentUserId : selectedExpenseGroup?.members?.[0]?.id || ''}>{(selectedExpenseGroup?.members || []).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
+                }} disabled={modal === 'expense-edit'}><option value="" disabled>Select a group</option>{groups.filter(group => group.members?.length).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
+                <label key={selectedExpenseGroup?.id}>Paid by<select name="paidBy" required value={expensePaidBy} onChange={event => setExpensePaidBy(Number(event.target.value))}>{(selectedExpenseGroup?.members || []).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
                 <label>Split method<select value={expenseSplitMethod} onChange={event => setExpenseSplitMethod(event.target.value)}><option value="equal">Split equally</option><option value="exact">Exact amounts</option><option value="percentage">Percentage</option><option value="shares">Shares</option><option value="itemwise">Item-wise</option></select></label>
                 {expenseSplitMethod !== 'itemwise' && <fieldset className="participant-field">
                   <legend>{expenseSplitMethod === 'exact' ? 'Participants and exact amounts' : expenseSplitMethod === 'percentage' ? 'Participants and percentages' : expenseSplitMethod === 'shares' ? 'Participants and share counts' : 'Split equally between'}</legend>
@@ -3508,6 +3589,7 @@ function App() {
                     {currency !== 'INR' && <p className="form-hint">Item prices are converted to INR for storage and all allocations use INR cents.</p>}
                   </div>
                 </section>}
+                </fieldset>
               </>
             )}
 
@@ -3593,8 +3675,8 @@ function App() {
             )}
 
             {!(modal === 'invite' && manualInviteLink) && (
-              <button className="button button-dark modal-submit" disabled={busy || (modal === 'expense' && !expenseSplitValid)}>
-                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'expense-category' ? 'Save category' : modal === 'recurring' ? 'Create schedule' : modal === 'recurring-edit' ? 'Save schedule' : modal === 'recurring-confirm' ? 'Confirm & record expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
+              <button className="button button-dark modal-submit" disabled={busy || (['expense', 'expense-edit'].includes(modal) && !expenseSplitValid)}>
+                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'expense-edit' ? 'Save Changes' : modal === 'expense-category' ? 'Save category' : modal === 'recurring' ? 'Create schedule' : modal === 'recurring-edit' ? 'Save schedule' : modal === 'recurring-confirm' ? 'Confirm & record expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
                 <ArrowRight size={15} />
               </button>
             )}

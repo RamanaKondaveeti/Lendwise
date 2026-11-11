@@ -152,6 +152,7 @@
 .exact-allocation-summary p{margin:3px 0}
 .exact-allocation-error{color:#b43d3d;font-weight:700}
 .expense-modal{width:min(820px,100%);max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:22px 24px;gap:13px}
+.expense-fields{display:contents;min-width:0;margin:0;padding:0;border:0}
 .expense-modal .modal-top{position:sticky;top:-22px;z-index:2;margin:-22px -24px 0;padding:18px 24px 10px;background:var(--theme-surface,#fff)}
 .expense-modal .participant-field{min-width:0;padding:12px;border-color:var(--theme-border,#e5e8e1)}
 .expense-modal .participant-list{grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:10px}
