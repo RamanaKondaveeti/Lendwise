@@ -314,6 +314,68 @@ function CategoryDonutChart({ categories, total, formatMoney }) {
   )
 }
 
+function GroupAnalyticsDashboard({ analytics, loading, error, period, setPeriod, startDate, setStartDate, endDate, setEndDate, formatMoney, onRetry }) {
+  const trend = analytics?.monthlyTrend || []
+  const categories = analytics?.categoryStats || []
+  const members = analytics?.memberStats || []
+  const maxTrend = Math.max(1, ...trend.map(row => Number(row.totalAmount)))
+  const maxMember = Math.max(1, ...members.map(row => Number(row.totalPaid)))
+  const points = trend.map((row, index) => {
+    const x = trend.length < 2 ? 310 : 28 + index * (564 / (trend.length - 1))
+    const y = 124 - (Number(row.totalAmount) / maxTrend) * 100
+    return `${x},${y}`
+  }).join(' ')
+  const radius = 48
+  const circumference = 2 * Math.PI * radius
+  let offset = 0
+  return (
+    <section className="group-analytics" aria-label="Group analytics">
+      <div className="panel-heading screen-panel-heading">
+        <div><div className="section-title">Group analytics</div><div className="section-subtitle">Spending and contributions in INR base currency.</div></div>
+        <div className="group-analytics-filters">
+          <label><span className="sr-only">Analytics period</span><select value={period} onChange={event => setPeriod(event.target.value)}>
+            <option value="7d">Last 7 Days</option><option value="30d">Last 30 Days</option><option value="90d">Last 90 Days</option><option value="all">All Time</option><option value="custom">Custom Dates</option>
+          </select></label>
+          {period === 'custom' && <><label><span className="sr-only">Start date</span><input type="date" value={startDate} max={endDate || undefined} onChange={event => setStartDate(event.target.value)} /></label><label><span className="sr-only">End date</span><input type="date" value={endDate} min={startDate || undefined} onChange={event => setEndDate(event.target.value)} /></label></>}
+        </div>
+      </div>
+      {loading ? <div className="group-analytics-loading" role="status"><LoaderCircle className="loading-icon" size={20} />Loading group analytics…</div>
+        : error ? <div className="empty group-analytics-state" role="alert">{error}<button type="button" className="button button-light" onClick={onRetry}>Retry</button></div>
+          : <>
+            <div className="group-analytics-summary">
+              {[
+                ['Total Group Spending', formatMoney(analytics?.summary.totalExpenses || 0)],
+                ['Expense Count', analytics?.summary.expenseCount ?? 0],
+                ['Average Expense', formatMoney(analytics?.summary.averageExpense || 0)],
+                ['Active Members', `${analytics?.summary.activeMembers || 0} / ${analytics?.summary.totalMembers || 0}`],
+              ].map(([label, value]) => <article className="analytics-stat" key={label}><span>{label}</span><b>{value}</b></article>)}
+            </div>
+            {!analytics?.summary.expenseCount ? <div className="empty group-analytics-state">No expenses for this group and date range.</div> : <>
+              <div className="group-analytics-charts">
+                <article className="analytics-chart-card"><div className="analytics-chart-heading"><b>Monthly Spending Trend</b><span>INR</span></div>
+                  {trend.length ? <svg className="group-trend-chart" viewBox="0 0 620 165" role="img" aria-label="Monthly spending trend">
+                    {[0, 1, 2, 3].map(line => <line key={line} x1="24" x2="596" y1={24 + line * 32} y2={24 + line * 32} className="group-chart-gridline" />)}
+                    {trend.length > 1 && <polyline points={points} className="group-trend-line" />}
+                    {trend.map((row, index) => { const x = trend.length < 2 ? 310 : 28 + index * (564 / (trend.length - 1)); const y = 124 - (Number(row.totalAmount) / maxTrend) * 100; return <g key={row.month}><circle cx={x} cy={y} r="4" className="group-trend-point"><title>{row.month}: {formatMoney(row.totalAmount)}</title></circle><text x={x} y="151" textAnchor="middle">{row.month}</text></g> })}
+                  </svg> : <div className="analytics-empty">No monthly data.</div>}
+                </article>
+                <article className="analytics-chart-card"><div className="analytics-chart-heading"><b>Category Spending Breakdown</b><span>{categories.length} categories</span></div>
+                  <div className="analytics-donut-layout"><svg className="analytics-donut" viewBox="0 0 160 160" role="img" aria-label="Category spending breakdown"><circle cx="80" cy="80" r={radius} className="analytics-donut-track" />{categories.map((row, index) => { const length = Number(row.percentage) / 100 * circumference; const currentOffset = offset; offset += length; return <circle key={row.category} cx="80" cy="80" r={radius} stroke={chartColors[index % chartColors.length]} strokeDasharray={`${length} ${circumference - length}`} strokeDashoffset={-currentOffset} className="analytics-donut-slice"><title>{row.category}: {formatMoney(row.totalAmount)} ({Number(row.percentage).toFixed(1)}%)</title></circle> })}<text x="80" y="77" className="analytics-donut-total">{categories.length}</text><text x="80" y="94" className="analytics-donut-caption">categories</text></svg>
+                    <div className="analytics-legend">{categories.map((row, index) => <div className="analytics-legend-row" key={row.category}><span className="analytics-legend-name"><i style={{ background: chartColors[index % chartColors.length] }} />{row.category}</span><b>{formatMoney(row.totalAmount)}</b></div>)}</div>
+                  </div>
+                </article>
+                <article className="analytics-chart-card group-member-chart-card"><div className="analytics-chart-heading"><b>Member-wise Spending Comparison</b><span>Paid amounts</span></div>
+                  {members.length ? <div className="group-member-bars">{members.map(row => <div className="group-member-bar-row" key={row.memberId}><span title={row.memberName}>{row.memberName}</span><i><b style={{ width: `${Math.min(100, Number(row.totalPaid) / maxMember * 100)}%` }} /></i><strong>{formatMoney(row.totalPaid)}</strong></div>)}</div> : <div className="analytics-empty">No group members.</div>}
+                </article>
+              </div>
+              <article className="analytics-chart-card group-analytics-table-card"><div className="analytics-chart-heading"><b>Member Contribution</b><span>{members.length} members</span></div><div className="group-analytics-table-scroll"><table className="report-table"><thead><tr><th>Member</th><th>Paid</th><th>Share</th><th>Net Contribution</th><th>Expense Count</th></tr></thead><tbody>{members.map(row => <tr key={row.memberId}><td>{row.memberName}</td><td>{formatMoney(row.totalPaid)}</td><td>{formatMoney(row.totalShare)}</td><td>{formatMoney(row.netContribution)}</td><td>{row.expenseCount}</td></tr>)}</tbody></table></div></article>
+              <article className="analytics-chart-card group-analytics-table-card"><div className="analytics-chart-heading"><b>Top 10 Expenses</b><span>Highest amounts</span></div><div className="group-analytics-table-scroll"><table className="report-table"><thead><tr><th>Expense</th><th>Category</th><th>Paid by</th><th>Amount</th><th>Date</th></tr></thead><tbody>{(analytics?.topExpenses || []).map(row => <tr key={row.expenseId}><td>{row.title}</td><td>{row.category}</td><td>{row.paidBy}</td><td>{formatMoney(row.amount)}</td><td>{date(row.createdAt)}</td></tr>)}</tbody></table></div></article>
+            </>}
+          </>}
+    </section>
+  )
+}
+
 function BudgetForm({ budget, groups, categories, currency, exchangeRate, onSubmit, onCancel, busy }) {
   const [type, setType] = useState(budget?.budget_type || 'personal')
   const thresholds = budget?.alert_thresholds
@@ -775,6 +837,13 @@ function App() {
   const [activity, setActivity] = useState([])
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityLoaded, setActivityLoaded] = useState(false)
+  const [groupAnalytics, setGroupAnalytics] = useState(null)
+  const [groupAnalyticsLoading, setGroupAnalyticsLoading] = useState(false)
+  const [groupAnalyticsError, setGroupAnalyticsError] = useState('')
+  const [groupAnalyticsPeriod, setGroupAnalyticsPeriod] = useState('30d')
+  const [groupAnalyticsStartDate, setGroupAnalyticsStartDate] = useState('')
+  const [groupAnalyticsEndDate, setGroupAnalyticsEndDate] = useState('')
+  const [groupAnalyticsRetry, setGroupAnalyticsRetry] = useState(0)
   const [selectedReportType, setSelectedReportType] = useState('expense')
   const [reportFilters, setReportFilters] = useState({
     startDate: `${new Date().getFullYear()}-01-01`,
@@ -1127,6 +1196,26 @@ function App() {
       })
     return () => { active = false }
   }, [tab, selectedGroupId, reloadKey, showVoidedExpenses])
+
+  useEffect(() => {
+    if (!authUser || tab !== 'Group' || !selectedGroupId) return undefined
+    let active = true
+    const params = new URLSearchParams()
+    if (groupAnalyticsPeriod === 'custom') {
+      if (groupAnalyticsStartDate) params.set('startDate', groupAnalyticsStartDate)
+      if (groupAnalyticsEndDate) params.set('endDate', groupAnalyticsEndDate)
+    } else {
+      params.set('period', groupAnalyticsPeriod)
+    }
+    setGroupAnalyticsLoading(true)
+    setGroupAnalyticsError('')
+    setGroupAnalytics(null)
+    request(`/api/groups/${selectedGroupId}/analytics?${params.toString()}`)
+      .then(result => { if (active) setGroupAnalytics(result) })
+      .catch(error => { if (active) setGroupAnalyticsError(error.message) })
+      .finally(() => { if (active) setGroupAnalyticsLoading(false) })
+    return () => { active = false }
+  }, [authUser?.id, tab, selectedGroupId, groupAnalyticsPeriod, groupAnalyticsStartDate, groupAnalyticsEndDate, groupAnalyticsRetry, reloadKey])
 
   useEffect(() => {
     if (!authUser || (tab !== 'Budgets' && tab !== 'Overview')) return undefined
@@ -3279,6 +3368,22 @@ function App() {
                   <div className="empty">No users in this group yet. Manage members to add users before recording expenses.</div>
                 )}
               </section>
+              <GroupAnalyticsDashboard
+                analytics={groupAnalytics}
+                loading={groupAnalyticsLoading}
+                error={groupAnalyticsError}
+                period={groupAnalyticsPeriod}
+                setPeriod={value => {
+                  setGroupAnalyticsPeriod(value)
+                  if (value !== 'custom') { setGroupAnalyticsStartDate(''); setGroupAnalyticsEndDate('') }
+                }}
+                startDate={groupAnalyticsStartDate}
+                setStartDate={setGroupAnalyticsStartDate}
+                endDate={groupAnalyticsEndDate}
+                setEndDate={setGroupAnalyticsEndDate}
+                formatMoney={formatMoney}
+                onRetry={() => setGroupAnalyticsRetry(value => value + 1)}
+              />
               </>
             )}
             <section className="panel screen-panel activity-screen">

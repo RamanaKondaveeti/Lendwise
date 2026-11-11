@@ -1086,3 +1086,11 @@ html[data-theme="dark"] .app :is(.search input, .range-select select, .monthly-s
   font-style: normal;
   font-weight: 700;
 }
+html[data-theme="dark"] .app .group-analytics .analytics-stat{border-color:#304239;background:#202c25}
+html[data-theme="dark"] .app .group-analytics .analytics-stat span,html[data-theme="dark"] .app .group-member-bar-row{color:#a4b4a8}
+html[data-theme="dark"] .app .group-analytics .analytics-stat b,html[data-theme="dark"] .app .group-member-bar-row>strong{color:#e5eee6}
+html[data-theme="dark"] .app .group-analytics-filters :is(select,input){border-color:#3b5144;background:#202c25;color:#e5eee6}
+html[data-theme="dark"] .app .group-chart-gridline{stroke:#35463b}
+html[data-theme="dark"] .app .group-trend-chart text{fill:#9cac9f}
+html[data-theme="dark"] .app .group-trend-point{stroke:#202c25}
+html[data-theme="dark"] .app .group-member-bar-row>i{background:#35463b}
