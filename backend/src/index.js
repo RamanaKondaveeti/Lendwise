@@ -30,6 +30,7 @@ const {
   periodRanges,
   validateBudgetInput,
 } = require('./budgets');
+const { buildGroupAnalyticsFilter } = require('./group-analytics');
 const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
@@ -3441,6 +3442,124 @@ app.post('/api/expenses', async (req, res) => {
     res.status(500).json({ error: 'Could not save this expense.' });
   } finally {
     connection?.release();
+  }
+});
+
+app.get('/api/groups/:groupId/analytics', async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  if (!Number.isInteger(groupId) || groupId <= 0) {
+    return res.status(400).json({ error: 'Provide a valid group ID.' });
+  }
+  let filter;
+  try {
+    filter = buildGroupAnalyticsFilter(req.query);
+  } catch (_error) {
+    return res.status(400).json({ error: 'Provide a valid period and date range.' });
+  }
+
+  try {
+    const [groups] = await pool.execute(
+      'SELECT id FROM `groups` WHERE id = ? AND workspace_id = ?',
+      [groupId, req.account.workspace_id]
+    );
+    if (!groups.length) return res.status(404).json({ error: 'Group not found.' });
+
+    const queryParams = [...filter.parameters];
+    const [summaryRows, memberRows, categoryRows, trendRows, topRows] = await Promise.all([
+      pool.execute(
+        `SELECT COALESCE(SUM(e.amount), 0) AS totalExpenses, COUNT(*) AS expenseCount
+         FROM expenses e WHERE ${filter.where}`,
+        queryParams
+      ),
+      pool.execute(
+        `SELECT p.id AS memberId, p.name AS memberName,
+                COALESCE(paid.totalPaid, 0) AS totalPaid,
+                COALESCE(shared.totalShare, 0) AS totalShare,
+                COALESCE(paid.totalPaid, 0) - COALESCE(shared.totalShare, 0) AS netContribution,
+                COALESCE(activity.expenseCount, 0) AS expenseCount
+         FROM group_members gm
+         JOIN people p ON p.id = gm.person_id
+         LEFT JOIN (
+           SELECT e.paid_by AS person_id, SUM(e.amount) AS totalPaid, COUNT(*) AS expenseCount
+           FROM expenses e WHERE ${filter.where} GROUP BY e.paid_by
+         ) paid ON paid.person_id = gm.person_id
+         LEFT JOIN (
+           SELECT s.person_id, SUM(s.amount) AS totalShare
+           FROM splits s JOIN expenses e ON e.id = s.expense_id
+           WHERE ${filter.where} GROUP BY s.person_id
+         ) shared ON shared.person_id = gm.person_id
+         LEFT JOIN (
+           SELECT involved.person_id, COUNT(*) AS expenseCount
+           FROM (
+             SELECT e.id, e.paid_by AS person_id FROM expenses e WHERE ${filter.where}
+             UNION
+             SELECT s.expense_id AS id, s.person_id FROM splits s JOIN expenses e ON e.id = s.expense_id
+             WHERE ${filter.where}
+           ) involved GROUP BY involved.person_id
+         ) activity ON activity.person_id = gm.person_id
+         WHERE gm.group_id = ? AND p.workspace_id = ? ORDER BY p.name, p.id`,
+        [...queryParams, ...queryParams, ...queryParams, ...queryParams, groupId, req.account.workspace_id]
+      ),
+      pool.execute(
+        `SELECT e.category, SUM(e.amount) AS totalAmount, COUNT(*) AS expenseCount
+         FROM expenses e WHERE ${filter.where} GROUP BY e.category ORDER BY totalAmount DESC, e.category`,
+        queryParams
+      ),
+      pool.execute(
+        `SELECT DATE_FORMAT(e.created_at, '%Y-%m') AS month, SUM(e.amount) AS totalAmount, COUNT(*) AS expenseCount
+         FROM expenses e WHERE ${filter.where} GROUP BY DATE_FORMAT(e.created_at, '%Y-%m') ORDER BY month`,
+        queryParams
+      ),
+      pool.execute(
+        `SELECT e.id AS expenseId, e.title, e.amount, e.category, p.name AS paidBy, e.created_at AS createdAt
+         FROM expenses e JOIN people p ON p.id = e.paid_by
+         WHERE ${filter.where} ORDER BY e.amount DESC, e.created_at DESC, e.id DESC LIMIT 10`,
+        queryParams
+      ),
+    ]);
+    const summary = summaryRows[0][0];
+    const totalExpenses = Number(summary.totalExpenses || 0);
+    const expenseCount = Number(summary.expenseCount || 0);
+    const memberStats = memberRows[0].map(row => ({
+      memberId: row.memberId,
+      memberName: row.memberName,
+      totalPaid: Number(row.totalPaid),
+      totalShare: Number(row.totalShare),
+      netContribution: Number(row.netContribution),
+      expenseCount: Number(row.expenseCount),
+    }));
+    res.json({
+      summary: {
+        totalExpenses,
+        expenseCount,
+        averageExpense: expenseCount ? totalExpenses / expenseCount : 0,
+        totalMembers: memberStats.length,
+        activeMembers: memberStats.filter(member => member.expenseCount > 0 || member.totalShare > 0).length,
+      },
+      memberStats,
+      categoryStats: categoryRows[0].map(row => ({
+        category: row.category,
+        totalAmount: Number(row.totalAmount),
+        expenseCount: Number(row.expenseCount),
+        percentage: totalExpenses ? Number(row.totalAmount) / totalExpenses * 100 : 0,
+      })),
+      monthlyTrend: trendRows[0].map(row => ({
+        month: row.month,
+        totalAmount: Number(row.totalAmount),
+        expenseCount: Number(row.expenseCount),
+      })),
+      topExpenses: topRows[0].map(row => ({
+        expenseId: row.expenseId,
+        title: row.title,
+        amount: Number(row.amount),
+        category: row.category,
+        paidBy: row.paidBy,
+        createdAt: row.createdAt,
+      })),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load group analytics.' });
   }
 });
 
