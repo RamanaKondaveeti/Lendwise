@@ -7,6 +7,8 @@ const { promisify } = require('util');
 const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
+const multer = require('multer');
+const { TextractClient, AnalyzeExpenseCommand } = require('@aws-sdk/client-textract');
 const { calculateMinimalSettlements, validateGroupSettlement } = require('./settlements');
 const { allocateExpenseSplits, allocateItemWiseSplits } = require('./expense-splits');
 const { expenseVoidRejection } = require('./expense-void');
@@ -32,6 +34,7 @@ const {
 } = require('./budgets');
 const { buildGroupAnalyticsFilter } = require('./group-analytics');
 const { validTripInput } = require('./trips');
+const { maxReceiptBytes, prepareReceiptForTextract, scanReceipt, supportedTypes, validateReceiptFile } = require('./receipt-ocr');
 const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
@@ -644,6 +647,8 @@ async function init() {
   await ensureColumn('expenses', 'category', "VARCHAR(100) NOT NULL DEFAULT 'Other'");
   await ensureColumn('expenses', 'split_method', "ENUM('equal', 'exact', 'percentage', 'shares', 'itemwise') NOT NULL DEFAULT 'equal'");
   await ensureColumn('expenses', 'trip_id', 'INT NULL');
+  await ensureColumn('expenses', 'receipt_date', 'DATE NULL');
+  await ensureColumn('expenses', 'tax_amount', 'DECIMAL(12, 2) NULL');
   const [tripIndex] = await pool.query("SHOW INDEX FROM expenses WHERE Key_name = 'idx_expenses_trip'");
   if (!tripIndex.length) await pool.query('ALTER TABLE expenses ADD INDEX idx_expenses_trip (trip_id)');
   const [tripForeignKey] = await pool.query(
@@ -976,6 +981,64 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
     workspaceId: req.account.workspace_id,
     workspaceName: req.account.workspace_name
   });
+});
+
+const receiptUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: maxReceiptBytes, files: 1, fields: 4, parts: 5 },
+  fileFilter: (_req, file, callback) => callback(
+    supportedTypes.has(file.mimetype) ? null : new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'receipt')
+  ),
+});
+const receiptScanRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: req => `account:${req.account?.id || req.ip}`,
+  message: { error: 'Receipt scan limit reached. Try again in 15 minutes.' },
+});
+let textractClient;
+function getTextractClient() {
+  const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+  if (!region) return null;
+  if (!textractClient) textractClient = new TextractClient({ region });
+  return textractClient;
+}
+
+app.post('/api/receipts/scan', receiptScanRateLimit, (req, res, next) => {
+  receiptUpload.single('receipt')(req, res, error => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'Receipt file is too large. Maximum size is 8 MB.' });
+    }
+    if (error instanceof multer.MulterError) return res.status(415).json({ error: 'Upload one JPEG, PNG, or WebP receipt.' });
+    return next(error);
+  });
+}, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Choose a receipt image to scan.' });
+  try {
+    validateReceiptFile(req.file);
+  } catch (error) {
+    return res.status(415).json({ error: error.message });
+  }
+  const client = getTextractClient();
+  if (!client) return res.status(503).json({ error: 'Receipt scanning is not configured. Contact your administrator.' });
+  let documentBytes;
+  try {
+    documentBytes = await prepareReceiptForTextract(req.file);
+  } catch (error) {
+    return res.status(error instanceof RangeError ? 413 : 415).json({
+      error: error instanceof RangeError ? 'The converted receipt image is too large to scan.' : 'The uploaded file is not a valid supported image.',
+    });
+  }
+  try {
+    const extraction = await scanReceipt(documentBytes, client, AnalyzeExpenseCommand);
+    return res.json(extraction);
+  } catch (error) {
+    console.error(`Receipt OCR failed (${error?.name || 'provider error'}).`);
+    return res.status(502).json({ error: 'Receipt scanning failed. Check the image and try again.' });
+  }
 });
 
 async function findAccessibleBudget(budgetId, account, executor = pool) {
@@ -2346,7 +2409,7 @@ app.get('/api/expenses', async (req, res) => {
       if (!trip || (groupId !== null && trip.group_id !== groupId)) return res.status(404).json({ error: 'Trip not found.' });
     }
     const expenses = await q(
-      `SELECT e.id, e.group_id, e.trip_id, t.name AS trip_name, e.title, e.amount, e.category, e.split_method, e.created_at,
+      `SELECT e.id, e.group_id, e.trip_id, e.receipt_date, e.tax_amount, t.name AS trip_name, e.title, e.amount, e.category, e.split_method, e.created_at,
               e.voided_at, e.voided_by, voider.name AS voided_by_name,
               p.id AS payer_id, p.name AS payer, p.initials, p.color,
               g.name AS group_name
@@ -2800,6 +2863,9 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
       typeof amount !== 'number' || !Number.isFinite(amount) ||
       !Number.isSafeInteger(amountCents) || amountCents <= 0 || amountCents > 999999999999 ||
       !Number.isInteger(Number(paidBy)) || Number(paidBy) <= 0 ||
+      (body.receiptDate !== undefined && body.receiptDate !== null && body.receiptDate !== '' && !isValidReportDate(body.receiptDate)) ||
+      (body.taxAmount !== undefined && body.taxAmount !== null && body.taxAmount !== '' &&
+        (!Number.isFinite(Number(body.taxAmount)) || Number(body.taxAmount) < 0 || Number(body.taxAmount) > 9999999999.99)) ||
       !['equal', 'exact', 'percentage', 'shares', 'itemwise'].includes(splitMethod)) {
     return res.status(400).json({ error: 'Provide a valid title, positive amount, category, payer, and split method.' });
   }
@@ -2821,7 +2887,7 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
     await connection.beginTransaction();
     inTransaction = true;
     const [expenses] = await connection.execute(
-      `SELECT e.id, e.group_id, e.trip_id, e.paid_by, e.voided_at, g.name AS group_name
+      `SELECT e.id, e.group_id, e.trip_id, e.receipt_date, e.tax_amount, e.paid_by, e.voided_at, g.name AS group_name
        FROM expenses e JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
        WHERE e.id = ? FOR UPDATE`,
       [req.account.workspace_id, expenseId]
@@ -2900,8 +2966,10 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
     }
 
     await connection.execute(
-      'UPDATE expenses SET title = ?, amount = ?, category = ?, paid_by = ?, split_method = ?, trip_id = ? WHERE id = ?',
-      [title.trim(), amountCents / 100, category.trim(), normalizedPaidBy, splitMethod, tripId, expenseId]
+      'UPDATE expenses SET title = ?, amount = ?, category = ?, paid_by = ?, split_method = ?, trip_id = ?, receipt_date = ?, tax_amount = ? WHERE id = ?',
+      [title.trim(), amountCents / 100, category.trim(), normalizedPaidBy, splitMethod, tripId,
+        body.receiptDate === undefined ? current.receipt_date : body.receiptDate || null,
+        body.taxAmount === undefined ? current.tax_amount : body.taxAmount, expenseId]
     );
     await connection.execute('DELETE FROM splits WHERE expense_id = ?', [expenseId]);
     for (const row of allocationDetails.allocations) {
@@ -3376,6 +3444,8 @@ app.delete('/api/people/:id', async (req, res) => {
 app.post('/api/expenses', async (req, res) => {
   const { groupId, title, amount, paidBy, category = 'Other', participants } = req.body || {};
   const requestedTripId = req.body?.tripId === undefined || req.body.tripId === null || req.body.tripId === '' ? null : Number(req.body.tripId);
+  const receiptDate = req.body?.receiptDate || null;
+  const taxAmount = req.body?.taxAmount === undefined || req.body.taxAmount === null || req.body.taxAmount === '' ? null : Number(req.body.taxAmount);
   const splitMethod = req.body?.splitMethod ?? 'equal';
   const normalizedGroupId = Number(groupId);
   const normalizedPaidBy = Number(paidBy);
@@ -3400,6 +3470,8 @@ app.post('/api/expenses', async (req, res) => {
       amountCents <= 0 || amountCents > 999999999999 ||
       !Number.isInteger(normalizedPaidBy) || normalizedPaidBy <= 0 ||
       (requestedTripId !== null && (!Number.isInteger(requestedTripId) || requestedTripId <= 0)) ||
+      (receiptDate !== null && !isValidReportDate(receiptDate)) ||
+      (taxAmount !== null && (!Number.isFinite(taxAmount) || taxAmount < 0 || taxAmount > 9999999999.99 || !Number.isSafeInteger(Math.round(taxAmount * 100))) ) ||
       (splitMethod !== 'itemwise' && !Array.isArray(participants)) || !participantIds.length) {
     return res.status(400).json({ error: 'Add a title, positive amount, group, and participants.' });
   }
@@ -3437,8 +3509,8 @@ app.post('/api/expenses', async (req, res) => {
     await connection.beginTransaction();
     inTransaction = true;
     const [expense] = await connection.execute(
-      'INSERT INTO expenses(group_id, trip_id, title, amount, paid_by, category, split_method) VALUES(?, ?, ?, ?, ?, ?, ?)',
-      [normalizedGroupId, requestedTripId, title.trim(), amountCents / 100, normalizedPaidBy, category, splitMethod]
+      'INSERT INTO expenses(group_id, trip_id, receipt_date, tax_amount, title, amount, paid_by, category, split_method) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [normalizedGroupId, requestedTripId, receiptDate, taxAmount, title.trim(), amountCents / 100, normalizedPaidBy, category, splitMethod]
     );
     for (const { personId, cents } of allocations) {
       await connection.execute(

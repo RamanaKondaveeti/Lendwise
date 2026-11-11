@@ -77,3 +77,7 @@ For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME` (normally `lend
 - Define and implement customer data export/deletion and retention procedures before accepting customer data.
 
 Registered account display names are globally searchable so people can invite existing users. Search results reveal names only; email addresses are sent only as part of invitations. Accepting an invite adds a workspace membership without moving or merging the user's existing workspace data.
+
+## Receipt OCR
+
+Receipt scanning uses AWS Textract AnalyzeExpense. Set `AWS_REGION` and configure AWS credentials through the AWS SDK default credential chain (IAM role is preferred in production; `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` are supported). Scanning accepts JPEG, PNG, and WebP images up to 8 MB; WebP is converted to PNG in memory. PDF is not supported by this synchronous endpoint. Images are never written to disk or returned to the browser. If `AWS_REGION` is unset, the API returns a configuration error while normal expense entry remains available.

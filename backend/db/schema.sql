@@ -172,6 +172,8 @@ CREATE TABLE IF NOT EXISTS expenses (
   id INT AUTO_INCREMENT PRIMARY KEY,
   group_id INT NOT NULL,
   trip_id INT NULL,
+  receipt_date DATE NULL,
+  tax_amount DECIMAL(12, 2) NULL,
   title VARCHAR(255) NOT NULL,
   amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
   paid_by INT NOT NULL,

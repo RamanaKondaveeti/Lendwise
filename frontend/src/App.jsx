@@ -199,6 +199,16 @@ const date = value => new Intl.DateTimeFormat('en-US', {
 const dateInputValue = value => value instanceof Date
   ? `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
   : String(value || '').slice(0, 10)
+const suggestReceiptCategory = receipt => {
+  const text = `${receipt?.merchant || ''} ${(receipt?.items || []).map(item => item.description || '').join(' ')}`.toLowerCase()
+  if (/grocery|supermarket|vegetable|produce|market/.test(text)) return 'Groceries'
+  if (/restaurant|cafe|coffee|diner|food|pizza|meal/.test(text)) return 'Food & Dining'
+  if (/fuel|petrol|taxi|uber|flight|airline|hotel|resort|travel|railway/.test(text)) return 'Travel'
+  if (/pharmacy|medical|clinic|hospital/.test(text)) return 'Healthcare'
+  if (/electricity|water bill|internet|utility/.test(text)) return 'Utilities & Bills'
+  if (/cinema|movie|theatre|concert/.test(text)) return 'Entertainment'
+  return 'Other'
+}
 const notificationTimestamp = value => new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
@@ -824,6 +834,16 @@ function App() {
   const [tripAnalyticsError, setTripAnalyticsError] = useState('')
   const [tripAnalyticsLoading, setTripAnalyticsLoading] = useState(false)
   const [expenseTripId, setExpenseTripId] = useState('')
+  const [expenseTitle, setExpenseTitle] = useState('')
+  const [expenseCategory, setExpenseCategory] = useState('Food & Dining')
+  const [receiptExtraction, setReceiptExtraction] = useState(null)
+  const [receiptItems, setReceiptItems] = useState([])
+  const [receiptScanning, setReceiptScanning] = useState(false)
+  const [receiptUploadProgress, setReceiptUploadProgress] = useState(0)
+  const [receiptError, setReceiptError] = useState('')
+  const [receiptDate, setReceiptDate] = useState('')
+  const [receiptTax, setReceiptTax] = useState('')
+  const receiptInputRef = useRef(null)
   const [focusExpenseId, setFocusExpenseId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
   const [expensePaidBy, setExpensePaidBy] = useState('')
@@ -1579,6 +1599,9 @@ function App() {
       : groups.find(group => group.members?.length)
     setExpenseGroupId(defaultGroup?.id || '')
     setExpenseTripId('')
+    setExpenseTitle('')
+    setExpenseCategory('Food & Dining')
+    setReceiptExtraction(null); setReceiptItems([]); setReceiptError(''); setReceiptDate(''); setReceiptTax('')
     setExpensePaidBy(defaultGroup?.members?.some(person => person.id === data.currentUserId)
       ? data.currentUserId
       : defaultGroup?.members?.[0]?.id || '')
@@ -1599,6 +1622,11 @@ function App() {
     setExpenseToEdit(expense)
     setExpenseGroupId(Number(expense.group_id))
     setExpenseTripId(expense.trip_id ? String(expense.trip_id) : '')
+    setExpenseTitle(expense.title || '')
+    setExpenseCategory(expense.category || 'Other')
+    setReceiptExtraction(null); setReceiptItems([]); setReceiptError('')
+    setReceiptDate(expense.receipt_date ? dateInputValue(expense.receipt_date) : '')
+    setReceiptTax(expense.tax_amount === null || expense.tax_amount === undefined ? '' : String(expense.tax_amount))
     setExpensePaidBy(Number(expense.payer_id))
     setExpenseSplitMethod(expense.split_method || 'equal')
     setExpenseParticipantIds(participants)
@@ -1636,6 +1664,35 @@ function App() {
       }
     }))
     setModal('expense-edit')
+  }
+
+  function scanReceiptFile(file) {
+    setReceiptError(''); setReceiptExtraction(null); setReceiptItems([])
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 8 * 1024 * 1024) {
+      setReceiptError('Choose a JPEG, PNG, or WebP image under 8 MB.')
+      return
+    }
+    const body = new FormData(); body.append('receipt', file)
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', '/api/receipts/scan'); xhr.withCredentials = true
+    xhr.upload.onprogress = event => { if (event.lengthComputable) setReceiptUploadProgress(Math.round(event.loaded / event.total * 100)) }
+    xhr.onload = () => {
+      setReceiptScanning(false)
+      let result
+      try { result = JSON.parse(xhr.responseText) } catch { result = {} }
+      if (xhr.status < 200 || xhr.status >= 300) { setReceiptError(result.error || 'Receipt scan failed. Try again.'); return }
+      setReceiptExtraction(result); setReceiptItems(result.items || [])
+      if (result.merchant) setExpenseTitle(result.merchant)
+      setExpenseCategory(suggestReceiptCategory(result))
+      if (result.total !== null && result.total !== undefined) setExpenseTotalInput(String(result.total))
+      setReceiptDate(result.receiptDate || '')
+      setReceiptTax(result.tax === null || result.tax === undefined ? '' : String(result.tax))
+    }
+    xhr.onerror = () => { setReceiptScanning(false); setReceiptError('Could not reach receipt scanning. Check your connection and retry.') }
+    xhr.onloadstart = () => { setReceiptScanning(true); setReceiptUploadProgress(0) }
+    xhr.onloadend = () => { setReceiptScanning(false) }
+    xhr.send(body)
   }
 
   function updateExpenseItem(index, update) {
@@ -2238,8 +2295,10 @@ function App() {
       payload = {
         groupId: modal === 'expense-edit' ? Number(expenseToEdit.group_id) : Number(form.get('groupId')),
         tripId: expenseTripId ? Number(expenseTripId) : null,
-        title: form.get('title'),
+        title: expenseTitle,
         amount: expenseSplitMethod === 'itemwise' ? expenseItemwiseTotalCents / 100 : toStoredAmount(form.get('amount')),
+        receiptDate: receiptDate || null,
+        taxAmount: receiptTax === '' ? null : toStoredAmount(receiptTax),
         paidBy: Number(form.get('paidBy')),
         category: form.get('category'),
         splitMethod: expenseSplitMethod,
@@ -3621,10 +3680,14 @@ function App() {
             {(modal === 'expense' || modal === 'expense-edit') && (
               <>
                 <fieldset className="expense-fields" disabled={busy}>
-                <label>What was it for?<input required name="title" maxLength="255" placeholder="Enter an expense name" defaultValue={modal === 'expense-edit' ? expenseToEdit?.title || '' : ''} /></label>
+                <label>What was it for?<input required name="title" maxLength="255" placeholder="Enter an expense name" value={expenseTitle} onChange={event => setExpenseTitle(event.target.value)} /></label>
+                <div className="receipt-scan-controls"><input ref={receiptInputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={event => { scanReceiptFile(event.target.files?.[0]); event.target.value = '' }} /><button type="button" className="button button-light" disabled={receiptScanning} onClick={() => receiptInputRef.current?.click()}><ReceiptText size={15} />{receiptScanning ? 'Scanning receipt…' : 'Scan Receipt'}</button><span>JPEG, PNG, WebP · up to 8 MB · no receipt is saved</span></div>
+                {receiptScanning && <div className="receipt-progress" role="status"><span>Uploading and reading receipt… {receiptUploadProgress}%</span><i><b style={{ width: `${receiptUploadProgress}%` }} /></i></div>}
+                {receiptError && <div className="receipt-error" role="alert">{receiptError}<button type="button" className="button button-light" onClick={() => receiptInputRef.current?.click()}>Retry</button></div>}
+                {receiptExtraction && <section className="receipt-review" aria-label="Review scanned receipt"><div className="receipt-review-heading"><b>Review receipt details</b><span>Check every value before saving the expense.</span></div><div className="form-row"><label>Receipt date<input type="date" value={receiptDate} onChange={event => setReceiptDate(event.target.value)} /></label><label>Tax amount ({currency})<input type="number" min="0" step="0.01" value={receiptTax} onChange={event => setReceiptTax(event.target.value)} /></label></div>{receiptExtraction.currency && receiptExtraction.currency !== currency && <p className="receipt-warning">Receipt currency is {receiptExtraction.currency}; the expense amount field is currently {currency}. Confirm the amount and currency before saving.</p>}{Object.entries(receiptExtraction.confidence || {}).filter(([, score]) => score !== null && score < 80).map(([key, score]) => <p className="receipt-warning" key={key}>Low confidence for {key} ({Math.round(score)}%). Please verify it.</p>)}<div className="receipt-review-heading"><b>Extracted items ({receiptItems.length})</b><button type="button" className="button button-light" onClick={() => setReceiptItems(items => [...items, { description: '', quantity: 1, unitPrice: 0, totalPrice: 0, confidence: null }])}>Add item</button></div>{receiptItems.map((item, index) => <div className="receipt-item-row" key={index}><input aria-label={`Item ${index + 1} description`} value={item.description || ''} placeholder="Description" onChange={event => setReceiptItems(rows => rows.map((row, rowIndex) => rowIndex === index ? { ...row, description: event.target.value } : row))} /><input aria-label={`Item ${index + 1} quantity`} type="number" min="0" step="0.01" value={item.quantity ?? ''} placeholder="Qty" onChange={event => setReceiptItems(rows => rows.map((row, rowIndex) => rowIndex === index ? { ...row, quantity: event.target.value === '' ? null : Number(event.target.value) } : row))} /><input aria-label={`Item ${index + 1} unit price`} type="number" min="0" step="0.01" value={item.unitPrice ?? ''} placeholder="Unit price" onChange={event => setReceiptItems(rows => rows.map((row, rowIndex) => rowIndex === index ? { ...row, unitPrice: event.target.value === '' ? null : Number(event.target.value) } : row))} /><input aria-label={`Item ${index + 1} total`} type="number" min="0" step="0.01" value={item.totalPrice ?? ''} placeholder="Total" onChange={event => setReceiptItems(rows => rows.map((row, rowIndex) => rowIndex === index ? { ...row, totalPrice: event.target.value === '' ? null : Number(event.target.value) } : row))} /><button type="button" aria-label={`Remove item ${index + 1}`} className="icon-button" onClick={() => setReceiptItems(rows => rows.filter((_, rowIndex) => rowIndex !== index))}><Trash2 size={15} /></button></div>)}{receiptItems.length > 0 && <button type="button" className="button button-light" onClick={() => { setExpenseSplitMethod('itemwise'); setExpenseItems(receiptItems.filter(item => item.description || item.totalPrice).map(item => ({ itemName: item.description || 'Item', quantity: String(item.quantity || 1), unitPrice: Number(item.unitPrice ?? (Number(item.totalPrice || 0) / Math.max(1, Number(item.quantity || 1)))).toFixed(2), allocationMethod: 'equal', participantIds: [...expenseParticipantIds], allocations: {} }))) }}>Use extracted items for item-wise split</button>}</section>}
                 <div className="form-row">
                 <label>Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" value={expenseSplitMethod === 'itemwise' ? expenseItemwiseDisplayTotal : expenseTotalInput} onChange={event => setExpenseTotalInput(event.target.value)} readOnly={expenseSplitMethod === 'itemwise'} disabled={!Number.isFinite(exchangeRate)} required /></label>
-                  <label>Category<select name="category" defaultValue={modal === 'expense-edit' ? expenseToEdit?.category || 'Other' : 'Food & Dining'}>{[...new Set([...expenseCategories, ...(modal === 'expense-edit' ? [expenseToEdit?.category || 'Other'] : [])])].map(category => <option key={category}>{category}</option>)}</select></label>
+                  <label>Category<select name="category" value={expenseCategory} onChange={event => setExpenseCategory(event.target.value)}>{[...new Set([...expenseCategories, ...(modal === 'expense-edit' ? [expenseToEdit?.category || 'Other'] : [])])].map(category => <option key={category}>{category}</option>)}</select></label>
                 </div>
                 <label>Group<select name="groupId" required value={expenseGroupId} onChange={event => {
                   const nextGroupId = Number(event.target.value)

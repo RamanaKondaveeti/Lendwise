@@ -1099,3 +1099,9 @@ html[data-theme="dark"] .app :is(.trip-card-open>b,.trip-card-open>strong,.trip-
 html[data-theme="dark"] .app :is(.trip-controls select,.trip-stat-row>i,.trip-progress){border-color:#3b5144;background:#202c25;color:#e5eee6}
 html[data-theme="dark"] .app .trip-status{background:#35463b;color:#c5d6c8}
 html[data-theme="dark"] .app .trip-expense-badge{background:#314637;color:#c2dfc5}
+html[data-theme="dark"] .app .receipt-review{border-color:#3b5144;background:#202c25}
+html[data-theme="dark"] .app .receipt-review-heading>b{color:#e5eee6}
+html[data-theme="dark"] .app .receipt-scan-controls>span,html[data-theme="dark"] .app .receipt-review-heading>span,html[data-theme="dark"] .app .receipt-progress{color:#a4b4a8}
+html[data-theme="dark"] .app .receipt-item-row input{border-color:#3b5144;background:#1c2821;color:#e5eee6}
+html[data-theme="dark"] .app :is(.receipt-warning,.receipt-error){border-color:#725c3c;background:#362f22;color:#e4cb99}
+html[data-theme="dark"] .app .receipt-progress>i{background:#35463b}
