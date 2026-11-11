@@ -685,6 +685,13 @@ button:disabled{cursor:not-allowed}
 .edit-category-button{display:grid;width:28px;height:28px;place-items:center;border:1px solid #e4ebe4;border-radius:6px;background:#fff;color:#6b816d}
 .edit-category-button:hover{border-color:#a9c5a8;background:#f3f8f2;color:#426a49}
 .activity-controls{flex-wrap:wrap;justify-content:flex-end}
+.activity-voided-toggle{display:flex;align-items:center;gap:6px;color:var(--theme-muted,#738076);font-size:11px;white-space:nowrap}
+.activity-voided-toggle input{accent-color:var(--theme-accent,#547a59)}
+.activity-row-voided{opacity:.72;background:var(--theme-card,#f7f8f5)}
+.voided-expense-badge{display:inline-flex;align-items:center;border:1px solid var(--theme-danger-border,#d9b8b8);border-radius:999px;padding:2px 6px;color:var(--theme-danger,#8b3e3e);font-size:8px;font-weight:800;letter-spacing:.06em}
+.void-expense-button{min-height:28px;padding:0 8px;border:1px solid var(--theme-danger-border,#e5caca);border-radius:6px;background:var(--theme-card,#fff);color:var(--theme-danger,#914646);font-size:10px;font-weight:700;cursor:pointer}
+.void-expense-button:hover:not(:disabled){background:var(--theme-danger-surface,#fff5f5);border-color:var(--theme-danger,#d8a7a7)}
+.void-expense-button:disabled{opacity:.6;cursor:wait}
 .activity-controls .range-select{max-width:170px}
 .activity-controls select{max-width:125px}
 @media(max-width:900px){

@@ -35,6 +35,7 @@ test('personal budgets calculate only the member share from splits', async () =>
   assert.equal(spent, 37.45);
   assert.match(query.sql, /SUM\(s\.amount\)/);
   assert.match(query.sql, /s\.person_id = \?/);
+  assert.match(query.sql, /e\.voided_at IS NULL/);
   assert.doesNotMatch(query.sql, /settlements/);
   assert.deepEqual(query.parameters, [4, 7, '2026-11-01 00:00:00', '2026-12-01 00:00:00']);
 });
@@ -43,15 +44,18 @@ test('group budgets calculate full expense amounts and category budgets filter t
   const noCategory = buildBudgetSpendQuery(groupBudget, range);
   assert.match(noCategory.sql, /SUM\(e\.amount\)/);
   assert.match(noCategory.sql, /e\.group_id = \?/);
+  assert.match(noCategory.sql, /e\.voided_at IS NULL/);
   assert.doesNotMatch(noCategory.sql, /splits/);
 
   const personalCategory = buildBudgetSpendQuery({ ...personalBudget, category: 'Food & Dining' }, range);
   assert.match(personalCategory.sql, /SUM\(s\.amount\)/);
   assert.match(personalCategory.sql, /e\.category = \?/);
+  assert.match(personalCategory.sql, /e\.voided_at IS NULL/);
   assert.equal(personalCategory.parameters.at(-1), 'Food & Dining');
   const groupCategory = buildBudgetSpendQuery({ ...groupBudget, category: 'Travel' }, range);
   assert.match(groupCategory.sql, /SUM\(e\.amount\)/);
   assert.match(groupCategory.sql, /e\.category = \?/);
+  assert.match(groupCategory.sql, /e\.voided_at IS NULL/);
   assert.equal(groupCategory.parameters.at(-1), 'Travel');
 });
 

@@ -14,7 +14,7 @@ function buildExpenseReportFilter({ workspaceId, groupId, memberId, category, st
       (startDate && endDate && startDate > endDate)) {
     throw new TypeError('Invalid report filters.');
   }
-  const conditions = ['g.workspace_id = ?'];
+  const conditions = ['g.workspace_id = ?', 'e.voided_at IS NULL'];
   const parameters = [Number(workspaceId)];
   if (groupId !== null) {
     conditions.push('e.group_id = ?');

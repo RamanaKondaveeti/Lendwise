@@ -9,6 +9,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const { calculateMinimalSettlements, validateGroupSettlement } = require('./settlements');
 const { allocateExpenseSplits, allocateItemWiseSplits } = require('./expense-splits');
+const { expenseVoidRejection } = require('./expense-void');
 const { createNotifications, reminderPeriodKey } = require('./notifications');
 const {
   buildExpenseReportFilter,
@@ -134,10 +135,10 @@ async function getWorkspaceBalances(workspaceId, executor = pool) {
             COALESCE((SELECT SUM(s.amount) FROM splits s
                       JOIN expenses e ON e.id = s.expense_id
                       JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = p.workspace_id
-                      WHERE s.person_id = p.id), 0)
+                      WHERE s.person_id = p.id AND e.voided_at IS NULL), 0)
             - COALESCE((SELECT SUM(e.amount) FROM expenses e
                         JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = p.workspace_id
-                        WHERE e.paid_by = p.id), 0)
+                        WHERE e.paid_by = p.id AND e.voided_at IS NULL), 0)
             + COALESCE((SELECT SUM(s.amount) FROM settlements s
                         JOIN people payer ON payer.id = s.payer_id AND payer.workspace_id = p.workspace_id
                         JOIN people payee ON payee.id = s.payee_id AND payee.workspace_id = p.workspace_id
@@ -161,35 +162,38 @@ async function getWorkspaceGroupBalances(workspaceId, executor = pool) {
      JOIN people p ON p.workspace_id = g.workspace_id
      LEFT JOIN (
        SELECT e.group_id, s.person_id, SUM(s.amount) AS amount
-       FROM splits s JOIN expenses e ON e.id = s.expense_id
+       FROM splits s JOIN expenses e ON e.id = s.expense_id AND e.voided_at IS NULL
        GROUP BY e.group_id, s.person_id
      ) split_totals ON split_totals.group_id = g.id AND split_totals.person_id = p.id
      LEFT JOIN (
        SELECT group_id, paid_by AS person_id, SUM(amount) AS amount
-       FROM expenses GROUP BY group_id, paid_by
+       FROM expenses WHERE voided_at IS NULL GROUP BY group_id, paid_by
      ) paid_totals ON paid_totals.group_id = g.id AND paid_totals.person_id = p.id
      LEFT JOIN (
        SELECT COALESCE(st.group_id, e.group_id) AS group_id, st.payee_id AS person_id, SUM(st.amount) AS amount
        FROM settlements st LEFT JOIN expenses e ON e.id = st.expense_id
-       WHERE st.group_id IS NOT NULL OR st.expense_id IS NOT NULL
+       WHERE (st.group_id IS NOT NULL OR st.expense_id IS NOT NULL)
+         AND (st.expense_id IS NULL OR e.voided_at IS NULL)
        GROUP BY COALESCE(st.group_id, e.group_id), st.payee_id
      ) settlement_received ON settlement_received.group_id = g.id AND settlement_received.person_id = p.id
      LEFT JOIN (
        SELECT COALESCE(st.group_id, e.group_id) AS group_id, st.payer_id AS person_id, SUM(st.amount) AS amount
        FROM settlements st LEFT JOIN expenses e ON e.id = st.expense_id
-       WHERE st.group_id IS NOT NULL OR st.expense_id IS NOT NULL
+       WHERE (st.group_id IS NOT NULL OR st.expense_id IS NOT NULL)
+         AND (st.expense_id IS NULL OR e.voided_at IS NULL)
        GROUP BY COALESCE(st.group_id, e.group_id), st.payer_id
      ) settlement_paid ON settlement_paid.group_id = g.id AND settlement_paid.person_id = p.id
      WHERE g.workspace_id = ? AND (
        EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.person_id = p.id)
        OR EXISTS (
          SELECT 1 FROM expenses e JOIN splits s ON s.expense_id = e.id
-         WHERE e.group_id = g.id AND s.person_id = p.id
+         WHERE e.group_id = g.id AND e.voided_at IS NULL AND s.person_id = p.id
        )
-       OR EXISTS (SELECT 1 FROM expenses e WHERE e.group_id = g.id AND e.paid_by = p.id)
+       OR EXISTS (SELECT 1 FROM expenses e WHERE e.group_id = g.id AND e.voided_at IS NULL AND e.paid_by = p.id)
        OR EXISTS (
          SELECT 1 FROM settlements st LEFT JOIN expenses linked ON linked.id = st.expense_id
          WHERE COALESCE(st.group_id, linked.group_id) = g.id
+           AND (st.expense_id IS NULL OR linked.voided_at IS NULL)
            AND (st.payer_id = p.id OR st.payee_id = p.id)
        )
      )
@@ -637,6 +641,7 @@ async function init() {
   }
   await ensureColumn('expenses', 'category', "VARCHAR(100) NOT NULL DEFAULT 'Other'");
   await ensureColumn('expenses', 'split_method', "ENUM('equal', 'exact', 'percentage', 'shares', 'itemwise') NOT NULL DEFAULT 'equal'");
+  await ensureExpenseVoidSchema();
   await ensureColumn('notification_preferences', 'budget_alert', 'TINYINT(1) NOT NULL DEFAULT 1');
   await ensureColumn('budgets', 'exchange_rate_to_inr', 'DECIMAL(15, 8) NOT NULL DEFAULT 1');
   const [notificationTypeColumn] = await pool.query(
@@ -967,6 +972,25 @@ async function findAccessibleBudget(budgetId, account, executor = pool) {
   const query = buildAccessibleBudgetQuery(budgetId, account);
   const [rows] = await executor.execute(query.sql, query.parameters);
   return rows[0] || null;
+}
+
+async function ensureExpenseVoidSchema() {
+  await ensureColumn('expenses', 'voided_at', 'DATETIME NULL');
+  await ensureColumn('expenses', 'voided_by', 'INT NULL');
+  const [foreignKeys] = await pool.query(
+    `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'expenses'
+       AND CONSTRAINT_NAME = 'fk_expenses_voided_by'`
+  );
+  if (!foreignKeys.length) {
+    await pool.query(`ALTER TABLE expenses ADD CONSTRAINT fk_expenses_voided_by
+      FOREIGN KEY (voided_by) REFERENCES people(id) ON DELETE SET NULL`);
+  }
+  const [indexes] = await pool.query(
+    `SELECT INDEX_NAME FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'expenses' AND INDEX_NAME = 'idx_expenses_voided'`
+  );
+  if (!indexes.length) await pool.query('ALTER TABLE expenses ADD INDEX idx_expenses_voided (voided_at)');
 }
 
 async function budgetSpend(budget, range, executor = pool) {
@@ -1740,7 +1764,7 @@ app.get('/api/summary', async (req, res) => {
       `SELECT g.id, g.name, g.icon, g.color, COUNT(DISTINCT e.id) AS expenses,
               COALESCE(SUM(e.amount), 0) AS total
        FROM \`groups\` g
-       LEFT JOIN expenses e ON e.group_id = g.id
+       LEFT JOIN expenses e ON e.group_id = g.id AND e.voided_at IS NULL
        WHERE g.workspace_id = ?
        GROUP BY g.id
        ORDER BY g.id`,
@@ -1796,13 +1820,13 @@ app.get('/api/summary', async (req, res) => {
        FROM expenses e
        JOIN people p ON p.id = e.paid_by AND p.workspace_id = ?
        JOIN \`groups\` g ON g.id = e.group_id
-       WHERE g.workspace_id = ?
+       WHERE g.workspace_id = ? AND e.voided_at IS NULL
        ORDER BY e.created_at DESC
        LIMIT 12`,
       [workspaceId, workspaceId]
     );
     const [activityCount] = await q(
-      'SELECT COUNT(*) AS count FROM expenses e JOIN `groups` g ON g.id = e.group_id WHERE g.workspace_id = ?',
+      'SELECT COUNT(*) AS count FROM expenses e JOIN `groups` g ON g.id = e.group_id WHERE g.workspace_id = ? AND e.voided_at IS NULL',
       [workspaceId]
     );
     const net = await getWorkspaceBalances(workspaceId);
@@ -2298,6 +2322,8 @@ app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confir
 
 app.get('/api/expenses', async (req, res) => {
   const groupId = req.query.groupId === undefined ? null : Number(req.query.groupId);
+  const includeVoided = req.query.includeVoided === 'true';
+  const activeExpensesOnly = includeVoided ? '' : 'AND e.voided_at IS NULL';
   if (groupId !== null && (!Number.isInteger(groupId) || groupId <= 0)) {
     return res.status(400).json({ error: 'Group ID must be a positive integer.' });
   }
@@ -2305,16 +2331,18 @@ app.get('/api/expenses', async (req, res) => {
   try {
     const expenses = await q(
       `SELECT e.id, e.group_id, e.title, e.amount, e.category, e.split_method, e.created_at,
+              e.voided_at, e.voided_by, voider.name AS voided_by_name,
               p.id AS payer_id, p.name AS payer, p.initials, p.color,
               g.name AS group_name
        FROM expenses e
        JOIN people p ON p.id = e.paid_by AND p.workspace_id = ?
+       LEFT JOIN people voider ON voider.id = e.voided_by AND voider.workspace_id = ?
        JOIN \`groups\` g ON g.id = e.group_id
-       WHERE g.workspace_id = ? ${groupId === null ? '' : 'AND e.group_id = ?'}
+       WHERE g.workspace_id = ? ${activeExpensesOnly} ${groupId === null ? '' : 'AND e.group_id = ?'}
        ORDER BY e.created_at DESC, e.id DESC`,
       groupId === null
-        ? [req.account.workspace_id, req.account.workspace_id]
-        : [req.account.workspace_id, req.account.workspace_id, groupId]
+        ? [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id]
+        : [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id, groupId]
     );
     if (!expenses.length) return res.json([]);
     const shares = await q(
@@ -2326,7 +2354,7 @@ app.get('/api/expenses', async (req, res) => {
        JOIN people p ON p.id = s.person_id AND p.workspace_id = ?
        LEFT JOIN settlements st
          ON st.expense_id = s.expense_id AND st.payer_id = s.person_id AND st.payee_id = e.paid_by
-       WHERE g.workspace_id = ? ${groupId === null ? '' : 'AND e.group_id = ?'}
+       WHERE g.workspace_id = ? ${activeExpensesOnly} ${groupId === null ? '' : 'AND e.group_id = ?'}
        GROUP BY s.expense_id, s.person_id, p.name, s.amount
        ORDER BY p.name, p.id`,
       groupId === null
@@ -2700,7 +2728,7 @@ app.patch('/api/expenses/:expenseId/category', async (req, res) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const [expenses] = await connection.execute(
-      `SELECT e.id, e.group_id, e.category FROM expenses e
+      `SELECT e.id, e.group_id, e.category, e.voided_at FROM expenses e
        JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
        WHERE e.id = ? FOR UPDATE`,
       [req.account.workspace_id, expenseId]
@@ -2708,6 +2736,10 @@ app.patch('/api/expenses/:expenseId/category', async (req, res) => {
     if (!expenses.length) {
       await connection.rollback();
       return res.status(404).json({ error: 'Expense not found.' });
+    }
+    if (expenses[0].voided_at) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Voided expenses cannot be edited.' });
     }
     if (expenses[0].category === category) {
       await connection.commit();
@@ -2774,7 +2806,7 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
     await connection.beginTransaction();
     inTransaction = true;
     const [expenses] = await connection.execute(
-      `SELECT e.id, e.group_id, e.paid_by, g.name AS group_name
+      `SELECT e.id, e.group_id, e.paid_by, e.voided_at, g.name AS group_name
        FROM expenses e JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
        WHERE e.id = ? FOR UPDATE`,
       [req.account.workspace_id, expenseId]
@@ -2784,6 +2816,10 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
       return res.status(404).json({ error: 'Expense not found.' });
     }
     const current = expenses[0];
+    if (current.voided_at) {
+      await connection.rollback(); inTransaction = false;
+      return res.status(409).json({ error: 'Voided expenses cannot be edited.' });
+    }
     await connection.execute('SELECT person_id FROM splits WHERE expense_id = ? FOR UPDATE', [expenseId]);
     const [settlements] = await connection.execute(
       `SELECT id, payer_id, payee_id, amount FROM settlements
@@ -2920,6 +2956,74 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
   }
 });
 
+app.delete('/api/expenses/:expenseId', async (req, res) => {
+  const expenseId = Number(req.params.expenseId);
+  if (!Number.isInteger(expenseId) || expenseId <= 0) {
+    return res.status(400).json({ error: 'Expense ID must be a positive integer.' });
+  }
+  let connection;
+  let inTransaction = false;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    inTransaction = true;
+    const [rows] = await connection.execute(
+      `SELECT e.id, e.group_id, e.title, e.amount, e.voided_at, g.name AS group_name
+       FROM expenses e JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+       WHERE e.id = ? FOR UPDATE`,
+      [req.account.workspace_id, expenseId]
+    );
+    const expense = rows[0];
+    if (!expense) {
+      await connection.rollback(); inTransaction = false;
+      return res.status(404).json({ error: 'Expense not found.' });
+    }
+    const [membership] = await connection.execute(
+      'SELECT person_id FROM group_members WHERE group_id = ? AND person_id = ? FOR UPDATE',
+      [expense.group_id, req.account.person_id]
+    );
+    const [settlements] = await connection.execute(
+      'SELECT id FROM settlements WHERE expense_id = ? FOR UPDATE', [expenseId]
+    );
+    const rejection = expenseVoidRejection({
+      isGroupMember: membership.length > 0,
+      alreadyVoided: Boolean(expense.voided_at),
+      hasLinkedSettlements: settlements.length > 0,
+    });
+    if (rejection) {
+      await connection.rollback(); inTransaction = false;
+      return res.status(rejection.status).json({ error: rejection.error });
+    }
+    await connection.execute(
+      'UPDATE expenses SET voided_at = UTC_TIMESTAMP(), voided_by = ? WHERE id = ? AND voided_at IS NULL',
+      [req.account.person_id, expenseId]
+    );
+    await notifyGroupMembers(connection, req.account.workspace_id, expense.group_id, {
+      type: 'expense_updated',
+      title: 'Expense voided',
+      message: `“${expense.title}” was voided in ${expense.group_name}; it no longer affects group balances or totals.`,
+      targetType: 'expense',
+      targetId: expenseId,
+      dedupeKey: `expense-voided:${expenseId}`,
+    }, req.account.id);
+    const [updated] = await connection.execute(
+      `SELECT id, title, amount, voided_at, voided_by FROM expenses WHERE id = ?`, [expenseId]
+    );
+    await connection.commit();
+    inTransaction = false;
+    await runBudgetAlerts(req.account.workspace_id);
+    return res.json({ ok: true, message: 'Expense voided. It remains available in expense history.', expense: updated[0] });
+  } catch (error) {
+    if (inTransaction) {
+      try { await connection.rollback(); } catch (rollbackError) { console.error('Expense void rollback failed', rollbackError); }
+    }
+    console.error(error);
+    return res.status(500).json({ error: 'Could not void this expense.' });
+  } finally {
+    connection?.release();
+  }
+});
+
 app.post('/api/expenses/:expenseId/settle', async (req, res) => {
   const expenseId = Number(req.params.expenseId);
   const legacyPersonIds = Array.isArray(req.body?.personIds) ? req.body.personIds.map(Number) : null;
@@ -2947,7 +3051,7 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const [expenses] = await connection.execute(
-      `SELECT e.id, e.paid_by, e.group_id, e.title, g.name AS group_name
+      `SELECT e.id, e.paid_by, e.group_id, e.title, e.voided_at, g.name AS group_name
        FROM expenses e
        JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
        JOIN people payer ON payer.id = e.paid_by AND payer.workspace_id = g.workspace_id
@@ -2958,6 +3062,10 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
     if (!expense) {
       await connection.rollback();
       return res.status(404).json({ error: 'Expense not found.' });
+    }
+    if (expense.voided_at) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Voided expenses cannot be settled.' });
     }
     if (personIds.includes(expense.paid_by)) {
       await connection.rollback();

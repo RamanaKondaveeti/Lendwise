@@ -157,9 +157,13 @@ CREATE TABLE IF NOT EXISTS expenses (
   paid_by INT NOT NULL,
   category VARCHAR(100) NOT NULL DEFAULT 'Other',
   split_method ENUM('equal', 'exact', 'percentage', 'shares', 'itemwise') NOT NULL DEFAULT 'equal',
+  voided_at DATETIME NULL,
+  voided_by INT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_expenses_group FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE,
-  CONSTRAINT fk_expenses_payer FOREIGN KEY (paid_by) REFERENCES people(id)
+  CONSTRAINT fk_expenses_payer FOREIGN KEY (paid_by) REFERENCES people(id),
+  CONSTRAINT fk_expenses_voided_by FOREIGN KEY (voided_by) REFERENCES people(id) ON DELETE SET NULL,
+  INDEX idx_expenses_voided (voided_at)
 );
 
 CREATE TABLE IF NOT EXISTS splits (

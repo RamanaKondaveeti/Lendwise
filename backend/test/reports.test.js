@@ -23,6 +23,7 @@ test('expense report filters are workspace-scoped and include selected date, gro
     endDate: '2025-01-31',
   });
   assert.match(filter.where, /g\.workspace_id = \?/);
+  assert.match(filter.where, /e\.voided_at IS NULL/);
   assert.match(filter.where, /e\.group_id = \?/);
   assert.match(filter.where, /e\.category = \?/);
   assert.match(filter.where, /e\.created_at >= \?/);
@@ -31,6 +32,13 @@ test('expense report filters are workspace-scoped and include selected date, gro
   assert.deepEqual(filter.parameters, [
     4, 11, 'Food & Dining', '2025-01-01 00:00:00', '2025-01-31', 8, 8,
   ]);
+});
+
+test('expense reports exclude voided expenses while audit retrieval remains opt-in on the expenses API', () => {
+  const filter = buildExpenseReportFilter({
+    workspaceId: 4, groupId: null, memberId: null, category: null, startDate: null, endDate: null,
+  });
+  assert.match(filter.where, /e\.voided_at IS NULL/);
 });
 
 test('settlement filters include workspace-only settlements and use inclusive end dates', () => {

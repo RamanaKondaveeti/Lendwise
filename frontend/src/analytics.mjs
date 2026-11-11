@@ -8,6 +8,7 @@ export function calculateMonthlyAnalytics(expenses, currentUserId, selectedMonth
   const previousDate = new Date(Date.UTC(year, month - 2, 1))
   const previousMonth = `${previousDate.getUTCFullYear()}-${String(previousDate.getUTCMonth() + 1).padStart(2, '0')}`
   const inScope = expenses.filter(expense => (
+    !expense.voided_at &&
     (groupId === 'all' || Number(expense.group_id) === Number(groupId)) &&
     (category === 'all' || (expense.category || 'Other') === category)
   ))

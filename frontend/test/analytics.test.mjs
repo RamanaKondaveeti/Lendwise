@@ -65,3 +65,14 @@ test('keeps expense amounts in their stored base units and counts only actual sh
   assert.equal(result.monthlySeries[2].total, 1250)
   assert.equal(result.monthlySeries[1].total, 0)
 })
+
+test('voided expenses are excluded from totals, personal shares, and monthly analytics', () => {
+  const records = [
+    expense(1, '2025-03-05T12:00:00Z', 125, 7, 'Other', [{ person_id: 3, amount: 25 }]),
+    { ...expense(2, '2025-03-06T12:00:00Z', 500, 7, 'Other', [{ person_id: 3, amount: 100 }]), voided_at: '2025-03-07T00:00:00Z' },
+  ]
+  const result = calculateMonthlyAnalytics(records, 3, '2025-03')
+  assert.equal(result.total, 125)
+  assert.equal(result.personalShare, 25)
+  assert.equal(result.monthlySeries[2].total, 125)
+})

@@ -24,7 +24,7 @@ function buildBudgetSpendQuery(budget, range) {
       sql: `SELECT COALESCE(SUM(s.amount), 0) AS spent
         FROM expenses e JOIN splits s ON s.expense_id = e.id
         JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
-        WHERE s.person_id = ? AND e.created_at >= ? AND e.created_at < ?${categoryCondition}`,
+        WHERE s.person_id = ? AND e.voided_at IS NULL AND e.created_at >= ? AND e.created_at < ?${categoryCondition}`,
       parameters,
     };
   }
@@ -33,7 +33,7 @@ function buildBudgetSpendQuery(budget, range) {
   return {
     sql: `SELECT COALESCE(SUM(e.amount), 0) AS spent
       FROM expenses e JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
-      WHERE e.group_id = ? AND e.created_at >= ? AND e.created_at < ?${categoryCondition}`,
+      WHERE e.group_id = ? AND e.voided_at IS NULL AND e.created_at >= ? AND e.created_at < ?${categoryCondition}`,
     parameters,
   };
 }

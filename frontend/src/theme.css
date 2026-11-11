@@ -25,6 +25,9 @@
   --theme-success: #54bd88;
   --theme-warning: #e3b46b;
   --theme-error: #d98c72;
+  --theme-danger: #8b3e3e;
+  --theme-danger-border: #d9b8b8;
+  --theme-danger-surface: #fff5f5;
 }
 
 html[data-theme="dark"] {
@@ -54,6 +57,9 @@ html[data-theme="dark"] {
   --theme-success: #6ee7b7;
   --theme-warning: #f4c76b;
   --theme-error: #f0a29b;
+  --theme-danger: #fca5a5;
+  --theme-danger-border: #7f3b3b;
+  --theme-danger-surface: #3a2226;
   --theme-raised: #202d42;
   --theme-hover: var(--bg-card-hover);
   --theme-row: #151f30;
