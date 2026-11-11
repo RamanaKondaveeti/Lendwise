@@ -196,6 +196,9 @@ const date = value => new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   year: 'numeric',
 }).format(new Date(value))
+const dateInputValue = value => value instanceof Date
+  ? `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+  : String(value || '').slice(0, 10)
 const notificationTimestamp = value => new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
@@ -458,6 +461,7 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onE
                 <i>·</i>
                 <span className="activity-category-label">{expense.category || 'Other'}</span>
                 {isVoided && <span className="voided-expense-badge" title={expense.voided_by_name ? `Deleted by ${expense.voided_by_name}` : 'Deleted'}>DELETED</span>}
+                {expense.trip_name && <span className="trip-expense-badge">{expense.trip_name}</span>}
               </span>
             </div>
             <div className="activity-payer">
@@ -810,6 +814,16 @@ function App() {
   const [themePreference, setThemePreference] = useState(storedThemePreference)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [selectedGroupId, setSelectedGroupId] = useState(null)
+  const [selectedTripId, setSelectedTripId] = useState(null)
+  const [tripEditing, setTripEditing] = useState(null)
+  const [groupTrips, setGroupTrips] = useState([])
+  const [expenseTripOptions, setExpenseTripOptions] = useState([])
+  const [tripStatusFilter, setTripStatusFilter] = useState('all')
+  const [groupExpenseTripFilter, setGroupExpenseTripFilter] = useState('')
+  const [tripAnalytics, setTripAnalytics] = useState(null)
+  const [tripAnalyticsError, setTripAnalyticsError] = useState('')
+  const [tripAnalyticsLoading, setTripAnalyticsLoading] = useState(false)
+  const [expenseTripId, setExpenseTripId] = useState('')
   const [focusExpenseId, setFocusExpenseId] = useState(null)
   const [expenseGroupId, setExpenseGroupId] = useState('')
   const [expensePaidBy, setExpensePaidBy] = useState('')
@@ -1173,11 +1187,13 @@ function App() {
   }, [modal, globalUserQuery])
 
   useEffect(() => {
-    if (tab !== 'Overview' && tab !== 'Activity' && tab !== 'Group') return undefined
+    if (tab !== 'Overview' && tab !== 'Activity' && tab !== 'Group' && tab !== 'Trip') return undefined
 
     let active = true
     const params = new URLSearchParams()
     if (tab === 'Group' && selectedGroupId) params.set('groupId', selectedGroupId)
+    if (tab === 'Group' && groupExpenseTripFilter) params.set('tripId', groupExpenseTripFilter)
+    if (tab === 'Trip' && selectedTripId) params.set('tripId', selectedTripId)
     if (showVoidedExpenses && ['Activity', 'Group'].includes(tab)) params.set('includeVoided', 'true')
     const query = params.size ? `?${params.toString()}` : ''
     setActivityLoading(true)
@@ -1195,7 +1211,29 @@ function App() {
         if (active) setActivityLoading(false)
       })
     return () => { active = false }
-  }, [tab, selectedGroupId, reloadKey, showVoidedExpenses])
+  }, [tab, selectedGroupId, selectedTripId, groupExpenseTripFilter, reloadKey, showVoidedExpenses])
+
+  useEffect(() => {
+    if (!selectedGroupId || tab !== 'Group') return undefined
+    let active = true
+    request(`/api/groups/${selectedGroupId}/trips`).then(rows => { if (active) setGroupTrips(rows) }).catch(error => { if (active) setNotice(error.message) })
+    return () => { active = false }
+  }, [selectedGroupId, tab, reloadKey])
+
+  useEffect(() => {
+    if (!['expense', 'expense-edit'].includes(modal) || !expenseGroupId) { setExpenseTripOptions([]); return undefined }
+    let active = true
+    request(`/api/groups/${expenseGroupId}/trips`).then(rows => { if (active) setExpenseTripOptions(rows) }).catch(() => { if (active) setExpenseTripOptions([]) })
+    return () => { active = false }
+  }, [modal, expenseGroupId, reloadKey])
+
+  useEffect(() => {
+    if (!selectedTripId || tab !== 'Trip') return undefined
+    let active = true
+    setTripAnalyticsLoading(true); setTripAnalyticsError(''); setTripAnalytics(null)
+    request(`/api/trips/${selectedTripId}/analytics`).then(result => { if (active) setTripAnalytics(result) }).catch(error => { if (active) setTripAnalyticsError(error.message) }).finally(() => { if (active) setTripAnalyticsLoading(false) })
+    return () => { active = false }
+  }, [selectedTripId, tab, reloadKey])
 
   useEffect(() => {
     if (!authUser || tab !== 'Group' || !selectedGroupId) return undefined
@@ -1526,7 +1564,13 @@ function App() {
 
   function openGroup(groupId) {
     setSelectedGroupId(Number(groupId))
+    setGroupExpenseTripFilter('')
     setTab('Group')
+  }
+
+  function openTrip(tripId) {
+    setSelectedTripId(Number(tripId))
+    setTab('Trip')
   }
 
   function openExpense() {
@@ -1534,6 +1578,7 @@ function App() {
       ? selectedGroup
       : groups.find(group => group.members?.length)
     setExpenseGroupId(defaultGroup?.id || '')
+    setExpenseTripId('')
     setExpensePaidBy(defaultGroup?.members?.some(person => person.id === data.currentUserId)
       ? data.currentUserId
       : defaultGroup?.members?.[0]?.id || '')
@@ -1553,6 +1598,7 @@ function App() {
     const rate = Number.isFinite(exchangeRate) && exchangeRate > 0 ? exchangeRate : 1
     setExpenseToEdit(expense)
     setExpenseGroupId(Number(expense.group_id))
+    setExpenseTripId(expense.trip_id ? String(expense.trip_id) : '')
     setExpensePaidBy(Number(expense.payer_id))
     setExpenseSplitMethod(expense.split_method || 'equal')
     setExpenseParticipantIds(participants)
@@ -2191,6 +2237,7 @@ function App() {
       url = modal === 'expense-edit' ? `/api/expenses/${expenseToEdit.id}` : '/api/expenses'
       payload = {
         groupId: modal === 'expense-edit' ? Number(expenseToEdit.group_id) : Number(form.get('groupId')),
+        tripId: expenseTripId ? Number(expenseTripId) : null,
         title: form.get('title'),
         amount: expenseSplitMethod === 'itemwise' ? expenseItemwiseTotalCents / 100 : toStoredAmount(form.get('amount')),
         paidBy: Number(form.get('paidBy')),
@@ -2261,6 +2308,13 @@ function App() {
       url = `/api/recurring-expenses/${occurrenceToConfirm.template_id}/occurrences/${encodeURIComponent(occurrenceToConfirm.occurrence_date.slice(0, 10))}/confirm`
       payload = { amount: Number(form.get('amount')) }
       successMessage = 'Recurring expense recorded.'
+    } else if (modal === 'trip-create' || modal === 'trip-edit') {
+      if (form.get('endDate') < form.get('startDate')) { notify('Trip end date must be on or after its start date.'); return }
+      const budget = form.get('budgetAmount')
+      if (budget !== '' && (!Number.isFinite(Number(budget)) || Number(budget) < 0)) { notify('Trip budget must be zero or greater.'); return }
+      url = modal === 'trip-edit' ? `/api/trips/${tripEditing.id}` : `/api/groups/${selectedGroupId}/trips`
+      payload = { name: form.get('name'), destination: form.get('destination'), description: form.get('description'), startDate: form.get('startDate'), endDate: form.get('endDate'), budgetAmount: budget === '' ? null : Number(budget), status: form.get('status') }
+      successMessage = modal === 'trip-edit' ? 'Trip updated.' : 'Trip created.'
     } else if (modal === 'group') {
       url = '/api/groups'
       payload = {
@@ -2285,7 +2339,7 @@ function App() {
     try {
       const submittedModal = modal
       const result = await request(url, {
-        method: submittedModal === 'members' || submittedModal === 'recurring-edit' || submittedModal === 'expense-edit'
+        method: ['members', 'recurring-edit', 'expense-edit', 'trip-edit'].includes(submittedModal)
           ? 'PUT'
           : submittedModal === 'expense-category'
             ? 'PATCH'
@@ -2417,7 +2471,8 @@ function App() {
     year: 'numeric',
   }).format(new Date())
   const firstName = currentUser?.name?.split(' ')[0] || 'there'
-  const pageTitle = tab === 'Group' ? selectedGroup?.name || 'Group' : tab
+  const activeTrip = groupTrips.find(trip => Number(trip.id) === Number(selectedTripId))
+  const pageTitle = tab === 'Group' ? selectedGroup?.name || 'Group' : tab === 'Trip' ? activeTrip?.name || 'Trip' : tab
 
   return (
     <div className={`app ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
@@ -3337,8 +3392,10 @@ function App() {
             </section>
           )}
 
-          {(tab === 'Activity' || tab === 'Group') && (
+          {(tab === 'Activity' || tab === 'Group' || tab === 'Trip') && (
             <>
+            {tab === 'Trip' && activeTrip && <section className="panel screen-panel trip-details-panel"><div className="panel-heading screen-panel-heading"><div><div className="section-title">{activeTrip.destination || activeTrip.name} <span className={`trip-status trip-status-${activeTrip.status}`}>{activeTrip.status}</span></div><div className="section-subtitle">{date(activeTrip.start_date)} – {date(activeTrip.end_date)}{activeTrip.description ? ` · ${activeTrip.description}` : ''}</div></div><div className="trip-controls"><button className="button button-light" onClick={() => setTab('Group')}>Back to group</button><button className="button button-light" onClick={() => { setTripEditing(activeTrip); setModal('trip-edit') }}>Edit trip</button></div></div>
+              {tripAnalyticsLoading ? <div className="empty"><LoaderCircle className="loading-icon" size={20} />Loading trip analytics…</div> : tripAnalyticsError ? <div className="empty" role="alert">{tripAnalyticsError}<button className="button button-light" onClick={() => setReloadKey(key => key + 1)}>Retry</button></div> : tripAnalytics && <><div className="trip-summary-grid">{[['Total spent', formatMoney(tripAnalytics.totalSpent)], ['Budget', activeTrip.budget_amount === null ? 'No budget' : formatMoney(activeTrip.budget_amount)], ['Remaining budget', tripAnalytics.remainingBudget === null ? '—' : formatMoney(tripAnalytics.remainingBudget)], ['Expense count', tripAnalytics.expenseCount]].map(([label, value]) => <article key={label}><span>{label}</span><b>{value}</b></article>)}</div><div className="trip-details-grid"><article className="analytics-chart-card"><div className="analytics-chart-heading"><b>Category spending</b></div>{tripAnalytics.categoryStats.map((row, index) => <div className="trip-stat-row" key={row.category}><span>{row.category}</span><i><b style={{ width: `${Math.min(100, row.percentage)}%`, background: chartColors[index % chartColors.length] }} /></i><strong>{formatMoney(row.totalAmount)}</strong></div>)}</article><article className="analytics-chart-card"><div className="analytics-chart-heading"><b>Member spending comparison</b></div>{tripAnalytics.memberStats.map((row, index) => <div className="trip-stat-row" key={row.memberId}><span>{row.memberName}</span><i><b style={{ width: `${tripAnalytics.totalSpent ? Math.min(100, row.paid / tripAnalytics.totalSpent * 100) : 0}%`, background: chartColors[index % chartColors.length] }} /></i><strong>{formatMoney(row.paid)}</strong></div>)}</article></div><article className="analytics-chart-card group-analytics-table-card"><div className="analytics-chart-heading"><b>Member contributions</b></div><div className="group-analytics-table-scroll"><table className="report-table"><thead><tr><th>Member</th><th>Paid</th><th>Share</th><th>Net contribution</th></tr></thead><tbody>{tripAnalytics.memberStats.map(row => <tr key={row.memberId}><td>{row.memberName}</td><td>{formatMoney(row.paid)}</td><td>{formatMoney(row.share)}</td><td>{formatMoney(row.netContribution)}</td></tr>)}</tbody></table></div></article><article className="analytics-chart-card group-analytics-table-card"><div className="analytics-chart-heading"><b>Top expenses</b></div><div className="group-analytics-table-scroll"><table className="report-table"><thead><tr><th>Expense</th><th>Category</th><th>Paid by</th><th>Amount</th><th>Date</th></tr></thead><tbody>{tripAnalytics.topExpenses.map(row => <tr key={row.expenseId}><td>{row.title}</td><td>{row.category}</td><td>{row.paidBy}</td><td>{formatMoney(row.amount)}</td><td>{date(row.createdAt)}</td></tr>)}</tbody></table></div></article></>}</section>}
             {tab === 'Group' && selectedGroup && (
               <>
               <SettlementSuggestions
@@ -3347,6 +3404,10 @@ function App() {
                 disabled={!Number.isFinite(exchangeRate)}
                 onRecordSettlement={payment => openGroupSettlement(selectedGroup, payment)}
               />
+              <section className="panel screen-panel trips-panel">
+                <div className="panel-heading screen-panel-heading"><div><div className="section-title">Trips <span className="title-count">{groupTrips.length}</span></div><div className="section-subtitle">Plan travel spending and keep trip expenses together.</div></div><div className="trip-controls"><select aria-label="Filter trips by status" value={tripStatusFilter} onChange={event => setTripStatusFilter(event.target.value)}><option value="all">All statuses</option>{['planned', 'active', 'completed', 'cancelled'].map(status => <option key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</option>)}</select><button type="button" className="button button-dark" onClick={() => { setTripEditing(null); setModal('trip-create') }}><Plus size={15} />Create Trip</button></div></div>
+                {groupTrips.filter(trip => tripStatusFilter === 'all' || trip.status === tripStatusFilter).length ? <div className="trip-card-grid">{groupTrips.filter(trip => tripStatusFilter === 'all' || trip.status === tripStatusFilter).map(trip => { const spent = Number(trip.spent || 0); const budget = trip.budget_amount === null ? null : Number(trip.budget_amount); const percent = budget > 0 ? Math.min(100, spent / budget * 100) : 0; return <article className="trip-card" key={trip.id}><button type="button" className="trip-card-open" onClick={() => openTrip(trip.id)}><span className={`trip-status trip-status-${trip.status}`}>{trip.status}</span><b>{trip.name}</b><span>{trip.destination || 'Destination not set'}</span><small>{date(trip.start_date)} – {date(trip.end_date)}</small><strong>{budget === null ? `${formatMoney(spent)} spent` : `${formatMoney(spent)} / ${formatMoney(budget)}`}</strong>{budget !== null && <i className="trip-progress"><b style={{ width: `${percent}%` }} /></i>}</button><button className="button button-light trip-edit" type="button" onClick={() => { setTripEditing(trip); setModal('trip-edit') }}>Edit</button></article> })}</div> : <div className="empty">No trips match this status. Create a trip to get started.</div>}
+              </section>
               <section className="panel screen-panel group-members-panel">
                 <div className="panel-heading screen-panel-heading">
                   <div>
@@ -3389,8 +3450,8 @@ function App() {
             <section className="panel screen-panel activity-screen">
               <div className="panel-heading screen-panel-heading">
                 <div>
-                  <div className="section-title">{tab === 'Group' ? 'Group expenses' : 'All activity'} <span className="title-count">{visibleActivity.length}</span></div>
-                  <div className="section-subtitle">{tab === 'Group' ? 'Transactions saved to this group.' : 'Your expense history, loaded from the database.'}</div>
+                  <div className="section-title">{tab === 'Group' ? 'Group expenses' : tab === 'Trip' ? 'Trip expenses' : 'All activity'} <span className="title-count">{visibleActivity.length}</span></div>
+                  <div className="section-subtitle">{tab === 'Group' ? 'Transactions saved to this group.' : tab === 'Trip' ? 'Transactions saved to this trip.' : 'Your expense history, loaded from the database.'}</div>
                 </div>
                 <div className="activity-controls">
                   <label className="activity-voided-toggle">
@@ -3405,6 +3466,7 @@ function App() {
                     </select>
                     <ChevronDown size={14} />
                   </label>
+                  {tab === 'Group' && <label className="select-button range-select"><span>Trip</span><select value={groupExpenseTripFilter} onChange={event => setGroupExpenseTripFilter(event.target.value)}><option value="">All group expenses</option>{groupTrips.map(trip => <option value={trip.id} key={trip.id}>{trip.name}</option>)}</select><ChevronDown size={14} /></label>}
                   {tab === 'Group'
                     ? <button className="select-button" onClick={() => setTab('Groups')}><ArrowRight className="back-arrow" size={14} />All groups</button>
                     : <label className="select-button range-select"><CalendarDays size={14} /><select value={dateRange} onChange={event => setDateRange(event.target.value)}><option value="30">Last 30 days</option><option value="7">Last 7 days</option><option value="all">All time</option></select><ChevronDown size={14} /></label>}
@@ -3477,7 +3539,7 @@ function App() {
         <div className="overlay" onMouseDown={event => !busy && event.target === event.currentTarget && setModal('')}>
           <form className={`modal${['expense', 'expense-edit'].includes(modal) ? ' expense-modal' : ''}`} onSubmit={submit}>
             <div className="modal-top">
-              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-edit' ? 'Edit Expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'recurring' ? 'Create recurring expense' : modal === 'recurring-edit' ? 'Edit recurring expense' : modal === 'recurring-confirm' ? 'Confirm recurring amount' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
+              <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'trip-create' ? 'Create trip' : modal === 'trip-edit' ? 'Edit trip' : modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-edit' ? 'Edit Expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'recurring' ? 'Create recurring expense' : modal === 'recurring-edit' ? 'Edit recurring expense' : modal === 'recurring-confirm' ? 'Confirm recurring amount' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" disabled={busy} onClick={() => setModal('')}><X size={18} /></button>
             </div>
 
@@ -3568,6 +3630,7 @@ function App() {
                   const nextGroupId = Number(event.target.value)
                   const nextGroup = groups.find(group => group.id === nextGroupId)
                   setExpenseGroupId(nextGroupId)
+                  setExpenseTripId('')
                   setExpenseParticipantIds((nextGroup?.members || []).map(person => person.id))
                   setExpensePaidBy(nextGroup?.members?.some(person => person.id === data.currentUserId)
                     ? data.currentUserId
@@ -3578,6 +3641,7 @@ function App() {
                     participantIds: item.participantIds.filter(personId => nextMemberIds.has(personId)),
                   })))
                 }} disabled={modal === 'expense-edit'}><option value="" disabled>Select a group</option>{groups.filter(group => group.members?.length).map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>
+                <label>Trip (optional)<select value={expenseTripId} onChange={event => setExpenseTripId(event.target.value)}><option value="">No trip</option>{expenseTripOptions.map(trip => <option value={trip.id} key={trip.id}>{trip.name}</option>)}</select></label>
                 <label key={selectedExpenseGroup?.id}>Paid by<select name="paidBy" required value={expensePaidBy} onChange={event => setExpensePaidBy(Number(event.target.value))}>{(selectedExpenseGroup?.members || []).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
                 <label>Split method<select value={expenseSplitMethod} onChange={event => setExpenseSplitMethod(event.target.value)}><option value="equal">Split equally</option><option value="exact">Exact amounts</option><option value="percentage">Percentage</option><option value="shares">Shares</option><option value="itemwise">Item-wise</option></select></label>
                 {expenseSplitMethod !== 'itemwise' && <fieldset className="participant-field">
@@ -3774,6 +3838,16 @@ function App() {
               </>
             )}
 
+            {(modal === 'trip-create' || modal === 'trip-edit') && (
+              <>
+                <label>Trip name<input name="name" maxLength="255" required defaultValue={tripEditing?.name || ''} placeholder="e.g. Goa weekend" /></label>
+                <label>Destination<input name="destination" maxLength="255" defaultValue={tripEditing?.destination || ''} placeholder="Optional destination" /></label>
+                <label>Description<textarea name="description" maxLength="5000" defaultValue={tripEditing?.description || ''} rows="3" /></label>
+                <div className="form-row"><label>Start date<input type="date" name="startDate" required defaultValue={tripEditing?.start_date ? dateInputValue(tripEditing.start_date) : ''} /></label><label>End date<input type="date" name="endDate" required defaultValue={tripEditing?.end_date ? dateInputValue(tripEditing.end_date) : ''} /></label></div>
+                <div className="form-row"><label>Budget (INR)<input name="budgetAmount" type="number" min="0" step="0.01" defaultValue={tripEditing?.budget_amount ?? ''} placeholder="Optional" /></label><label>Status<select name="status" defaultValue={tripEditing?.status || 'planned'}>{['planned', 'active', 'completed', 'cancelled'].map(status => <option key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</option>)}</select></label></div>
+              </>
+            )}
+
             {modal === 'group' && (
               <>
                 <label>Group name<input required name="name" maxLength="255" placeholder="Enter a group name" /></label>
@@ -3820,7 +3894,7 @@ function App() {
 
             {!(modal === 'invite' && manualInviteLink) && (
               <button className="button button-dark modal-submit" disabled={busy || (['expense', 'expense-edit'].includes(modal) && !expenseSplitValid)}>
-                {busy ? 'Saving…' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'expense-edit' ? 'Save Changes' : modal === 'expense-category' ? 'Save category' : modal === 'recurring' ? 'Create schedule' : modal === 'recurring-edit' ? 'Save schedule' : modal === 'recurring-confirm' ? 'Confirm & record expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
+                {busy ? 'Saving…' : modal === 'trip-create' ? 'Create trip' : modal === 'trip-edit' ? 'Save trip' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'expense-edit' ? 'Save Changes' : modal === 'expense-category' ? 'Save category' : modal === 'recurring' ? 'Create schedule' : modal === 'recurring-edit' ? 'Save schedule' : modal === 'recurring-confirm' ? 'Confirm & record expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
                 <ArrowRight size={15} />
               </button>
             )}

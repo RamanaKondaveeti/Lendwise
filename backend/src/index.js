@@ -31,6 +31,7 @@ const {
   validateBudgetInput,
 } = require('./budgets');
 const { buildGroupAnalyticsFilter } = require('./group-analytics');
+const { validTripInput } = require('./trips');
 const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
@@ -642,6 +643,14 @@ async function init() {
   }
   await ensureColumn('expenses', 'category', "VARCHAR(100) NOT NULL DEFAULT 'Other'");
   await ensureColumn('expenses', 'split_method', "ENUM('equal', 'exact', 'percentage', 'shares', 'itemwise') NOT NULL DEFAULT 'equal'");
+  await ensureColumn('expenses', 'trip_id', 'INT NULL');
+  const [tripIndex] = await pool.query("SHOW INDEX FROM expenses WHERE Key_name = 'idx_expenses_trip'");
+  if (!tripIndex.length) await pool.query('ALTER TABLE expenses ADD INDEX idx_expenses_trip (trip_id)');
+  const [tripForeignKey] = await pool.query(
+    `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'expenses' AND CONSTRAINT_NAME = 'fk_expenses_trip'`
+  );
+  if (!tripForeignKey.length) await pool.query('ALTER TABLE expenses ADD CONSTRAINT fk_expenses_trip FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE SET NULL');
   await ensureExpenseVoidSchema();
   await ensureColumn('notification_preferences', 'budget_alert', 'TINYINT(1) NOT NULL DEFAULT 1');
   await ensureColumn('budgets', 'exchange_rate_to_inr', 'DECIMAL(15, 8) NOT NULL DEFAULT 1');
@@ -2323,15 +2332,21 @@ app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confir
 
 app.get('/api/expenses', async (req, res) => {
   const groupId = req.query.groupId === undefined ? null : Number(req.query.groupId);
+  const tripId = req.query.tripId === undefined ? null : Number(req.query.tripId);
   const includeVoided = req.query.includeVoided === 'true';
   const activeExpensesOnly = includeVoided ? '' : 'AND e.voided_at IS NULL';
   if (groupId !== null && (!Number.isInteger(groupId) || groupId <= 0)) {
     return res.status(400).json({ error: 'Group ID must be a positive integer.' });
   }
+  if (tripId !== null && (!Number.isInteger(tripId) || tripId <= 0)) return res.status(400).json({ error: 'Trip ID must be a positive integer.' });
 
   try {
+    if (tripId !== null) {
+      const trip = await findAccessibleTrip(tripId, req.account);
+      if (!trip || (groupId !== null && trip.group_id !== groupId)) return res.status(404).json({ error: 'Trip not found.' });
+    }
     const expenses = await q(
-      `SELECT e.id, e.group_id, e.title, e.amount, e.category, e.split_method, e.created_at,
+      `SELECT e.id, e.group_id, e.trip_id, t.name AS trip_name, e.title, e.amount, e.category, e.split_method, e.created_at,
               e.voided_at, e.voided_by, voider.name AS voided_by_name,
               p.id AS payer_id, p.name AS payer, p.initials, p.color,
               g.name AS group_name
@@ -2339,11 +2354,11 @@ app.get('/api/expenses', async (req, res) => {
        JOIN people p ON p.id = e.paid_by AND p.workspace_id = ?
        LEFT JOIN people voider ON voider.id = e.voided_by AND voider.workspace_id = ?
        JOIN \`groups\` g ON g.id = e.group_id
-       WHERE g.workspace_id = ? ${activeExpensesOnly} ${groupId === null ? '' : 'AND e.group_id = ?'}
+       LEFT JOIN trips t ON t.id = e.trip_id
+       WHERE g.workspace_id = ? ${activeExpensesOnly} ${groupId === null ? '' : 'AND e.group_id = ?'} ${tripId === null ? '' : 'AND e.trip_id = ?'}
        ORDER BY e.created_at DESC, e.id DESC`,
-      groupId === null
-        ? [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id]
-        : [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id, groupId]
+      [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id,
+        ...(groupId === null ? [] : [groupId]), ...(tripId === null ? [] : [tripId])]
     );
     if (!expenses.length) return res.json([]);
     const shares = await q(
@@ -2355,12 +2370,11 @@ app.get('/api/expenses', async (req, res) => {
        JOIN people p ON p.id = s.person_id AND p.workspace_id = ?
        LEFT JOIN settlements st
          ON st.expense_id = s.expense_id AND st.payer_id = s.person_id AND st.payee_id = e.paid_by
-       WHERE g.workspace_id = ? ${activeExpensesOnly} ${groupId === null ? '' : 'AND e.group_id = ?'}
+       WHERE g.workspace_id = ? ${activeExpensesOnly} ${groupId === null ? '' : 'AND e.group_id = ?'} ${tripId === null ? '' : 'AND e.trip_id = ?'}
        GROUP BY s.expense_id, s.person_id, p.name, s.amount
        ORDER BY p.name, p.id`,
-      groupId === null
-        ? [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id]
-        : [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id, groupId]
+      [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id,
+        ...(groupId === null ? [] : [groupId]), ...(tripId === null ? [] : [tripId])]
     );
     const sharesByExpense = new Map();
     for (const share of shares) {
@@ -2807,7 +2821,7 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
     await connection.beginTransaction();
     inTransaction = true;
     const [expenses] = await connection.execute(
-      `SELECT e.id, e.group_id, e.paid_by, e.voided_at, g.name AS group_name
+      `SELECT e.id, e.group_id, e.trip_id, e.paid_by, e.voided_at, g.name AS group_name
        FROM expenses e JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
        WHERE e.id = ? FOR UPDATE`,
       [req.account.workspace_id, expenseId]
@@ -2842,6 +2856,24 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
       return res.status(400).json({ error: 'Choose a group member as payer and participants.' });
     }
 
+    let tripId = current.trip_id;
+    if (body.tripId !== undefined) {
+      tripId = body.tripId === null || body.tripId === '' ? null : Number(body.tripId);
+      if (tripId !== null && (!Number.isInteger(tripId) || tripId <= 0)) {
+        await connection.rollback(); inTransaction = false;
+        return res.status(400).json({ error: 'Choose a valid trip.' });
+      }
+      if (tripId !== null) {
+        const [trips] = await connection.execute(
+          `SELECT t.id FROM trips t JOIN \`groups\` g ON g.id = t.group_id
+           JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = ?
+           WHERE t.id = ? AND t.group_id = ? AND g.workspace_id = ?`,
+          [req.account.person_id, tripId, current.group_id, req.account.workspace_id]
+        );
+        if (!trips.length) { await connection.rollback(); inTransaction = false; return res.status(400).json({ error: 'Choose a trip in this expense group.' }); }
+      }
+    }
+
     const settledByParticipant = new Map();
     for (const settlement of settlements) {
       if (Number(settlement.payee_id) !== Number(current.paid_by)) {
@@ -2868,8 +2900,8 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
     }
 
     await connection.execute(
-      'UPDATE expenses SET title = ?, amount = ?, category = ?, paid_by = ?, split_method = ? WHERE id = ?',
-      [title.trim(), amountCents / 100, category.trim(), normalizedPaidBy, splitMethod, expenseId]
+      'UPDATE expenses SET title = ?, amount = ?, category = ?, paid_by = ?, split_method = ?, trip_id = ? WHERE id = ?',
+      [title.trim(), amountCents / 100, category.trim(), normalizedPaidBy, splitMethod, tripId, expenseId]
     );
     await connection.execute('DELETE FROM splits WHERE expense_id = ?', [expenseId]);
     for (const row of allocationDetails.allocations) {
@@ -3343,6 +3375,7 @@ app.delete('/api/people/:id', async (req, res) => {
 
 app.post('/api/expenses', async (req, res) => {
   const { groupId, title, amount, paidBy, category = 'Other', participants } = req.body || {};
+  const requestedTripId = req.body?.tripId === undefined || req.body.tripId === null || req.body.tripId === '' ? null : Number(req.body.tripId);
   const splitMethod = req.body?.splitMethod ?? 'equal';
   const normalizedGroupId = Number(groupId);
   const normalizedPaidBy = Number(paidBy);
@@ -3366,6 +3399,7 @@ app.post('/api/expenses', async (req, res) => {
       !Number.isFinite(Number(amount)) || !Number.isSafeInteger(amountCents) ||
       amountCents <= 0 || amountCents > 999999999999 ||
       !Number.isInteger(normalizedPaidBy) || normalizedPaidBy <= 0 ||
+      (requestedTripId !== null && (!Number.isInteger(requestedTripId) || requestedTripId <= 0)) ||
       (splitMethod !== 'itemwise' && !Array.isArray(participants)) || !participantIds.length) {
     return res.status(400).json({ error: 'Add a title, positive amount, group, and participants.' });
   }
@@ -3389,13 +3423,22 @@ app.post('/api/expenses', async (req, res) => {
     if (!groups.length || members.length !== new Set([normalizedPaidBy, ...participantIds]).size) {
       return res.status(400).json({ error: 'Choose a group member as payer and participants.' });
     }
+    if (requestedTripId !== null) {
+      const [trips] = await q(
+        `SELECT t.id FROM trips t JOIN \`groups\` g ON g.id = t.group_id
+         JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = ?
+         WHERE t.id = ? AND t.group_id = ? AND g.workspace_id = ?`,
+        [req.account.person_id, requestedTripId, normalizedGroupId, req.account.workspace_id]
+      );
+      if (!trips.length) return res.status(400).json({ error: 'Choose a trip in this expense group.' });
+    }
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
     inTransaction = true;
     const [expense] = await connection.execute(
-      'INSERT INTO expenses(group_id, title, amount, paid_by, category, split_method) VALUES(?, ?, ?, ?, ?, ?)',
-      [normalizedGroupId, title.trim(), amountCents / 100, normalizedPaidBy, category, splitMethod]
+      'INSERT INTO expenses(group_id, trip_id, title, amount, paid_by, category, split_method) VALUES(?, ?, ?, ?, ?, ?, ?)',
+      [normalizedGroupId, requestedTripId, title.trim(), amountCents / 100, normalizedPaidBy, category, splitMethod]
     );
     for (const { personId, cents } of allocations) {
       await connection.execute(
@@ -3443,6 +3486,145 @@ app.post('/api/expenses', async (req, res) => {
   } finally {
     connection?.release();
   }
+});
+
+app.post('/api/groups/:groupId/trips', async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  const body = req.body || {};
+  if (!Number.isInteger(groupId) || groupId <= 0 || !validTripInput(body) ||
+      !isValidReportDate(body.startDate) || !isValidReportDate(body.endDate)) {
+    return res.status(400).json({ error: 'Provide a trip name, valid dates, and valid details.' });
+  }
+  try {
+    const [groups] = await q(
+      `SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id
+       WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`,
+      [groupId, req.account.workspace_id, req.account.person_id]
+    );
+    if (!groups.length) return res.status(404).json({ error: 'Group not found.' });
+    const [result] = await pool.execute(
+      `INSERT INTO trips(group_id, name, destination, description, start_date, end_date, budget_amount, created_by, status)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [groupId, body.name.trim(), body.destination?.trim() || null, body.description?.trim() || null,
+        body.startDate, body.endDate, body.budgetAmount ?? null, req.account.person_id, body.status || 'planned']
+    );
+    const [rows] = await pool.execute('SELECT * FROM trips WHERE id = ?', [result.insertId]);
+    res.status(201).json(rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not create this trip.' });
+  }
+});
+
+app.get('/api/groups/:groupId/trips', async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  if (!Number.isInteger(groupId) || groupId <= 0) return res.status(400).json({ error: 'Provide a valid group ID.' });
+  try {
+    const [groups] = await q(
+      `SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id
+       WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`,
+      [groupId, req.account.workspace_id, req.account.person_id]
+    );
+    if (!groups.length) return res.status(404).json({ error: 'Group not found.' });
+    const [rows] = await pool.execute(
+      `SELECT t.*, COALESCE(x.spent, 0) AS spent, COALESCE(x.expense_count, 0) AS expense_count
+       FROM trips t LEFT JOIN (
+         SELECT trip_id, SUM(amount) AS spent, COUNT(*) AS expense_count
+         FROM expenses WHERE voided_at IS NULL GROUP BY trip_id
+       ) x ON x.trip_id = t.id WHERE t.group_id = ? ORDER BY t.start_date DESC, t.id DESC`, [groupId]
+    );
+    res.json(rows.map(row => ({ ...row, spent: Number(row.spent), expense_count: Number(row.expense_count) })));
+  } catch (error) {
+    console.error(error); res.status(500).json({ error: 'Could not load trips.' });
+  }
+});
+
+async function findAccessibleTrip(tripId, account, executor = pool, lock = false) {
+  const [rows] = await executor.execute(
+    `SELECT t.* FROM trips t JOIN \`groups\` g ON g.id = t.group_id
+     JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = ?
+     WHERE t.id = ? AND g.workspace_id = ? ${lock ? 'FOR UPDATE' : ''}`,
+    [account.person_id, tripId, account.workspace_id]
+  );
+  return rows[0] || null;
+}
+
+app.get('/api/trips/:tripId', async (req, res) => {
+  const tripId = Number(req.params.tripId);
+  if (!Number.isInteger(tripId) || tripId <= 0) return res.status(400).json({ error: 'Provide a valid trip ID.' });
+  try {
+    const trip = await findAccessibleTrip(tripId, req.account);
+    if (!trip) return res.status(404).json({ error: 'Trip not found.' });
+    res.json(trip);
+  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load this trip.' }); }
+});
+
+app.put('/api/trips/:tripId', async (req, res) => {
+  const tripId = Number(req.params.tripId);
+  const body = req.body || {};
+  if (!Number.isInteger(tripId) || tripId <= 0 || !validTripInput(body, true)) return res.status(400).json({ error: 'Provide valid trip details.' });
+  let connection;
+  try {
+    connection = await pool.getConnection(); await connection.beginTransaction();
+    const current = await findAccessibleTrip(tripId, req.account, connection, true);
+    if (!current) { await connection.rollback(); return res.status(404).json({ error: 'Trip not found.' }); }
+    const startDate = body.startDate ?? dateOnly(current.start_date);
+    const endDate = body.endDate ?? dateOnly(current.end_date);
+    if (!isValidReportDate(startDate) || !isValidReportDate(endDate) || endDate < startDate) {
+      await connection.rollback(); return res.status(400).json({ error: 'Trip end date must be on or after its start date.' });
+    }
+    await connection.execute(
+      `UPDATE trips SET name = ?, destination = ?, description = ?, start_date = ?, end_date = ?, budget_amount = ?, status = ? WHERE id = ?`,
+      [body.name === undefined ? current.name : body.name.trim(), body.destination === undefined ? current.destination : body.destination?.trim() || null,
+        body.description === undefined ? current.description : body.description?.trim() || null, startDate, endDate,
+        body.budgetAmount === undefined ? current.budget_amount : body.budgetAmount, body.status ?? current.status, tripId]
+    );
+    await connection.commit();
+    const [rows] = await pool.execute('SELECT * FROM trips WHERE id = ?', [tripId]); res.json(rows[0]);
+  } catch (error) { await connection?.rollback(); console.error(error); res.status(500).json({ error: 'Could not update this trip.' }); }
+  finally { connection?.release(); }
+});
+
+app.delete('/api/trips/:tripId', async (req, res) => {
+  const tripId = Number(req.params.tripId);
+  if (!Number.isInteger(tripId) || tripId <= 0) return res.status(400).json({ error: 'Provide a valid trip ID.' });
+  let connection;
+  try {
+    connection = await pool.getConnection(); await connection.beginTransaction();
+    const trip = await findAccessibleTrip(tripId, req.account, connection, true);
+    if (!trip) { await connection.rollback(); return res.status(404).json({ error: 'Trip not found.' }); }
+    const [expenses] = await connection.execute('SELECT COUNT(*) AS count FROM expenses WHERE trip_id = ?', [tripId]);
+    if (Number(expenses[0].count)) { await connection.rollback(); return res.status(409).json({ error: 'This trip has expenses. Cancel the trip to preserve its history.' }); }
+    await connection.execute('DELETE FROM trips WHERE id = ?', [tripId]); await connection.commit(); res.json({ ok: true });
+  } catch (error) { await connection?.rollback(); console.error(error); res.status(500).json({ error: 'Could not delete this trip.' }); }
+  finally { connection?.release(); }
+});
+
+app.get('/api/trips/:tripId/analytics', async (req, res) => {
+  const tripId = Number(req.params.tripId);
+  if (!Number.isInteger(tripId) || tripId <= 0) return res.status(400).json({ error: 'Provide a valid trip ID.' });
+  try {
+    const trip = await findAccessibleTrip(tripId, req.account);
+    if (!trip) return res.status(404).json({ error: 'Trip not found.' });
+    const [sumRows] = await pool.execute('SELECT COALESCE(SUM(amount), 0) AS totalSpent, COUNT(*) AS expenseCount FROM expenses WHERE trip_id = ? AND voided_at IS NULL', [tripId]);
+    const [members] = await pool.execute(
+      `SELECT gm.person_id AS memberId, p.name AS memberName, COALESCE(paid.amount, 0) AS paid,
+              COALESCE(shares.amount, 0) AS share, COALESCE(paid.amount, 0) - COALESCE(shares.amount, 0) AS netContribution
+       FROM group_members gm JOIN people p ON p.id = gm.person_id
+       LEFT JOIN (SELECT paid_by, SUM(amount) amount FROM expenses WHERE trip_id = ? AND voided_at IS NULL GROUP BY paid_by) paid ON paid.paid_by = gm.person_id
+       LEFT JOIN (SELECT s.person_id, SUM(s.amount) amount FROM splits s JOIN expenses e ON e.id = s.expense_id WHERE e.trip_id = ? AND e.voided_at IS NULL GROUP BY s.person_id) shares ON shares.person_id = gm.person_id
+       WHERE gm.group_id = ? ORDER BY p.name`, [tripId, tripId, trip.group_id]);
+    const [categories] = await pool.execute('SELECT category, SUM(amount) totalAmount, COUNT(*) expenseCount FROM expenses WHERE trip_id = ? AND voided_at IS NULL GROUP BY category ORDER BY totalAmount DESC', [tripId]);
+    const [monthly] = await pool.execute("SELECT DATE_FORMAT(created_at, '%Y-%m') month, SUM(amount) totalAmount, COUNT(*) expenseCount FROM expenses WHERE trip_id = ? AND voided_at IS NULL GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY month", [tripId]);
+    const [top] = await pool.execute('SELECT e.id expenseId, e.title, e.amount, e.category, p.name paidBy, e.created_at createdAt FROM expenses e JOIN people p ON p.id = e.paid_by WHERE e.trip_id = ? AND e.voided_at IS NULL ORDER BY e.amount DESC, e.id DESC LIMIT 10', [tripId]);
+    const totalSpent = Number(sumRows[0].totalSpent || 0); const budget = trip.budget_amount === null ? null : Number(trip.budget_amount);
+    res.json({ totalSpent, expenseCount: Number(sumRows[0].expenseCount), remainingBudget: budget === null ? null : budget - totalSpent,
+      budgetPercentage: budget > 0 ? totalSpent / budget * 100 : budget === 0 ? null : null,
+      memberStats: members.map(row => ({ ...row, paid: Number(row.paid), share: Number(row.share), netContribution: Number(row.netContribution) })),
+      categoryStats: categories.map(row => ({ ...row, totalAmount: Number(row.totalAmount), expenseCount: Number(row.expenseCount), percentage: totalSpent ? Number(row.totalAmount) / totalSpent * 100 : 0 })),
+      monthlyTrend: monthly.map(row => ({ ...row, totalAmount: Number(row.totalAmount), expenseCount: Number(row.expenseCount) })),
+      topExpenses: top.map(row => ({ ...row, amount: Number(row.amount) })) });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load trip analytics.' }); }
 });
 
 app.get('/api/groups/:groupId/analytics', async (req, res) => {

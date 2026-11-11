@@ -121,6 +121,25 @@ CREATE TABLE IF NOT EXISTS group_members (
   CONSTRAINT fk_group_members_person FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS trips (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  group_id INT NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  destination VARCHAR(255) NULL,
+  description TEXT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  budget_amount DECIMAL(12, 2) NULL,
+  created_by INT NOT NULL,
+  status ENUM('planned', 'active', 'completed', 'cancelled') NOT NULL DEFAULT 'planned',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_trips_group FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE,
+  CONSTRAINT fk_trips_creator FOREIGN KEY (created_by) REFERENCES people(id),
+  INDEX idx_trips_group_status (group_id, status),
+  INDEX idx_trips_dates (start_date, end_date)
+);
+
 CREATE TABLE IF NOT EXISTS budgets (
   id INT AUTO_INCREMENT PRIMARY KEY,
   workspace_id INT NOT NULL,
@@ -152,6 +171,7 @@ CREATE TABLE IF NOT EXISTS budgets (
 CREATE TABLE IF NOT EXISTS expenses (
   id INT AUTO_INCREMENT PRIMARY KEY,
   group_id INT NOT NULL,
+  trip_id INT NULL,
   title VARCHAR(255) NOT NULL,
   amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
   paid_by INT NOT NULL,
@@ -161,9 +181,11 @@ CREATE TABLE IF NOT EXISTS expenses (
   voided_by INT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_expenses_group FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE,
+  CONSTRAINT fk_expenses_trip FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE SET NULL,
   CONSTRAINT fk_expenses_payer FOREIGN KEY (paid_by) REFERENCES people(id),
   CONSTRAINT fk_expenses_voided_by FOREIGN KEY (voided_by) REFERENCES people(id) ON DELETE SET NULL,
-  INDEX idx_expenses_voided (voided_at)
+  INDEX idx_expenses_voided (voided_at),
+  INDEX idx_expenses_trip (trip_id)
 );
 
 CREATE TABLE IF NOT EXISTS splits (
