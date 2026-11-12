@@ -155,7 +155,7 @@ test('all health paths are public before the API auth gate while protected APIs 
   }
 });
 
-test('two trusted reverse proxies preserve the client IP for rate-limit keys', async () => {
+test('two trusted reverse proxies preserve the client IP and ignore spoofed forwarded entries', async () => {
   const app = express();
   app.set('trust proxy', 2);
   app.get('/api/ip', (req, res) => res.json({ ip: req.ip }));
@@ -164,7 +164,9 @@ test('two trusted reverse proxies preserve the client IP for rate-limit keys', a
   });
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/ip`, {
-      headers: { 'X-Forwarded-For': '203.0.113.7, 172.20.0.4' },
+      // Simulate a client-supplied fake address followed by the actual client
+      // and host-proxy addresses appended by the two trusted proxy layers.
+      headers: { 'X-Forwarded-For': '198.51.100.99, 203.0.113.7, 172.20.0.4' },
     });
     assert.deepEqual(await response.json(), { ip: '203.0.113.7' });
   } finally {
