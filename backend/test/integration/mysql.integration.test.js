@@ -456,6 +456,8 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
 
       const tripStart = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
       const tripEnd = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+      expectStatus(await api(`/api/groups/${groupId}/trips`, { cookie: primary.cookie }), 200,
+        'group trip membership authorization immediately before trip creation');
       const tripResult = await api(`/api/groups/${groupId}/trips`, {
         method: 'POST', cookie: primary.cookie,
         body: { name: `${runWorkspacePrefix} Trip`, startDate: tripStart, endDate: tripEnd, budgetAmount: 1000, status: 'planned' },
