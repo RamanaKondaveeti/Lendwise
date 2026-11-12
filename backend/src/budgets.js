@@ -1,8 +1,12 @@
 const { isValidReportDate } = require('./reports');
 const { isSupportedCurrency, supportedCurrencies } = require('./currencies');
+const { amountToCents } = require('./expense-splits');
 
 function convertBudgetAmountToBase(amount, currency, exchangeRateToInr = 1) {
-  const numericAmount = Number(amount);
+  let inputCents;
+  try { inputCents = amountToCents(amount); }
+  catch { inputCents = null; }
+  const numericAmount = inputCents === null ? NaN : inputCents / 100;
   const rate = Number(exchangeRateToInr);
   if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !isSupportedCurrency(currency) ||
       !Number.isFinite(rate) || rate <= 0 || (currency === 'INR' && Math.abs(rate - 1) > 0.000001)) {

@@ -62,6 +62,10 @@ test('rejects group balances whose credits and debits do not reconcile', () => {
   );
 });
 
+test('rejects balance values with sub-paisa precision instead of rounding them', () => {
+  assert.throws(() => calculateMinimalSettlements(members([1.001, -1])), /valid person ID and amount/);
+});
+
 test('allows partial group settlements only within both outstanding balances', () => {
   assert.equal(validateGroupSettlement(1000, -800, 350), true);
   assert.equal(validateGroupSettlement(1000, -800, 801), false);

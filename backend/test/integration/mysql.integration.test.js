@@ -532,6 +532,10 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
         groupId, title: `${runWorkspacePrefix} Dinner`, amount: 100, paidBy: primary.personId,
         participants: [primary.personId, participantId],
       };
+      expectStatus(await api('/api/expenses', {
+        method: 'POST', cookie: primary.cookie,
+        body: { ...expenseBody, title: `${runWorkspacePrefix} Invalid precision`, amount: 1.001 },
+      }), 400, 'expense amount finer than one paise');
       const key = `it-expense-${runId}`;
       const duplicateResults = await Promise.all([
         api('/api/expenses', { method: 'POST', cookie: primary.cookie, body: expenseBody, key }),
@@ -573,12 +577,20 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       expectStatus(concurrentDistinct, 201, 'different idempotency key');
       assert.notEqual(concurrentDistinct.body.id, expenseId);
 
+      expectStatus(await api(`/api/expenses/${expenseId}`, {
+        method: 'PUT', cookie: primary.cookie,
+        body: { title: 'Invalid precision edit', amount: 100.001, paidBy: primary.personId, category: 'Food', splitMethod: 'equal', participants: [primary.personId, participantId] },
+      }), 400, 'expense edit amount finer than one paise');
       const updated = await api(`/api/expenses/${expenseId}`, {
         method: 'PUT', cookie: primary.cookie,
         body: { title: `${runWorkspacePrefix} Dinner edited`, amount: 120, paidBy: primary.personId, category: 'Food', splitMethod: 'equal', participants: [primary.personId, participantId] },
       });
       expectStatus(updated, 200, 'expense edit');
       const partialBody = { payments: [{ personId: participantId, amount: 20 }] };
+      expectStatus(await api(`/api/expenses/${expenseId}/settle`, {
+        method: 'POST', cookie: primary.cookie,
+        body: { payments: [{ personId: participantId, amount: 1.001 }] },
+      }), 400, 'settlement amount finer than one paise');
       const settleKey = `it-expense-settle-${runId}`;
       const settlements = await Promise.all([
         api(`/api/expenses/${expenseId}/settle`, { method: 'POST', cookie: primary.cookie, body: partialBody, key: settleKey }),
@@ -606,6 +618,10 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
         payerId: participantId, payeeId: primary.personId, amount: 10, groupId,
         note: 'Integration partial settlement',
       };
+      expectStatus(await api('/api/settlements', {
+        method: 'POST', cookie: primary.cookie,
+        body: { ...groupSettlementBody, amount: 1.001 },
+      }), 400, 'group settlement amount finer than one paise');
       const groupSettlementKey = `it-group-settlement-${runId}`;
       const groupSettlementResults = await Promise.all([
         api('/api/settlements', { method: 'POST', cookie: primary.cookie, body: groupSettlementBody, key: groupSettlementKey }),
@@ -652,14 +668,18 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       expectStatus(await api(`/api/groups/${groupId}/activity`, { cookie: primary.cookie }), 200, 'group activity');
 
       const recurringStart = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+      const recurringBody = {
+        title: `${runWorkspacePrefix} Recurring`, description: '', category: 'Food', groupId,
+        paidBy: primary.personId, amount: 12, exchangeRateToInr: 1, currency: 'INR',
+        frequency: 'weekly', splitMethod: 'equal', variableAmount: false, startDate: recurringStart,
+        participants: [{ personId: primary.personId }, { personId: participantId }],
+      };
+      expectStatus(await api('/api/recurring-expenses', {
+        method: 'POST', cookie: primary.cookie, body: { ...recurringBody, amount: 12.001 },
+      }), 400, 'recurring expense amount finer than one paise');
       const recurring = await api('/api/recurring-expenses', {
         method: 'POST', cookie: primary.cookie,
-        body: {
-          title: `${runWorkspacePrefix} Recurring`, description: '', category: 'Food', groupId,
-          paidBy: primary.personId, amount: 12, exchangeRateToInr: 1, currency: 'INR',
-          frequency: 'weekly', splitMethod: 'equal', variableAmount: false, startDate: recurringStart,
-          participants: [{ personId: primary.personId }, { personId: participantId }],
-        },
+        body: recurringBody,
       });
       expectStatus(recurring, 201, 'recurring expense template');
       await db.execute('UPDATE recurring_expenses SET next_occurrence_date = UTC_DATE() - INTERVAL 1 DAY WHERE id = ?', [recurring.body.id]);

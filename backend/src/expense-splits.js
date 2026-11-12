@@ -10,6 +10,14 @@ function amountToCents(value) {
   return cents;
 }
 
+function tryAmountToCents(value) {
+  try {
+    return amountToCents(value);
+  } catch {
+    return null;
+  }
+}
+
 function percentageToUnits(value) {
   if (typeof value !== 'string' && typeof value !== 'number') {
     throw new TypeError('Each percentage must be a nonnegative value with at most two decimals.');
@@ -186,4 +194,4 @@ function allocateItemWiseSplits(expenseTotalCents, items) {
   return { items: normalizedItems, allocations: aggregateAllocations };
 }
 
-module.exports = { amountToCents, allocateExpenseSplits, allocateItemWiseSplits, percentageToUnits, positiveShareCount, quantityToMillis };
+module.exports = { amountToCents, allocateExpenseSplits, allocateItemWiseSplits, percentageToUnits, positiveShareCount, quantityToMillis, tryAmountToCents };

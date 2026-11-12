@@ -10,7 +10,7 @@ const helmet = require('helmet');
 const multer = require('multer');
 const { TextractClient, AnalyzeExpenseCommand } = require('@aws-sdk/client-textract');
 const { calculateMinimalSettlements, validateGroupSettlement } = require('./settlements');
-const { allocateExpenseSplits, allocateItemWiseSplits } = require('./expense-splits');
+const { allocateExpenseSplits, allocateItemWiseSplits, tryAmountToCents } = require('./expense-splits');
 const { expenseVoidRejection } = require('./expense-void');
 const { createNotifications, reminderPeriodKey } = require('./notifications');
 const {
@@ -2106,8 +2106,9 @@ app.post('/api/recurring-expenses', async (req, res) => {
   const groupId = Number(body.groupId);
   const paidBy = Number(body.paidBy);
   const amount = Number(body.amount);
+  const amountCents = tryAmountToCents(body.amount);
   const exchangeRateToInr = Number(body.exchangeRateToInr);
-  const baseAmount = Math.round(amount * exchangeRateToInr * 100) / 100;
+  const baseAmount = Math.round((amountCents / 100) * exchangeRateToInr * 100) / 100;
   const participantInput = Array.isArray(body.participants) ? body.participants : [];
   const participants = participantInput.map(participant => ({
     personId: Number(participant?.personId),
@@ -2136,7 +2137,7 @@ app.post('/api/recurring-expenses', async (req, res) => {
       !Number.isFinite(amount) || amount <= 0 || amount > 9999999999 ||
       !Number.isFinite(exchangeRateToInr) || exchangeRateToInr <= 0 ||
       exchangeRateToInr >= 10000000 || baseAmount > 9999999999.99 ||
-      !Number.isSafeInteger(Math.round(amount * 100)) ||
+      !Number.isSafeInteger(amountCents) ||
       !Number.isSafeInteger(Math.round(baseAmount * 100)) || baseAmount <= 0 ||
       !isSupportedCurrency(currency) ||
       (currency === 'INR' && Math.abs(exchangeRateToInr - 1) > 0.000001) ||
@@ -2191,7 +2192,7 @@ app.post('/api/recurring-expenses', async (req, res) => {
        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
       [
         req.account.workspace_id, groupId, req.account.person_id, paidBy, title, description || null,
-        amount, baseAmount, currency, exchangeRateToInr, category, splitMethod,
+        amountCents / 100, baseAmount, currency, exchangeRateToInr, category, splitMethod,
         body.variableAmount, frequency, startDate, endDate, anchorMonth, anchorDay, startDate,
       ]
     );
@@ -2232,8 +2233,9 @@ app.put('/api/recurring-expenses/:templateId', async (req, res) => {
   const groupId = Number(body.groupId);
   const paidBy = Number(body.paidBy);
   const amount = Number(body.amount);
+  const amountCents = tryAmountToCents(body.amount);
   const exchangeRateToInr = Number(body.exchangeRateToInr);
-  const baseAmount = Math.round(amount * exchangeRateToInr * 100) / 100;
+  const baseAmount = Math.round((amountCents / 100) * exchangeRateToInr * 100) / 100;
   const participantInput = Array.isArray(body.participants) ? body.participants : [];
   const participants = participantInput.map(participant => ({
     personId: Number(participant?.personId),
@@ -2261,7 +2263,7 @@ app.put('/api/recurring-expenses/:templateId', async (req, res) => {
       !Number.isFinite(amount) || amount <= 0 || amount > 9999999999 ||
       !Number.isFinite(exchangeRateToInr) || exchangeRateToInr <= 0 ||
       exchangeRateToInr >= 10000000 || baseAmount > 9999999999.99 ||
-      !Number.isSafeInteger(Math.round(amount * 100)) ||
+      !Number.isSafeInteger(amountCents) ||
       !Number.isSafeInteger(Math.round(baseAmount * 100)) || baseAmount <= 0 ||
       !isSupportedCurrency(currency) ||
       (currency === 'INR' && Math.abs(exchangeRateToInr - 1) > 0.000001) ||
@@ -2339,7 +2341,7 @@ app.put('/api/recurring-expenses/:templateId', async (req, res) => {
        anchor_month = ?, anchor_day = ?, next_occurrence_date = ?, status = ?
        WHERE id = ?`,
       [
-        groupId, paidBy, title, description || null, amount, baseAmount, currency,
+        groupId, paidBy, title, description || null, amountCents / 100, baseAmount, currency,
         exchangeRateToInr, category, splitMethod, body.variableAmount, frequency, startDate,
         endDate, anchorMonth, anchorDay, nextDate, status, templateId,
       ]
@@ -2423,6 +2425,7 @@ app.delete('/api/recurring-expenses/:templateId', async (req, res) => {
 app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confirm', async (req, res) => {
   const templateId = Number(req.params.templateId);
   const amount = Number(req.body?.amount);
+  const amountCents = tryAmountToCents(req.body?.amount);
   let occurrenceDate;
   try {
     occurrenceDate = dateOnly(req.params.occurrenceDate);
@@ -2431,7 +2434,7 @@ app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confir
   }
   if (!Number.isInteger(templateId) || templateId <= 0 ||
       !Number.isFinite(amount) || amount <= 0 || amount > 9999999999 ||
-      !Number.isSafeInteger(Math.round(amount * 100))) {
+      !Number.isSafeInteger(amountCents)) {
     return res.status(400).json({ error: 'Enter a positive actual amount.' });
   }
 
@@ -2468,7 +2471,7 @@ app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confir
        WHERE template_id = ? ORDER BY person_id`,
       [templateId]
     );
-    const baseAmount = Math.round(amount * Number(template.exchange_rate_to_inr) * 100) / 100;
+    const baseAmount = Math.round((amountCents / 100) * Number(template.exchange_rate_to_inr) * 100) / 100;
     if (!Number.isSafeInteger(Math.round(baseAmount * 100)) || baseAmount <= 0 || baseAmount > 9999999999.99) {
       throw new Error('The confirmed amount could not be converted to the stored base currency.');
     }
@@ -2476,7 +2479,7 @@ app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confir
       connection,
       template,
       occurrenceDate,
-      amount,
+      amountCents / 100,
       baseAmount,
       participants
     );
@@ -2986,7 +2989,9 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
   const { title, amount, paidBy, category } = body;
   const participants = body.participants ?? body.allocations;
   const splitMethod = body.splitMethod;
-  const amountCents = Math.round(Number(amount) * 100);
+  const amountCents = tryAmountToCents(amount);
+  const taxAmountCents = body.taxAmount === undefined || body.taxAmount === null || body.taxAmount === ''
+    ? null : tryAmountToCents(body.taxAmount);
   if (!Number.isInteger(expenseId) || expenseId <= 0 ||
       typeof title !== 'string' || !title.trim() || title.trim().length > 255 ||
       typeof category !== 'string' || !category.trim() || category.trim().length > 100 ||
@@ -2995,7 +3000,7 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
       !Number.isInteger(Number(paidBy)) || Number(paidBy) <= 0 ||
       (body.receiptDate !== undefined && body.receiptDate !== null && body.receiptDate !== '' && !isValidReportDate(body.receiptDate)) ||
       (body.taxAmount !== undefined && body.taxAmount !== null && body.taxAmount !== '' &&
-        (!Number.isFinite(Number(body.taxAmount)) || Number(body.taxAmount) < 0 || Number(body.taxAmount) > 9999999999.99)) ||
+        (!Number.isSafeInteger(taxAmountCents) || taxAmountCents > 999999999999)) ||
       !['equal', 'exact', 'percentage', 'shares', 'itemwise'].includes(splitMethod)) {
     return res.status(400).json({ error: 'Provide a valid title, positive amount, category, payer, and split method.' });
   }
@@ -3100,7 +3105,7 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
       'UPDATE expenses SET title = ?, amount = ?, category = ?, paid_by = ?, split_method = ?, trip_id = ?, receipt_date = ?, tax_amount = ? WHERE id = ?',
       [title.trim(), amountCents / 100, category.trim(), normalizedPaidBy, splitMethod, tripId,
         body.receiptDate === undefined ? current.receipt_date : body.receiptDate || null,
-        body.taxAmount === undefined ? current.tax_amount : body.taxAmount, expenseId]
+        body.taxAmount === undefined ? current.tax_amount : taxAmountCents === null ? null : taxAmountCents / 100, expenseId]
     );
     await recordGroupActivity(connection, { groupId: current.group_id, activityType: 'expense_edited', actorId: req.account.person_id, entityType: 'expense', entityId: expenseId, entityName: title.trim(), description: `edited expense ${title.trim()}`, amount: amountCents / 100 });
     await connection.execute('DELETE FROM splits WHERE expense_id = ?', [expenseId]);
@@ -3265,7 +3270,7 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
   const requestedPayments = Array.isArray(req.body?.payments)
     ? req.body.payments.map(payment => ({
       personId: Number(payment?.personId),
-      amountCents: Math.round(Number(payment?.amount) * 100)
+      amountCents: tryAmountToCents(payment?.amount)
     }))
     : null;
   const personIds = requestedPayments
@@ -3394,7 +3399,7 @@ app.post('/api/settlements/bulk', async (req, res) => {
   const normalizedPayments = payments.map(payment => {
     const payerId = Number(payment?.payerId);
     const payeeId = Number(payment?.payeeId);
-    const amountCents = Math.round(Number(payment?.amount) * 100);
+    const amountCents = tryAmountToCents(payment?.amount);
     return { payerId, payeeId, amountCents };
   });
   const paymentPairs = normalizedPayments.map(payment => `${payment.payerId}:${payment.payeeId}`);
@@ -3599,10 +3604,11 @@ app.post('/api/expenses', async (req, res) => {
   const requestedTripId = req.body?.tripId === undefined || req.body.tripId === null || req.body.tripId === '' ? null : Number(req.body.tripId);
   const receiptDate = req.body?.receiptDate || null;
   const taxAmount = req.body?.taxAmount === undefined || req.body.taxAmount === null || req.body.taxAmount === '' ? null : Number(req.body.taxAmount);
+  const taxAmountCents = taxAmount === null ? null : tryAmountToCents(req.body.taxAmount);
   const splitMethod = req.body?.splitMethod ?? 'equal';
   const normalizedGroupId = Number(groupId);
   const normalizedPaidBy = Number(paidBy);
-  const amountCents = Math.round(Number(amount) * 100);
+  const amountCents = tryAmountToCents(amount);
   let allocations = null;
   let itemWiseDetails = null;
   try {
@@ -3624,7 +3630,7 @@ app.post('/api/expenses', async (req, res) => {
       !Number.isInteger(normalizedPaidBy) || normalizedPaidBy <= 0 ||
       (requestedTripId !== null && (!Number.isInteger(requestedTripId) || requestedTripId <= 0)) ||
       (receiptDate !== null && !isValidReportDate(receiptDate)) ||
-      (taxAmount !== null && (!Number.isFinite(taxAmount) || taxAmount < 0 || taxAmount > 9999999999.99 || !Number.isSafeInteger(Math.round(taxAmount * 100))) ) ||
+      (taxAmount !== null && (!Number.isFinite(taxAmount) || !Number.isSafeInteger(taxAmountCents) || taxAmountCents > 999999999999)) ||
       (splitMethod !== 'itemwise' && !Array.isArray(participants)) || !participantIds.length) {
     return res.status(400).json({ error: 'Add a title, positive amount, group, and participants.' });
   }
@@ -3665,7 +3671,7 @@ app.post('/api/expenses', async (req, res) => {
     if (!idempotency) { inTransaction = false; return; }
     const [expense] = await connection.execute(
       'INSERT INTO expenses(group_id, trip_id, receipt_date, tax_amount, title, amount, paid_by, category, split_method) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [normalizedGroupId, requestedTripId, receiptDate, taxAmount, title.trim(), amountCents / 100, normalizedPaidBy, category, splitMethod]
+      [normalizedGroupId, requestedTripId, receiptDate, taxAmountCents === null ? null : taxAmountCents / 100, title.trim(), amountCents / 100, normalizedPaidBy, category, splitMethod]
     );
     await recordGroupActivity(connection, { groupId: normalizedGroupId, activityType: 'expense_created', actorId: req.account.person_id, entityType: 'expense', entityId: expense.insertId, entityName: title.trim(), description: `added expense ${title.trim()}`, amount: amountCents / 100 });
     for (const { personId, cents } of allocations) {
@@ -4211,7 +4217,7 @@ app.post('/api/settlements', async (req, res) => {
   const normalizedPayerId = Number(payerId);
   const normalizedPayeeId = Number(payeeId);
   const normalizedGroupId = groupId === undefined || groupId === null ? null : Number(groupId);
-  const amountCents = Math.round(Number(amount) * 100);
+  const amountCents = tryAmountToCents(amount);
   if (!Number.isInteger(normalizedPayerId) || normalizedPayerId <= 0 ||
       !Number.isInteger(normalizedPayeeId) || normalizedPayeeId <= 0 ||
       normalizedPayerId === normalizedPayeeId ||

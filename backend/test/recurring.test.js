@@ -28,6 +28,7 @@ test('equal and custom allocations conserve every cent', () => {
   ]);
   assert.equal(custom.reduce((sum, share) => sum + share.amount, 0), 10);
   assert.throws(() => splitExpenseAmount(10, [2, 3], 'custom', [60, 30]), /100%/);
+  assert.throws(() => splitExpenseAmount(10.001, [2, 3]), /positive amount/);
 });
 
 test('generated expenses and all participant splits are inserted with a traceable occurrence link', async () => {
@@ -85,6 +86,26 @@ test('unique occurrence reservation prevents a second generation for the same te
   assert.equal(await reserveOccurrence(executor, 15, '2025-01-01'), false);
   assert.equal(await reserveOccurrence(executor, 15, '2025-02-01'), true);
   assert.equal(await reserveOccurrence(executor, 16, '2025-01-01'), true);
+});
+
+test('concurrent recurring retries reserve one occurrence only', async () => {
+  let inserted = false;
+  const executor = {
+    async execute() {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      if (inserted) {
+        const error = new Error('Duplicate occurrence.');
+        error.code = 'ER_DUP_ENTRY';
+        throw error;
+      }
+      inserted = true;
+      return [{ affectedRows: 1 }];
+    },
+  };
+  assert.deepEqual(await Promise.all([
+    reserveOccurrence(executor, 15, '2025-01-01'),
+    reserveOccurrence(executor, 15, '2025-01-01'),
+  ]), [true, false]);
 });
 
 test('occurrence reservation only treats duplicate-key errors as an existing occurrence', async () => {

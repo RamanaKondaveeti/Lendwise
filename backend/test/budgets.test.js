@@ -82,6 +82,7 @@ test('INR and USD budget values normalize to the stored INR base amount', () => 
   assert.deepEqual(convertBudgetAmountToBase(10, 'USD', 83.125), {
     amount: 831.25, exchangeRateToInr: 83.125,
   });
+  assert.throws(() => convertBudgetAmountToBase(10.001, 'INR', 1), /positive amount/);
   assert.equal(validateBudgetInput({
     name: 'USD budget', budgetType: 'personal', amount: 10, currency: 'USD',
     exchangeRateToInr: 83.125, period: 'monthly', startDate: '2026-11-01',

@@ -3,7 +3,7 @@ const frequencyMonths = {
   quarterly: 3,
   yearly: 12,
 };
-const { allocateExpenseSplits } = require('./expense-splits');
+const { allocateExpenseSplits, amountToCents } = require('./expense-splits');
 
 function dateOnly(value) {
   if (value instanceof Date) {
@@ -46,7 +46,9 @@ function nextOccurrenceDate(value, frequency, anchorMonth, anchorDay) {
 }
 
 function splitExpenseAmount(amount, participantIds, splitMethod = 'equal', percentages = []) {
-  const totalCents = Math.round(Number(amount) * 100);
+  let totalCents;
+  try { totalCents = amountToCents(amount); }
+  catch { totalCents = null; }
   if (!Number.isSafeInteger(totalCents) || totalCents <= 0 ||
       !Array.isArray(participantIds) || !participantIds.length ||
       new Set(participantIds).size !== participantIds.length) {

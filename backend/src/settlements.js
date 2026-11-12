@@ -1,3 +1,5 @@
+const { amountToCents } = require('./expense-splits');
+
 function validateGroupSettlement(payerBalanceCents, payeeBalanceCents, amountCents) {
   return Number.isSafeInteger(payerBalanceCents) &&
     Number.isSafeInteger(payeeBalanceCents) &&
@@ -12,7 +14,13 @@ function calculateMinimalSettlements(people) {
   if (!Array.isArray(people)) throw new TypeError('Balances must be an array.');
 
   const members = people.map(person => {
-    const balanceCents = Math.round(Number(person.balance) * 100);
+    const amount = Number(person.balance);
+    let balanceCents;
+    try {
+      balanceCents = (amount < 0 ? -1 : 1) * amountToCents(Math.abs(amount));
+    } catch {
+      balanceCents = NaN;
+    }
     if (!Number.isInteger(person.id) || !Number.isSafeInteger(balanceCents)) {
       throw new TypeError('Each balance requires a valid person ID and amount.');
     }

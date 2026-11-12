@@ -1,12 +1,31 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { amountToCents, allocateExpenseSplits } = require('../src/expense-splits');
+const { amountToCents, allocateExpenseSplits, tryAmountToCents } = require('../src/expense-splits');
 
 test('equal allocation keeps the existing cent distribution', () => {
   assert.deepEqual(allocateExpenseSplits(1000, [2, 3, 4]), [
     { personId: 2, cents: 334 },
     { personId: 3, cents: 333 },
     { personId: 4, cents: 333 },
+  ]);
+});
+
+test('equal rupee splits conserve ₹100 and ₹999.99 across three, six, and seven people', () => {
+  for (const [totalCents, people, expected] of [
+    [10000, 3, [3334, 3333, 3333]],
+    [10000, 6, [1667, 1667, 1667, 1667, 1666, 1666]],
+    [99999, 7, [14286, 14286, 14286, 14286, 14285, 14285, 14285]],
+  ]) {
+    const allocations = allocateExpenseSplits(totalCents, Array.from({ length: people }, (_, index) => index + 1));
+    assert.deepEqual(allocations.map(row => row.cents), expected);
+    assert.equal(allocations.reduce((sum, row) => sum + row.cents, 0), totalCents);
+  }
+});
+
+test('only selected participants receive allocations; excluded group members are omitted', () => {
+  assert.deepEqual(allocateExpenseSplits(10000, [4, 9]), [
+    { personId: 4, cents: 5000 },
+    { personId: 9, cents: 5000 },
   ]);
 });
 
@@ -53,6 +72,17 @@ test('exact allocation rejects negative, excessive precision, and duplicate part
     { personId: 2, amount: '0.50' },
     { personId: 2, amount: '0.50' },
   ], 'exact'), /unique/);
+});
+
+test('money input rejects negative values and precision finer than one paise', () => {
+  for (const amount of [-1, '-0.01', 1.001, 1.0001, '10.999', '1.0001', '1e2', 'not-a-number', '', NaN, Infinity, -Infinity]) {
+    assert.throws(() => amountToCents(amount));
+    assert.equal(tryAmountToCents(amount), null);
+  }
+  for (const [amount, cents] of [[0.01, 1], [1, 100], [1.10, 110], ['1.10', 110], [999.99, 99999]]) {
+    assert.equal(amountToCents(amount), cents);
+    assert.equal(tryAmountToCents(amount), cents);
+  }
 });
 
 test('percentage allocation accepts decimal percentages totaling exactly 100%', () => {
