@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const express = require('express');
 const {
   createRequestId,
   logError,
@@ -9,6 +10,7 @@ const {
   writeLog,
 } = require('../src/logger');
 const { createHealthHandlers } = require('../src/health');
+const { createApiAuthGate, createRequireAuth } = require('../src/auth-middleware');
 
 test('request IDs accept safe values and replace malformed or injectable values', () => {
   assert.equal(createRequestId('request-123456'), 'request-123456');
@@ -110,4 +112,37 @@ test('readiness returns success when database connectivity succeeds', async () =
   await handlers.ready({}, ready);
   assert.equal(ready.statusCode, 200);
   assert.deepEqual(ready.body, { ok: true });
+});
+
+test('all health paths are public before the API auth gate while protected APIs still require a session', async () => {
+  const app = express();
+  let readinessChecks = 0;
+  const health = createHealthHandlers({ checkDatabase: async () => { readinessChecks += 1; } });
+  const requireAuth = createRequireAuth({ lookupAccount: async () => null, clearSessionCookie() {} });
+
+  // Match production ordering: the global /api gate is mounted before these routes.
+  app.use('/api', createApiAuthGate({ requireAuth }));
+  app.get('/api/health/live', health.live);
+  app.get('/api/health/ready', health.ready);
+  app.get('/api/health', health.ready);
+  app.get('/api/expenses', (_req, res) => res.json({ ok: true }));
+
+  const server = await new Promise(resolve => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    for (const path of ['/api/health/live', '/api/health/ready', '/api/health']) {
+      const response = await fetch(`${base}${path}`);
+      assert.equal(response.status, 200, `${path} should not require a session`);
+      assert.deepEqual(await response.json(), { ok: true });
+    }
+    assert.equal(readinessChecks, 2, 'liveness must not query MySQL');
+
+    const protectedResponse = await fetch(`${base}/api/expenses`);
+    assert.equal(protectedResponse.status, 401);
+    assert.deepEqual(await protectedResponse.json(), { error: 'Sign in to continue.' });
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });

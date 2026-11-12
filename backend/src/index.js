@@ -37,7 +37,7 @@ const { normalizeActivityQuery, activityTypeClause } = require('./group-activity
 const { supportedCurrencies, currencyEnumSql, isSupportedCurrency } = require('./currencies');
 const { validTripInput } = require('./trips');
 const { hasGroupMembership } = require('./authorization');
-const { createRequireAuth, getSessionToken } = require('./auth-middleware');
+const { createApiAuthGate, createRequireAuth, getSessionToken } = require('./auth-middleware');
 const { claimIdempotency, findIdempotencyReplay, readIdempotencyKey, saveIdempotentResponse } = require('./idempotency');
 const { maxReceiptBytes, prepareReceiptForTextract, scanReceipt, supportedTypes, validateReceiptFile } = require('./receipt-ocr');
 const { createHealthHandlers } = require('./health');
@@ -1059,11 +1059,7 @@ const requireAuth = createRequireAuth({
   clearSessionCookie,
 });
 
-app.use('/api', (req, res, next) => {
-  if (req.path === '/health' || req.path.startsWith('/auth/') ||
-      (req.method === 'GET' && /^\/invitations\/[^/]+$/.test(req.path))) return next();
-  return requireAuth(req, res, next);
-});
+app.use('/api', createApiAuthGate({ requireAuth }));
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({

@@ -30,4 +30,14 @@ function createRequireAuth({ lookupAccount, clearSessionCookie }) {
   };
 }
 
-module.exports = { createRequireAuth, getSessionToken };
+function createApiAuthGate({ requireAuth }) {
+  const publicHealthPaths = new Set(['/health', '/health/live', '/health/ready']);
+  return function apiAuthGate(req, res, next) {
+    if ((req.method === 'GET' && publicHealthPaths.has(req.path)) ||
+        req.path.startsWith('/auth/') ||
+        (req.method === 'GET' && /^\/invitations\/[^/]+$/.test(req.path))) return next();
+    return requireAuth(req, res, next);
+  };
+}
+
+module.exports = { createApiAuthGate, createRequireAuth, getSessionToken };
