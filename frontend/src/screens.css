@@ -976,3 +976,7 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
   .overview-insights-grid .budget-overview-list{grid-template-columns:minmax(0,1fr)}
   .overview-insights-grid .budget-overview-row{grid-template-columns:minmax(0,1fr) 38px}
 }
+
+/* Match insight card heights within each dashboard grid row. */
+.overview-insights-grid{align-items:stretch}
+.overview-insights-grid>.budget-overview-panel{align-self:stretch;min-height:100%}
