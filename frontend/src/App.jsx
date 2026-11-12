@@ -2738,7 +2738,7 @@ function App() {
         <div className="nav-label">WORKSPACE</div>
         <nav>
           {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [Wallet, 'Budgets'], [CalendarClock, 'Recurring'], [FileBarChart, 'Reports'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
-            <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} aria-current={tab === name ? 'page' : undefined} onClick={() => { setTab(name); setMobileNavOpen(false) }}>
+            <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => { setTab(name); setMobileNavOpen(false) }}>
               <Icon size={18} />{name}
               {name === 'Activity' && <span className="nav-count">{data.activityCount || 0}</span>}
               {name === 'Recurring' && recurringOccurrences.some(occurrence => occurrence.status === 'needs_confirmation') &&
@@ -3764,14 +3764,6 @@ function App() {
           <footer><span>Shared expenses, kept in sync.</span></footer>
         </div>
       </main>
-
-      <nav className="mobile-bottom-nav" aria-label="Quick navigation">
-        {[[LayoutDashboard, 'Overview'], [Users, 'Groups'], [ReceiptText, 'Activity'], [Wallet, 'Balances']].map(([Icon, name]) => (
-          <button key={name} type="button" className={tab === name ? 'active' : ''} aria-current={tab === name ? 'page' : undefined} onClick={() => setTab(name)}>
-            <Icon size={19} aria-hidden="true" /><span>{name === 'Overview' ? 'Home' : name}</span>
-          </button>
-        ))}
-      </nav>
 
       {!isOnline && <div className="pwa-offline-screen" role="status" aria-live="assertive">
         <div className="pwa-offline-card"><span className="pwa-offline-symbol">⌁</span><h2>You’re offline</h2><p>GroupBuk’s app shell is available, but financial data needs an internet connection. Reconnect to view current balances, expenses, and settlements.</p><small>No transactions are saved while offline.</small></div>
