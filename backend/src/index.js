@@ -36,6 +36,7 @@ const { buildGroupAnalyticsFilter } = require('./group-analytics');
 const { normalizeActivityQuery, activityTypeClause } = require('./group-activity');
 const { supportedCurrencies, currencyEnumSql, isSupportedCurrency } = require('./currencies');
 const { validTripInput } = require('./trips');
+const { claimIdempotency, findIdempotencyReplay, readIdempotencyKey, saveIdempotentResponse } = require('./idempotency');
 const { maxReceiptBytes, prepareReceiptForTextract, scanReceipt, supportedTypes, validateReceiptFile } = require('./receipt-ocr');
 const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
@@ -89,6 +90,70 @@ const q = async (text, params = []) => {
   const [result] = await pool.execute(text, params);
   return result;
 };
+
+async function beginIdempotentRequest(req, res, connection, operation) {
+  const parsed = readIdempotencyKey(req);
+  if (parsed.error) {
+    await connection.rollback();
+    res.status(400).json({ error: parsed.error });
+    return null;
+  }
+  const claim = await claimIdempotency(connection, {
+    accountId: req.account.id,
+    workspaceId: req.account.workspace_id,
+    operation,
+    key: parsed.key,
+    payload: req.body || {},
+  });
+  if (claim.kind === 'conflict') {
+    await connection.rollback();
+    res.status(409).json({ error: 'This Idempotency-Key was already used with a different request payload.' });
+    return null;
+  }
+  if (claim.kind === 'incomplete') {
+    await connection.rollback();
+    res.status(409).json({ error: 'This request key is currently being processed. Retry with the same key.' });
+    return null;
+  }
+  if (claim.kind === 'replay') {
+    await connection.rollback();
+    res.status(claim.status).json(claim.body);
+    return null;
+  }
+  return claim;
+}
+
+async function replayCompletedRequest(req, res, operation) {
+  const parsed = readIdempotencyKey(req);
+  if (parsed.error) {
+    res.status(400).json({ error: parsed.error });
+    return true;
+  }
+  if (!parsed.key) return false;
+  let result;
+  try {
+    result = await findIdempotencyReplay(pool, {
+      accountId: req.account.id,
+      workspaceId: req.account.workspace_id,
+      operation,
+      key: parsed.key,
+      payload: req.body || {},
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not verify the request key.' });
+    return true;
+  }
+  if (!result) return false;
+  if (result.kind === 'conflict') {
+    res.status(409).json({ error: 'This Idempotency-Key was already used with a different request payload.' });
+  } else if (result.kind === 'incomplete') {
+    res.status(409).json({ error: 'This request key is currently being processed. Retry with the same key.' });
+  } else {
+    res.status(result.status).json(result.body);
+  }
+  return true;
+}
 
 async function notifyPeople(executor, workspaceId, personIds, notification, excludeAccountId = null) {
   const people = [...new Set(personIds.map(Number))]
@@ -3158,6 +3223,7 @@ app.delete('/api/expenses/:expenseId', async (req, res) => {
 
 app.post('/api/expenses/:expenseId/settle', async (req, res) => {
   const expenseId = Number(req.params.expenseId);
+  if (await replayCompletedRequest(req, res, `POST /api/expenses/${expenseId}/settle`)) return;
   const legacyPersonIds = Array.isArray(req.body?.personIds) ? req.body.personIds.map(Number) : null;
   const requestedPayments = Array.isArray(req.body?.payments)
     ? req.body.payments.map(payment => ({
@@ -3182,6 +3248,8 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    const idempotency = await beginIdempotentRequest(req, res, connection, `POST /api/expenses/${expenseId}/settle`);
+    if (!idempotency) return;
     const [expenses] = await connection.execute(
       `SELECT e.id, e.paid_by, e.group_id, e.title, e.voided_at, g.name AS group_name
        FROM expenses e
@@ -3266,8 +3334,10 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
         dedupeKey: `settlement-recorded:${settlement.insertId}`,
       }, req.account.id);
     }
+    const responseBody = { ok: true, count: amounts.length };
+    await saveIdempotentResponse(connection, idempotency, 201, responseBody);
     await connection.commit();
-    res.status(201).json({ ok: true, count: amounts.length });
+    res.status(201).json(responseBody);
   } catch (error) {
     if (connection) await connection.rollback();
     console.error(error);
@@ -3278,6 +3348,7 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
 });
 
 app.post('/api/settlements/bulk', async (req, res) => {
+  if (await replayCompletedRequest(req, res, 'POST /api/settlements/bulk')) return;
   const payments = Array.isArray(req.body?.payments) ? req.body.payments : [];
   if (!payments.length || payments.length > 500) {
     return res.status(400).json({ error: 'No valid suggested payments were provided.' });
@@ -3303,6 +3374,8 @@ app.post('/api/settlements/bulk', async (req, res) => {
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    const idempotency = await beginIdempotentRequest(req, res, connection, 'POST /api/settlements/bulk');
+    if (!idempotency) return;
     await connection.execute(
       'SELECT id FROM people WHERE workspace_id = ? ORDER BY id FOR UPDATE',
       [req.account.workspace_id]
@@ -3357,8 +3430,10 @@ app.post('/api/settlements/bulk', async (req, res) => {
         dedupeKey: `settlement-recorded:${settlement.insertId}`,
       }, req.account.id);
     }
+    const responseBody = { ok: true, count: normalizedPayments.length };
+    await saveIdempotentResponse(connection, idempotency, 201, responseBody);
     await connection.commit();
-    res.status(201).json({ ok: true, count: normalizedPayments.length });
+    res.status(201).json(responseBody);
   } catch (error) {
     if (connection) await connection.rollback();
     console.error(error);
@@ -3481,6 +3556,7 @@ app.delete('/api/people/:id', async (req, res) => {
 });
 
 app.post('/api/expenses', async (req, res) => {
+  if (await replayCompletedRequest(req, res, 'POST /api/expenses')) return;
   const { groupId, title, amount, paidBy, category = 'Other', participants } = req.body || {};
   const requestedTripId = req.body?.tripId === undefined || req.body.tripId === null || req.body.tripId === '' ? null : Number(req.body.tripId);
   const receiptDate = req.body?.receiptDate || null;
@@ -3547,6 +3623,8 @@ app.post('/api/expenses', async (req, res) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     inTransaction = true;
+    const idempotency = await beginIdempotentRequest(req, res, connection, 'POST /api/expenses');
+    if (!idempotency) { inTransaction = false; return; }
     const [expense] = await connection.execute(
       'INSERT INTO expenses(group_id, trip_id, receipt_date, tax_amount, title, amount, paid_by, category, split_method) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [normalizedGroupId, requestedTripId, receiptDate, taxAmount, title.trim(), amountCents / 100, normalizedPaidBy, category, splitMethod]
@@ -3581,10 +3659,12 @@ app.post('/api/expenses', async (req, res) => {
       targetId: expense.insertId,
       dedupeKey: `expense-created:${expense.insertId}`,
     }, req.account.id);
+    const responseBody = { ok: true, id: expense.insertId };
+    await saveIdempotentResponse(connection, idempotency, 201, responseBody);
     await connection.commit();
     inTransaction = false;
     await runBudgetAlerts(req.account.workspace_id);
-    res.status(201).json({ ok: true, id: expense.insertId });
+    res.status(201).json(responseBody);
   } catch (error) {
     if (inTransaction) {
       try {
@@ -4085,6 +4165,7 @@ app.put('/api/groups/:groupId/members', async (req, res) => {
 });
 
 app.post('/api/settlements', async (req, res) => {
+  if (await replayCompletedRequest(req, res, 'POST /api/settlements')) return;
   const { payerId, payeeId, amount, groupId, note = 'Settlement' } = req.body || {};
   const normalizedPayerId = Number(payerId);
   const normalizedPayeeId = Number(payeeId);
@@ -4110,6 +4191,8 @@ app.post('/api/settlements', async (req, res) => {
     }
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    const idempotency = await beginIdempotentRequest(req, res, connection, 'POST /api/settlements');
+    if (!idempotency) return;
     let settlementId;
     if (normalizedGroupId !== null) {
       const [groupRows] = await connection.execute(
@@ -4164,8 +4247,10 @@ app.post('/api/settlements', async (req, res) => {
       targetId: normalizedGroupId === null ? settlementId : normalizedGroupId,
       dedupeKey: `settlement-recorded:${settlementId}`,
     }, req.account.id);
+    const responseBody = { ok: true };
+    await saveIdempotentResponse(connection, idempotency, 201, responseBody);
     await connection.commit();
-    res.status(201).json({ ok: true });
+    res.status(201).json(responseBody);
   } catch (error) {
     if (connection) {
       try {

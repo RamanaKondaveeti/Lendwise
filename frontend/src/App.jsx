@@ -934,6 +934,8 @@ function App() {
   const [analyticsGroup, setAnalyticsGroup] = useState('all')
   const [analyticsCategory, setAnalyticsCategory] = useState('all')
   const [busy, setBusy] = useState(false)
+  const financialRequestKeys = useRef(new Map())
+  const financialSubmitInFlight = useRef(false)
   const [notice, setNotice] = useState('')
   const [activity, setActivity] = useState([])
   const [activityLoading, setActivityLoading] = useState(false)
@@ -2336,6 +2338,8 @@ function App() {
 
   async function submit(event) {
     event.preventDefault()
+    const financialModal = ['expense', 'expense-settlement', 'settlement', 'settle-all'].includes(modal)
+    if (financialModal && financialSubmitInFlight.current) return
     if (['expense', 'expense-edit', 'expense-settlement', 'settlement'].includes(modal) && !Number.isFinite(exchangeRate)) {
       notify('A current currency rate is required before saving this amount.')
       return
@@ -2511,19 +2515,33 @@ function App() {
     }
 
     setBusy(true)
+    if (financialModal) financialSubmitInFlight.current = true
     try {
       const submittedModal = modal
+      const idempotencyScope = `${submittedModal}:${url}`
+      let idempotencyKey = null
+      if (financialModal) {
+        idempotencyKey = financialRequestKeys.current.get(idempotencyScope)
+        if (!idempotencyKey) {
+          idempotencyKey = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+          financialRequestKeys.current.set(idempotencyScope, idempotencyKey)
+        }
+      }
       const result = await request(url, {
         method: ['members', 'recurring-edit', 'expense-edit', 'trip-edit'].includes(submittedModal)
           ? 'PUT'
           : submittedModal === 'expense-category'
             ? 'PATCH'
             : 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+        },
         body: JSON.stringify(payload),
       })
       if (result.invitationUrl) setManualInviteLink(result.invitationUrl)
       else setModal('')
+      if (idempotencyKey) financialRequestKeys.current.delete(idempotencyScope)
       await refresh()
       setReloadKey(key => key + 1)
       refreshNotifications().catch(error => notify(error.message))
@@ -2536,6 +2554,7 @@ function App() {
         ? `Unable to save these changes because they conflict with recorded settlements: ${error.message}`
         : error.message)
     } finally {
+      if (financialModal) financialSubmitInFlight.current = false
       setBusy(false)
     }
   }

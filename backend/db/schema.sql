@@ -39,6 +39,22 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   INDEX idx_auth_sessions_expiration (expires_at)
 );
 
+CREATE TABLE IF NOT EXISTS idempotency_requests (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  account_id INT NOT NULL,
+  workspace_id INT NOT NULL,
+  operation VARCHAR(120) NOT NULL,
+  key_hash CHAR(64) NOT NULL,
+  payload_hash CHAR(64) NOT NULL,
+  response_status SMALLINT UNSIGNED NULL,
+  response_body JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_idempotency_requests_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_idempotency_requests_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_idempotency_account_workspace_operation_key (account_id, workspace_id, operation, key_hash),
+  INDEX idx_idempotency_created (created_at)
+);
+
 CREATE TABLE IF NOT EXISTS notification_preferences (
   account_id INT PRIMARY KEY,
   expense_created TINYINT(1) NOT NULL DEFAULT 1,
