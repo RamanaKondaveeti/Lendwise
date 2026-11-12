@@ -419,7 +419,7 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       }), 200, 'restore group member');
 
       const authenticatedIdentity = await api('/api/auth/me', { cookie: primary.cookie });
-      expectStatus(authenticatedIdentity, 200, 'authenticated identity before trip creation');
+      expectStatus(authenticatedIdentity, 200, 'authenticated identity after membership restore');
       assert.equal(Number(authenticatedIdentity.body.personId), Number(primary.personId),
         'the active session must resolve to the primary account person ID');
       assert.equal(Number(authenticatedIdentity.body.workspaceId), Number(primary.workspaceId),
@@ -444,7 +444,16 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       assert.equal(Number(tripAccess.session_workspace_id), Number(authenticatedIdentity.body.workspaceId));
       assert.equal(Number(tripAccess.group_workspace_id), Number(authenticatedIdentity.body.workspaceId));
       assert.equal(Number(tripAccess.member_person_id), Number(authenticatedIdentity.body.personId),
-        'the authenticated person must be a member of the group immediately before trip creation');
+        'the authenticated person must be a member of the group after membership restore');
+      const [[tripRouteAuthorization]] = await db.execute(
+        `SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id
+         WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`,
+        [groupId, authenticatedIdentity.body.workspaceId, authenticatedIdentity.body.personId]
+      );
+      assert.ok(tripRouteAuthorization,
+        'the exact group membership query used by the trip routes must match this authenticated identity');
+      expectStatus(await api(`/api/groups/${groupId}/trips`, { cookie: primary.cookie }), 200,
+        'group trip membership authorization immediately after membership restore');
 
       const foreignGroup = await api(`/api/groups/${groupId}/activity`, { cookie: second.cookie });
       expectStatus(foreignGroup, 404, 'cross-workspace group activity');
@@ -456,8 +465,19 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
 
       const tripStart = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
       const tripEnd = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+      const identityImmediatelyBeforeTrip = await api('/api/auth/me', { cookie: primary.cookie });
+      expectStatus(identityImmediatelyBeforeTrip, 200, 'authenticated identity after cross-workspace requests');
+      assert.equal(Number(identityImmediatelyBeforeTrip.body.personId), Number(authenticatedIdentity.body.personId));
+      assert.equal(Number(identityImmediatelyBeforeTrip.body.workspaceId), Number(authenticatedIdentity.body.workspaceId));
+      const [[tripAuthorizationImmediatelyBeforeTrip]] = await db.execute(
+        `SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id
+         WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`,
+        [groupId, identityImmediatelyBeforeTrip.body.workspaceId, identityImmediatelyBeforeTrip.body.personId]
+      );
+      assert.ok(tripAuthorizationImmediatelyBeforeTrip,
+        'group membership must still satisfy the exact trip authorization query after cross-workspace requests');
       expectStatus(await api(`/api/groups/${groupId}/trips`, { cookie: primary.cookie }), 200,
-        'group trip membership authorization immediately before trip creation');
+        'group trip membership authorization after cross-workspace requests');
       const tripResult = await api(`/api/groups/${groupId}/trips`, {
         method: 'POST', cookie: primary.cookie,
         body: { name: `${runWorkspacePrefix} Trip`, startDate: tripStart, endDate: tripEnd, budgetAmount: 1000, status: 'planned' },
