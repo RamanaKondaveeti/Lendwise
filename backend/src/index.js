@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { promisify } = require('util');
 const nodemailer = require('nodemailer');
-const rateLimit = require('express-rate-limit');
+const { default: rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const helmet = require('helmet');
 const multer = require('multer');
 const { TextractClient, AnalyzeExpenseCommand } = require('@aws-sdk/client-textract');
@@ -1021,7 +1021,9 @@ const receiptScanRateLimit = rateLimit({
   limit: 10,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  keyGenerator: req => `account:${req.account?.id || req.ip}`,
+  keyGenerator: req => req.account?.id
+    ? `account:${req.account.id}`
+    : ipKeyGenerator(req.ip),
   message: { error: 'Receipt scan limit reached. Try again in 15 minutes.' },
 });
 let textractClient;
@@ -2987,7 +2989,7 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
         return res.status(409).json({ error: 'A participant share cannot be reduced below the amount already settled.' });
       }
     }
-    if (amountCents < settledByParticipant.values().reduce((sum, cents) => sum + cents, 0)) {
+    if (amountCents < [...settledByParticipant.values()].reduce((sum, cents) => sum + cents, 0)) {
       await connection.rollback(); inTransaction = false;
       return res.status(409).json({ error: 'The expense amount cannot be reduced below its recorded settlement total.' });
     }
