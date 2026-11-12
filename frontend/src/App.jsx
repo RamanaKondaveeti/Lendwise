@@ -2011,6 +2011,19 @@ function App() {
     setModal('settle-all')
   }
 
+  function openIndividualSuggestedSettlement(payment) {
+    if (!Number.isFinite(exchangeRate)) {
+      notify('Wait for the currency rate to load before recording a settlement.')
+      return
+    }
+    setSettlementDefaults({
+      payerId: payment.payerId,
+      payeeId: payment.payeeId,
+      amount: (payment.amount * exchangeRate).toFixed(2),
+    })
+    setModal('settlement')
+  }
+
   function openPersonSettlement(person) {
     if (!Number.isFinite(exchangeRate)) {
       notify('Wait for the currency rate to load before recording a settlement.')
@@ -3768,6 +3781,7 @@ function App() {
                     <div className="settlement-plan-row" key={`${payment.payerId}-${payment.payeeId}-${index}`}>
                       <span><b>{payment.payer}</b> pays <b>{payment.payee}</b></span>
                       <strong>{formatMoney(payment.amount)}</strong>
+                      <button type="button" className="settlement-individual-action" disabled={busy} onClick={() => openIndividualSuggestedSettlement(payment)}>Settle individually</button>
                     </div>
                   ))}
                 </div>
