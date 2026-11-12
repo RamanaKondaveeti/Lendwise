@@ -2762,7 +2762,7 @@ function App() {
               <select value={currency} onChange={event => setCurrency(event.target.value)} aria-label="Currency">
                 {supportedCurrencies.map(code => <option key={code} value={code}>{code}</option>)}
               </select>
-              <small aria-live="polite">{currencyLoading ? 'Updating rate…' : currency === 'INR' ? 'Base currency' : Number.isFinite(exchangeRate) ? 'Converted' : 'Rate unavailable'}</small>
+              {currency !== 'INR' && <small aria-live="polite">{currencyLoading ? 'Updating rate…' : Number.isFinite(exchangeRate) ? 'Converted' : 'Rate unavailable'}</small>}
             </label>
             {!appInstalled && (installPromptEvent || iosSafariAvailable) && <button type="button" className="button button-light pwa-install-action" onClick={async () => { await installApp(); setInstallPromptEvent(null) }}><Download size={15} />Install GroupBuk</button>}
             <SiteShareButtons
@@ -3720,7 +3720,7 @@ function App() {
             </section>
           )}
 
-          <footer><span>Shared expenses, kept in sync.</span><span><CircleHelp size={13} /> Data saved to your database</span></footer>
+          <footer><span>Shared expenses, kept in sync.</span></footer>
         </div>
       </main>
 
