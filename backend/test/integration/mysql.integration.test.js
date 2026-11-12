@@ -418,6 +418,34 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
         method: 'PUT', cookie: primary.cookie, body: { personIds: [primary.personId, participantId] },
       }), 200, 'restore group member');
 
+      const authenticatedIdentity = await api('/api/auth/me', { cookie: primary.cookie });
+      expectStatus(authenticatedIdentity, 200, 'authenticated identity before trip creation');
+      assert.equal(Number(authenticatedIdentity.body.personId), Number(primary.personId),
+        'the active session must resolve to the primary account person ID');
+      assert.equal(Number(authenticatedIdentity.body.workspaceId), Number(primary.workspaceId),
+        'the active session must resolve to the primary account workspace ID');
+      const [[tripAccess]] = await db.execute(
+        `SELECT a.person_id AS account_person_id, a.workspace_id AS account_workspace_id,
+                wm.person_id AS session_person_id, s.workspace_id AS session_workspace_id,
+                g.workspace_id AS group_workspace_id, gm.person_id AS member_person_id
+         FROM accounts a
+         JOIN auth_sessions s ON s.account_id = a.id
+         JOIN workspace_members wm ON wm.account_id = a.id AND wm.workspace_id = s.workspace_id
+         JOIN \`groups\` g ON g.id = ?
+         LEFT JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = wm.person_id
+         WHERE a.id = ? AND s.expires_at > UTC_TIMESTAMP()
+         ORDER BY s.id DESC LIMIT 1`,
+        [groupId, primary.id]
+      );
+      assert.ok(tripAccess, 'the primary account must have an active session and a workspace row');
+      assert.equal(Number(tripAccess.account_person_id), Number(authenticatedIdentity.body.personId));
+      assert.equal(Number(tripAccess.session_person_id), Number(authenticatedIdentity.body.personId));
+      assert.equal(Number(tripAccess.account_workspace_id), Number(authenticatedIdentity.body.workspaceId));
+      assert.equal(Number(tripAccess.session_workspace_id), Number(authenticatedIdentity.body.workspaceId));
+      assert.equal(Number(tripAccess.group_workspace_id), Number(authenticatedIdentity.body.workspaceId));
+      assert.equal(Number(tripAccess.member_person_id), Number(authenticatedIdentity.body.personId),
+        'the authenticated person must be a member of the group immediately before trip creation');
+
       const foreignGroup = await api(`/api/groups/${groupId}/activity`, { cookie: second.cookie });
       expectStatus(foreignGroup, 404, 'cross-workspace group activity');
       expectStatus(await api(`/api/reports?type=expense&groupId=${groupId}`, { cookie: second.cookie }), 404, 'cross-workspace report');
