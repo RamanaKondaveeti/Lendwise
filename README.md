@@ -26,6 +26,44 @@ The production backend refuses to start unless `APP_URL` uses HTTPS and `COOKIE_
 
 Back up the MySQL database and test restoring that backup before deployment or upgrades. The backend applies schema updates at startup. The workspace ownership migration gives each existing account its own workspace and account-linked person; previously shared, unowned people and groups are preserved in a separate `Legacy workspace` so they are not exposed to an arbitrary account. Those records are not visible through account workspaces and need a deliberate manual reassignment if they should remain in use. Run migrations on a restored copy first and verify the resulting data before deploying them to customer data.
 
+### Database and uploaded-file backups
+
+The repository includes `scripts/backup/groupbuk_backup.py`, a host-side Python 3 utility for Ubuntu/Debian. It runs `mysqldump --single-transaction` for a transaction-consistent InnoDB snapshot, compresses and validates the dump, writes a SHA-256 manifest, and stores each timestamped backup in a mode-700 directory. MySQL credentials are read from the ignored deployment `.env` and placed in a temporary mode-600 MySQL option file, never on the command line. Install the host tools with `sudo apt-get install python3 mysql-client` if they are not already present. Run commands from the repository root:
+
+```bash
+sudo python3 scripts/backup/groupbuk_backup.py backup
+sudo python3 scripts/backup/groupbuk_backup.py verify /var/backups/groupbuk/groupbuk-YYYYMMDDTHHMMSSZ
+```
+
+Backups default to `/var/backups/groupbuk`; set `BACKUP_DIR` in the private `.env` to choose another host directory. `BACKUP_RETENTION_DAYS` defaults to 14 and may be set to a positive integer. Expired dated backup directories are removed only after a new database dump and any configured file archive have both completed and validated. Keep the backup directory on a protected disk with sufficient capacity; copy backups to a separate protected location for disaster recovery.
+
+The application currently stores receipt OCR images in memory and does not persist receipt images, profile images, or user documents on disk. If a deployment adds a persistent upload directory, set `BACKUP_FILES_PATH=/absolute/path/to/uploads` in `.env` or pass `--files-path /absolute/path/to/uploads` to `backup`. The archive excludes cache/temp folders, temporary filenames, and links. Verify the exact path before enabling file backup.
+
+Daily scheduling is optional and is not installed automatically. The default backup directory is root-owned, so run these commands with `sudo` (or configure a protected backup directory writable by the chosen service account). After verifying a manual backup, a host administrator can add this entry to root's crontab with `sudo crontab -e` (adjust the checkout and log paths):
+
+```cron
+15 2 * * * cd /home/ubuntu/LendWise && /usr/bin/flock -n /var/lock/groupbuk-backup.lock /usr/bin/python3 scripts/backup/groupbuk_backup.py backup >> /var/log/groupbuk-backup.log 2>&1
+```
+
+#### Safe restore and test restore
+
+First verify the selected backup. Create a new empty test database on the same MySQL server, grant the backup user the required privileges on it, and import there. The tool refuses the configured application database and refuses any target that already contains tables. The explicit confirmation must exactly match the target database name:
+
+```bash
+sudo python3 scripts/backup/groupbuk_backup.py verify /var/backups/groupbuk/groupbuk-YYYYMMDDTHHMMSSZ
+sudo python3 scripts/backup/groupbuk_backup.py restore-db /var/backups/groupbuk/groupbuk-YYYYMMDDTHHMMSSZ groupbuk_restore_test --confirm-target groupbuk_restore_test
+```
+
+Use credentials authorized for both the source application database and the test database. Do not point the test app at production. Review table counts and representative workspace, expense, split, settlement, and migration data in the restored database; run the application against the test database in an isolated environment to exercise startup migrations and application reads. `restore-db` only imports into a new empty target and does not issue `DROP DATABASE` or overwrite existing tables.
+
+If the backup includes files, restore them to a new or empty destination. Confirmation must exactly match the resolved absolute path:
+
+```bash
+sudo python3 scripts/backup/groupbuk_backup.py restore-files /var/backups/groupbuk/groupbuk-YYYYMMDDTHHMMSSZ /srv/groupbuk-restore/uploads --confirm-target /srv/groupbuk-restore/uploads
+```
+
+After restoring files, review ownership and permissions and compare records that refer to uploaded files. Backups use InnoDB transaction consistency; nontransactional MySQL tables are not snapshot-consistent. Backup verification checks gzip integrity, expected dump markers, archive structure, and checksums; it does not prove that MySQL can import the dump. Only an isolated test restore verifies importability and application-level consistency. Protect backups as production data because they contain user and financial records.
+
 For an initial production deployment, configure HTTPS at a reverse proxy or load balancer, then build and start the Compose services:
 
 ```powershell
