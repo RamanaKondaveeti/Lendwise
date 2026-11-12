@@ -52,6 +52,7 @@ import {
 import { calculateMonthlyAnalytics, monthValue } from './analytics.mjs'
 import { isSupportedCurrency, supportedCurrencies } from './currencies.mjs'
 import { isIosSafari, isStandalone, promptInstall, registerServiceWorker } from './pwa.mjs'
+import { readAuthLink } from './auth-link.mjs'
 import {
   convertReportRow,
   presentReportRow,
@@ -1214,15 +1215,17 @@ function App() {
   }
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const invite = params.get('invite')
-    const reset = params.get('reset')
-    if (invite || params.has('verify') || reset) window.history.replaceState({}, '', window.location.pathname)
+    const { invite, reset, shouldClean, cleanUrl } = readAuthLink(window.location.href)
+    if (shouldClean) window.history.replaceState(window.history.state, '', cleanUrl)
     let active = true
     async function initializeAuth() {
       try {
         if (invite) {
-          const invitation = await request(`/api/invitations/${encodeURIComponent(invite)}`)
+          const invitation = await request('/api/invitations/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: invite }),
+          })
           if (!active) return
           setInvitationToken(invite)
           setAuthEmail(invitation.email)

@@ -35,6 +35,7 @@ function createApiAuthGate({ requireAuth }) {
   return function apiAuthGate(req, res, next) {
     if ((req.method === 'GET' && publicHealthPaths.has(req.path)) ||
         req.path.startsWith('/auth/') ||
+        (req.method === 'POST' && req.path === '/invitations/preview') ||
         (req.method === 'GET' && /^\/invitations\/[^/]+$/.test(req.path))) return next();
     return requireAuth(req, res, next);
   };

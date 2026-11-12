@@ -54,7 +54,9 @@ if (isProduction && !process.env.DB_PASSWORD) {
 const scrypt = promisify(crypto.scrypt);
 const passwordHashOptions = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const app = express();
-app.set('trust proxy', 1);
+// Production traffic passes through the host Nginx and frontend Nginx before
+// reaching this private backend container. Trust only those two proxy hops.
+app.set('trust proxy', 2);
 app.use(requestObservability);
 const pool = mysql.createPool({
   host: process.env.DB_HOST || '127.0.0.1',
@@ -927,7 +929,7 @@ app.post('/api/auth/forgot-password', authRateLimit, async (req, res) => {
         await sendEmail({
           to: account.email,
           subject: 'Reset your GroupBuk password',
-          text: `Reset your password: ${appUrl}/?reset=${encodeURIComponent(token)}`
+          text: `Reset your password: ${appUrl}/#reset=${encodeURIComponent(token)}`
         });
       } catch (emailError) {
         logError('Password reset email delivery failed', emailError);
@@ -1679,8 +1681,7 @@ app.get('/api/health/live', healthHandlers.live);
 app.get('/api/health/ready', healthHandlers.ready);
 app.get('/api/health', healthHandlers.ready);
 
-app.get('/api/invitations/:token', async (req, res) => {
-  const token = req.params.token;
+async function previewInvitation(req, res, token) {
   if (!token || token.length > 128) {
     return res.status(400).json({ error: 'Invitation link is invalid or expired.' });
   }
@@ -1700,7 +1701,15 @@ app.get('/api/invitations/:token', async (req, res) => {
     logError(error);
     res.status(500).json({ error: 'Could not load this invitation.' });
   }
+}
+
+// New clients send bearer tokens in the request body so they do not appear in
+// proxy access logs. Keep the path form temporarily for already deployed clients.
+app.post('/api/invitations/preview', async (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token : '';
+  return previewInvitation(req, res, token);
 });
+app.get('/api/invitations/:token', (req, res) => previewInvitation(req, res, req.params.token));
 
 app.get('/api/users/search', async (req, res) => {
   const search = typeof req.query.q === 'string' ? req.query.q.trim() : '';
@@ -1800,7 +1809,7 @@ app.post('/api/invitations', async (req, res) => {
     } finally {
       connection.release();
     }
-    const inviteUrl = `${appUrl}/?invite=${encodeURIComponent(token)}`;
+    const inviteUrl = `${appUrl}/#invite=${encodeURIComponent(token)}`;
     try {
       await sendEmail({
         to: targetEmail,

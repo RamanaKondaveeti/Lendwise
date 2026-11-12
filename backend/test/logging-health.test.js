@@ -126,6 +126,7 @@ test('all health paths are public before the API auth gate while protected APIs 
   app.get('/api/health/ready', health.ready);
   app.get('/api/health', health.ready);
   app.get('/api/expenses', (_req, res) => res.json({ ok: true }));
+  app.post('/api/invitations/preview', (_req, res) => res.json({ ok: true }));
 
   const server = await new Promise(resolve => {
     const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
@@ -139,9 +140,33 @@ test('all health paths are public before the API auth gate while protected APIs 
     }
     assert.equal(readinessChecks, 2, 'liveness must not query MySQL');
 
+    const invitationPreviewResponse = await fetch(`${base}/api/invitations/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'opaque-bearer-token' }),
+    });
+    assert.equal(invitationPreviewResponse.status, 200, 'invitation links remain usable without an account session');
+
     const protectedResponse = await fetch(`${base}/api/expenses`);
     assert.equal(protectedResponse.status, 401);
     assert.deepEqual(await protectedResponse.json(), { error: 'Sign in to continue.' });
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('two trusted reverse proxies preserve the client IP for rate-limit keys', async () => {
+  const app = express();
+  app.set('trust proxy', 2);
+  app.get('/api/ip', (req, res) => res.json({ ip: req.ip }));
+  const server = await new Promise(resolve => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/ip`, {
+      headers: { 'X-Forwarded-For': '203.0.113.7, 172.20.0.4' },
+    });
+    assert.deepEqual(await response.json(), { ip: '203.0.113.7' });
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
