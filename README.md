@@ -120,6 +120,21 @@ node backend/scripts/benchmark-api.js --base https://groupbuk.com --iterations 3
 
 Add `--path /api/summary` or another authenticated endpoint to sample it. To authenticate, provide a session cookie through `GROUPBUK_BENCH_COOKIE` in the current shell environment; do not put a real cookie in command history or share benchmark output containing environment details. The sampler reports status counts, response bytes, and latency percentiles, never response bodies or cookie values. Take repeated before/after samples on the same host under comparable load; these are observational samples, not a production load test.
 
+### Isolated MySQL integration tests
+
+The database-backed workflow suite is opt-in and reads only `backend/.env.integration`; it never loads `.env` or inherited database credentials. Create a disposable MySQL database and dedicated account first, grant that account privileges only on that database, then copy `backend/.env.integration.example` to `backend/.env.integration` and set the actual test host, database name, MySQL-reported server hostname, account, password, and a private random marker. Use a name such as `groupbuk_integration_test` and a dedicated account such as `groupbuk_integration_test`. Do not use production credentials or point the test configuration at production.
+
+The runner requires the exact destructive-test opt-in shown in the example. It checks the connected database and MySQL server identity, requires a writable server and a test-specific database and user name, and takes a database-scoped advisory lock. On first use it refuses any nonempty schema and installs a marker. Later runs require that marker and refuse accounts or workspaces outside its integration namespace. Cleanup removes only integration-test workspaces from the marked database; it never drops the database. The backend process receives only the integration database configuration and runs as `NODE_ENV=test`.
+
+Run locally or on Ubuntu from `backend`:
+
+```bash
+npm test
+npm run test:integration
+```
+
+The app startup initializes its schema in the test database before the suite begins. The recurrence test waits for the backend's scheduled worker (up to 70 seconds by default); set `INTEGRATION_RECURRING_WAIT_MS` to adjust that timeout. Keep `backend/.env.integration` out of version control and delete the test database/account when no longer needed. The guard reduces accidental-target risk but does not replace creating a separate MySQL server/database/user and independently verifying those credentials before opting in.
+
 ### EC2 host Nginx and Let's Encrypt
 
 For an EC2 host running Ubuntu/Debian, the repository includes a temporary HTTP proxy at `deploy/nginx/groupbuk.com.http.conf` and the final TLS/canonical-host configuration at `deploy/nginx/groupbuk.com.https.conf.example`. The first proxies both names to the frontend on `127.0.0.1:3000`; the final redirects HTTP and `www` to `https://groupbuk.com` and proxies the apex host. These files are host Nginx configuration; the Nginx inside the frontend container continues to serve the built app and proxy `/api` to the backend.

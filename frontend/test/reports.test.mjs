@@ -32,8 +32,8 @@ test('CSV export preserves descriptions, escapes separators, and includes actual
   assert.match(reportCsv(headers, [{ ...rows[0], description: '=1+1' }]), /'=1\+1/)
 });
 
-test('Excel export is a valid OpenXML ZIP workbook with report columns and rows', () => {
-  const workbook = reportXlsx(headers, [{ ...rows[0], description: 'Dinner\u0001 with friends' }], 'Expense / Report')
+test('Excel export is a valid OpenXML ZIP workbook with report columns and rows', async () => {
+  const workbook = await reportXlsx(headers, [{ ...rows[0], description: 'Dinner\u0001 with friends' }], 'Expense / Report')
   const archive = unzipSync(workbook)
   const sheet = strFromU8(archive['xl/worksheets/sheet1.xml'])
   const workbookXml = strFromU8(archive['xl/workbook.xml'])
@@ -44,8 +44,8 @@ test('Excel export is a valid OpenXML ZIP workbook with report columns and rows'
   assert.match(sheet, /20/)
 });
 
-test('PDF export returns a multipage-capable PDF document', () => {
-  const pdf = reportPdf(headers, rows, 'Expense report')
+test('PDF export returns a multipage-capable PDF document', async () => {
+  const pdf = await reportPdf(headers, rows, 'Expense report')
   const content = new TextDecoder().decode(pdf)
   assert.match(content, /^%PDF-/)
   assert.ok(pdf.byteLength > 500)

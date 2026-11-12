@@ -43,7 +43,8 @@ const { maxReceiptBytes, prepareReceiptForTextract, scanReceipt, supportedTypes,
 const { createHealthHandlers } = require('./health');
 const { logError, logInfo, logWarn, rateLimitHandler, requestObservability } = require('./logger');
 const envPath = path.resolve(__dirname, '../../.env');
-if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
+const isolatedIntegrationTest = process.env.NODE_ENV === 'test' && process.env.GROUPBUK_INTEGRATION_TEST === 'true';
+if (!isolatedIntegrationTest && fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
 const isProduction = process.env.NODE_ENV === 'production';
 if (isProduction && !process.env.DB_PASSWORD) {

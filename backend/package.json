@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
+    "test:integration": "node --test test/integration/mysql.integration.test.js",
     "start": "node src/index.js",
     "dev": "node --watch src/index.js"
   },
