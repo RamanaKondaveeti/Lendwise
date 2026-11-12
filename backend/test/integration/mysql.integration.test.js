@@ -434,7 +434,7 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
          JOIN \`groups\` g ON g.id = ?
          LEFT JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = wm.person_id
          WHERE a.id = ? AND s.expires_at > UTC_TIMESTAMP()
-         ORDER BY s.id DESC LIMIT 1`,
+         ORDER BY s.created_at DESC LIMIT 1`,
         [groupId, primary.id]
       );
       assert.ok(tripAccess, 'the primary account must have an active session and a workspace row');
