@@ -22,6 +22,8 @@ MAIL_FROM=GroupBuk <no-reply@your-domain.example>
 
 Use the SMTP provider's required port and TLS settings. `APP_URL` must be the exact public HTTPS origin used by customers. For temporary HTTP testing, `COOKIE_SECURE=false` allows session cookies over HTTP, and email variables may be left unset so the backend can start. Signup and login do not require email delivery. Password recovery and invitation emails require SMTP; when an invitation email cannot be sent, the app provides a shareable invitation link. HTTP and non-secure cookies are not safe for customer use; configure HTTPS and set `COOKIE_SECURE=true` before release. Keep `.env` private and out of version control.
 
+The production backend refuses to start unless `APP_URL` uses HTTPS and `COOKIE_SECURE=true`. Docker Compose defaults secure cookies on and requires `APP_URL`; set `COOKIE_SECURE=false` only for a deliberate non-production HTTP test.
+
 Back up the MySQL database and test restoring that backup before deployment or upgrades. The backend applies schema updates at startup. The workspace ownership migration gives each existing account its own workspace and account-linked person; previously shared, unowned people and groups are preserved in a separate `Legacy workspace` so they are not exposed to an arbitrary account. Those records are not visible through account workspaces and need a deliberate manual reassignment if they should remain in use. Run migrations on a restored copy first and verify the resulting data before deploying them to customer data.
 
 For an initial production deployment, configure HTTPS at a reverse proxy or load balancer, then build and start the Compose services:

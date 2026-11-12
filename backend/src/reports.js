@@ -5,7 +5,7 @@ function isValidReportDate(value) {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
-function buildExpenseReportFilter({ workspaceId, groupId, memberId, category, startDate, endDate }) {
+function buildExpenseReportFilter({ workspaceId, viewerPersonId = null, groupId, memberId, category, startDate, endDate }) {
   if (!Number.isInteger(Number(workspaceId)) || Number(workspaceId) <= 0 ||
       (groupId !== null && (!Number.isInteger(Number(groupId)) || Number(groupId) <= 0)) ||
       (memberId !== null && (!Number.isInteger(Number(memberId)) || Number(memberId) <= 0)) ||
@@ -16,6 +16,11 @@ function buildExpenseReportFilter({ workspaceId, groupId, memberId, category, st
   }
   const conditions = ['g.workspace_id = ?', 'e.voided_at IS NULL'];
   const parameters = [Number(workspaceId)];
+  if (viewerPersonId !== null) {
+    if (!Number.isInteger(Number(viewerPersonId)) || Number(viewerPersonId) <= 0) throw new TypeError('Invalid report filters.');
+    conditions.push('EXISTS (SELECT 1 FROM group_members report_access WHERE report_access.group_id = e.group_id AND report_access.person_id = ?)');
+    parameters.push(Number(viewerPersonId));
+  }
   if (groupId !== null) {
     conditions.push('e.group_id = ?');
     parameters.push(Number(groupId));
@@ -39,7 +44,7 @@ function buildExpenseReportFilter({ workspaceId, groupId, memberId, category, st
   return { where: conditions.join(' AND '), parameters };
 }
 
-function buildSettlementReportFilter({ workspaceId, groupId, memberId, startDate, endDate }) {
+function buildSettlementReportFilter({ workspaceId, viewerPersonId = null, groupId, memberId, startDate, endDate }) {
   if (!Number.isInteger(Number(workspaceId)) || Number(workspaceId) <= 0 ||
       (groupId !== null && (!Number.isInteger(Number(groupId)) || Number(groupId) <= 0)) ||
       (memberId !== null && (!Number.isInteger(Number(memberId)) || Number(memberId) <= 0)) ||
@@ -49,6 +54,11 @@ function buildSettlementReportFilter({ workspaceId, groupId, memberId, startDate
   }
   const conditions = ['payer.workspace_id = ?', 'payee.workspace_id = ?'];
   const parameters = [Number(workspaceId), Number(workspaceId)];
+  if (viewerPersonId !== null) {
+    if (!Number.isInteger(Number(viewerPersonId)) || Number(viewerPersonId) <= 0) throw new TypeError('Invalid report filters.');
+    conditions.push('((COALESCE(st.group_id, linked_group.id) IS NOT NULL AND EXISTS (SELECT 1 FROM group_members report_access WHERE report_access.group_id = COALESCE(st.group_id, linked_group.id) AND report_access.person_id = ?)) OR (COALESCE(st.group_id, linked_group.id) IS NULL AND (st.payer_id = ? OR st.payee_id = ?)))');
+    parameters.push(Number(viewerPersonId), Number(viewerPersonId), Number(viewerPersonId));
+  }
   if (groupId !== null) {
     conditions.push('COALESCE(st.group_id, linked_group.id) = ?');
     parameters.push(Number(groupId));

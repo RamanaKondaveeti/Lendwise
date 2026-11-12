@@ -41,6 +41,15 @@ test('expense reports exclude voided expenses while audit retrieval remains opt-
   assert.match(filter.where, /e\.voided_at IS NULL/);
 });
 
+test('expense reports can be restricted to groups the authenticated member belongs to', () => {
+  const filter = buildExpenseReportFilter({
+    workspaceId: 4, viewerPersonId: 9, groupId: null, memberId: null,
+    category: null, startDate: null, endDate: null,
+  });
+  assert.match(filter.where, /report_access\.group_id = e\.group_id/);
+  assert.deepEqual(filter.parameters, [4, 9]);
+});
+
 test('settlement filters include workspace-only settlements and use inclusive end dates', () => {
   const filter = buildSettlementReportFilter({
     workspaceId: 5,
@@ -53,6 +62,16 @@ test('settlement filters include workspace-only settlements and use inclusive en
   assert.match(filter.where, /st\.payer_id = \? OR st\.payee_id = \?/);
   assert.match(filter.where, /DATE_ADD\(\?, INTERVAL 1 DAY\)/);
   assert.deepEqual(filter.parameters, [5, 5, 2, 2, '2025-06-30']);
+});
+
+test('settlement reports restrict group records to member groups and workspace records to the viewer', () => {
+  const filter = buildSettlementReportFilter({
+    workspaceId: 5, viewerPersonId: 9, groupId: null, memberId: null,
+    startDate: null, endDate: null,
+  });
+  assert.match(filter.where, /report_access\.group_id = COALESCE\(st\.group_id, linked_group\.id\)/);
+  assert.match(filter.where, /st\.payer_id = \? OR st\.payee_id = \?/);
+  assert.deepEqual(filter.parameters, [5, 5, 9, 9, 9]);
 });
 
 test('rejects reversed date ranges and invalid filter IDs', () => {

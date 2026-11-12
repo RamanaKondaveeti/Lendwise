@@ -36,6 +36,8 @@ const { buildGroupAnalyticsFilter } = require('./group-analytics');
 const { normalizeActivityQuery, activityTypeClause } = require('./group-activity');
 const { supportedCurrencies, currencyEnumSql, isSupportedCurrency } = require('./currencies');
 const { validTripInput } = require('./trips');
+const { hasGroupMembership } = require('./authorization');
+const { createRequireAuth, getSessionToken } = require('./auth-middleware');
 const { claimIdempotency, findIdempotencyReplay, readIdempotencyKey, saveIdempotentResponse } = require('./idempotency');
 const { maxReceiptBytes, prepareReceiptForTextract, scanReceipt, supportedTypes, validateReceiptFile } = require('./receipt-ocr');
 const envPath = path.resolve(__dirname, '../../.env');
@@ -75,6 +77,16 @@ app.use(helmet({
 app.use(express.json({ limit: '16kb' }));
 
 const appUrl = (process.env.APP_URL || 'http://localhost:3000').replace(/\/+$/, '');
+if (isProduction) {
+  let configuredAppUrl;
+  try { configuredAppUrl = new URL(appUrl); } catch { configuredAppUrl = null; }
+  if (!configuredAppUrl || configuredAppUrl.protocol !== 'https:') {
+    throw new Error('Production requires APP_URL to use HTTPS.');
+  }
+  if (process.env.COOKIE_SECURE !== 'true') {
+    throw new Error('Production requires COOKIE_SECURE=true.');
+  }
+}
 const emailTransport = process.env.SMTP_HOST
   ? nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -225,7 +237,7 @@ async function getWorkspaceBalances(workspaceId, executor = pool) {
   return balances;
 }
 
-async function getWorkspaceGroupBalances(workspaceId, executor = pool) {
+async function getWorkspaceGroupBalances(workspaceId, executor = pool, memberPersonId = null) {
   const [balances] = await executor.execute(
     `SELECT g.id AS group_id, g.name AS group_name, p.id, p.name, p.initials, p.color,
             COALESCE(split_totals.amount, 0) - COALESCE(paid_totals.amount, 0)
@@ -255,7 +267,7 @@ async function getWorkspaceGroupBalances(workspaceId, executor = pool) {
          AND (st.expense_id IS NULL OR e.voided_at IS NULL)
        GROUP BY COALESCE(st.group_id, e.group_id), st.payer_id
      ) settlement_paid ON settlement_paid.group_id = g.id AND settlement_paid.person_id = p.id
-     WHERE g.workspace_id = ? AND (
+     WHERE g.workspace_id = ? ${memberPersonId === null ? '' : 'AND EXISTS (SELECT 1 FROM group_members access WHERE access.group_id = g.id AND access.person_id = ?)'} AND (
        EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.person_id = p.id)
        OR EXISTS (
          SELECT 1 FROM expenses e JOIN splits s ON s.expense_id = e.id
@@ -270,7 +282,7 @@ async function getWorkspaceGroupBalances(workspaceId, executor = pool) {
        )
      )
      ORDER BY g.id, p.id`,
-    [workspaceId]
+    memberPersonId === null ? [workspaceId] : [workspaceId, memberPersonId]
   );
   return balances;
 }
@@ -285,13 +297,6 @@ const rememberedSessionDurationSeconds = 30 * 24 * 60 * 60;
 const emailTokenDurationSeconds = 60 * 60;
 if (!Number.isInteger(sessionDurationSeconds) || sessionDurationSeconds < 300 || sessionDurationSeconds > 30 * 24 * 60 * 60) {
   throw new Error('SESSION_DURATION_SECONDS must be between 300 seconds and 30 days.');
-}
-
-function getSessionToken(req) {
-  const cookies = req.headers.cookie || '';
-  const cookie = cookies.split(';').map(value => value.trim())
-    .find(value => value.startsWith(`${sessionCookieName}=`));
-  return cookie?.slice(sessionCookieName.length + 1) || '';
 }
 
 function setSessionCookie(res, token, maxAgeSeconds = sessionDurationSeconds) {
@@ -1029,11 +1034,8 @@ app.post('/api/auth/logout', async (req, res) => {
   }
 });
 
-async function requireAuth(req, res, next) {
-  const token = getSessionToken(req);
-  if (!token) return res.status(401).json({ error: 'Sign in to continue.' });
-
-  try {
+const requireAuth = createRequireAuth({
+  lookupAccount: async token => {
     const [account] = await q(
         `SELECT a.id, a.email, wm.person_id, s.workspace_id, p.name, w.name AS workspace_name
        FROM auth_sessions s
@@ -1045,17 +1047,10 @@ async function requireAuth(req, res, next) {
            AND a.workspace_id IS NOT NULL`,
         [hashSessionToken(token)]
     );
-    if (!account) {
-      clearSessionCookie(res);
-      return res.status(401).json({ error: 'Your session has expired. Sign in again.' });
-    }
-    req.account = account;
-    next();
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Could not verify your session.' });
-  }
-}
+    return account || null;
+  },
+  clearSessionCookie,
+});
 
 app.use('/api', (req, res, next) => {
   if (req.path === '/health' || req.path.startsWith('/auth/') ||
@@ -1930,19 +1925,21 @@ app.get('/api/summary', async (req, res) => {
       `SELECT g.id, g.name, g.icon, g.color, COUNT(DISTINCT e.id) AS expenses,
               COALESCE(SUM(e.amount), 0) AS total
        FROM \`groups\` g
+       JOIN group_members access ON access.group_id = g.id AND access.person_id = ?
        LEFT JOIN expenses e ON e.group_id = g.id AND e.voided_at IS NULL
        WHERE g.workspace_id = ?
        GROUP BY g.id
        ORDER BY g.id`,
-      [workspaceId]
+      [req.account.person_id, workspaceId]
     );
     const members = await q(
       `SELECT gm.group_id, p.id, p.name, p.initials, p.color
        FROM group_members gm
        JOIN people p ON p.id = gm.person_id AND p.workspace_id = ?
        JOIN \`groups\` g ON g.id = gm.group_id AND g.workspace_id = ?
+       WHERE EXISTS (SELECT 1 FROM group_members access WHERE access.group_id = g.id AND access.person_id = ?)
        ORDER BY p.name, p.id`,
-      [workspaceId, workspaceId]
+      [workspaceId, workspaceId, req.account.person_id]
     );
     const membersByGroup = new Map();
     for (const person of members) {
@@ -1958,7 +1955,7 @@ app.get('/api/summary', async (req, res) => {
     for (const group of groups) {
       group.members = membersByGroup.get(group.id) || [];
     }
-    const groupBalances = await getWorkspaceGroupBalances(workspaceId);
+    const groupBalances = await getWorkspaceGroupBalances(workspaceId, pool, req.account.person_id);
     const groupBalancesById = new Map();
     for (const person of groupBalances) {
       const balances = groupBalancesById.get(person.group_id) || [];
@@ -1986,16 +1983,26 @@ app.get('/api/summary', async (req, res) => {
        FROM expenses e
        JOIN people p ON p.id = e.paid_by AND p.workspace_id = ?
        JOIN \`groups\` g ON g.id = e.group_id
+       JOIN group_members access ON access.group_id = g.id AND access.person_id = ?
        WHERE g.workspace_id = ? AND e.voided_at IS NULL
        ORDER BY e.created_at DESC
        LIMIT 12`,
-      [workspaceId, workspaceId]
+      [workspaceId, req.account.person_id, workspaceId]
     );
     const [activityCount] = await q(
-      'SELECT COUNT(*) AS count FROM expenses e JOIN `groups` g ON g.id = e.group_id WHERE g.workspace_id = ? AND e.voided_at IS NULL',
-      [workspaceId]
+      `SELECT COUNT(*) AS count FROM expenses e JOIN \`groups\` g ON g.id = e.group_id
+       WHERE g.workspace_id = ? AND e.voided_at IS NULL AND EXISTS
+         (SELECT 1 FROM group_members access WHERE access.group_id = g.id AND access.person_id = ?)`,
+      [workspaceId, req.account.person_id]
     );
-    const net = await getWorkspaceBalances(workspaceId);
+    const netByPerson = new Map();
+    for (const balance of groupBalances) {
+      const cents = Math.round(Number(balance.balance) * 100);
+      const current = netByPerson.get(balance.id) || { id: balance.id, name: balance.name, initials: balance.initials, color: balance.color, cents: 0 };
+      current.cents += cents;
+      netByPerson.set(balance.id, current);
+    }
+    const net = [...netByPerson.values()].map(({ cents, ...person }) => ({ ...person, balance: cents / 100 }));
     res.json({
       people,
       groups,
@@ -2033,10 +2040,11 @@ app.get('/api/recurring-expenses', async (req, res) => {
       `SELECT r.*, g.name AS group_name, p.name AS payer_name
        FROM recurring_expenses r
        JOIN \`groups\` g ON g.id = r.group_id AND g.workspace_id = ?
+       JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = ?
        JOIN people p ON p.id = r.paid_by AND p.workspace_id = ?
        WHERE r.workspace_id = ?
        ORDER BY r.status = 'active' DESC, r.next_occurrence_date, r.id`,
-      [workspaceId, workspaceId, workspaceId]
+      [workspaceId, req.account.person_id, workspaceId, workspaceId]
     );
     if (!templates.length) return res.json({ templates: [], occurrences: [] });
     const ids = templates.map(template => template.id);
@@ -2151,7 +2159,7 @@ app.post('/api/recurring-expenses', async (req, res) => {
       inTransaction = false;
       return res.status(404).json({ error: 'Group not found.' });
     }
-    const idsToCheck = [...new Set([paidBy, ...participantIds])];
+    const idsToCheck = [...new Set([req.account.person_id, paidBy, ...participantIds])];
     const [members] = await connection.execute(
       `SELECT gm.person_id AS id FROM group_members gm
        JOIN people p ON p.id = gm.person_id AND p.workspace_id = ?
@@ -2268,9 +2276,10 @@ app.put('/api/recurring-expenses/:templateId', async (req, res) => {
     await connection.beginTransaction();
     inTransaction = true;
     const [existing] = await connection.execute(
-      `SELECT * FROM recurring_expenses
-       WHERE id = ? AND workspace_id = ? FOR UPDATE`,
-      [templateId, req.account.workspace_id]
+      `SELECT r.* FROM recurring_expenses r
+       JOIN group_members gm ON gm.group_id = r.group_id AND gm.person_id = ?
+       WHERE r.id = ? AND r.workspace_id = ? FOR UPDATE`,
+      [req.account.person_id, templateId, req.account.workspace_id]
     );
     if (!existing.length) {
       await connection.rollback();
@@ -2292,7 +2301,7 @@ app.put('/api/recurring-expenses/:templateId', async (req, res) => {
       inTransaction = false;
       return res.status(404).json({ error: 'Group not found.' });
     }
-    const idsToCheck = [...new Set([paidBy, ...participantIds])];
+    const idsToCheck = [...new Set([req.account.person_id, paidBy, ...participantIds])];
     const [members] = await connection.execute(
       `SELECT gm.person_id AS id FROM group_members gm
        JOIN people p ON p.id = gm.person_id AND p.workspace_id = ?
@@ -2360,14 +2369,16 @@ app.patch('/api/recurring-expenses/:templateId/status', async (req, res) => {
   }
   try {
     const result = await q(
-      `UPDATE recurring_expenses SET status = ?
-       WHERE id = ? AND workspace_id = ? AND status IN ('active', 'paused')`,
-      [status, templateId, req.account.workspace_id]
+      `UPDATE recurring_expenses r SET status = ?
+       WHERE r.id = ? AND r.workspace_id = ? AND r.status IN ('active', 'paused')
+         AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = r.group_id AND gm.person_id = ?)`,
+      [status, templateId, req.account.workspace_id, req.account.person_id]
     );
     if (!result.affectedRows) {
       const [templates] = await q(
-        'SELECT id FROM recurring_expenses WHERE id = ? AND workspace_id = ?',
-        [templateId, req.account.workspace_id]
+        `SELECT r.id FROM recurring_expenses r JOIN group_members gm ON gm.group_id = r.group_id AND gm.person_id = ?
+         WHERE r.id = ? AND r.workspace_id = ?`,
+        [req.account.person_id, templateId, req.account.workspace_id]
       );
       return res.status(templates.length ? 409 : 404).json({
         error: templates.length ? 'Completed or cancelled recurring expenses cannot be resumed.' : 'Recurring expense not found.',
@@ -2387,9 +2398,10 @@ app.delete('/api/recurring-expenses/:templateId', async (req, res) => {
   }
   try {
     const result = await q(
-      `UPDATE recurring_expenses SET status = 'cancelled', next_occurrence_date = NULL
-       WHERE id = ? AND workspace_id = ? AND status != 'cancelled'`,
-      [templateId, req.account.workspace_id]
+      `UPDATE recurring_expenses r SET status = 'cancelled', next_occurrence_date = NULL
+       WHERE r.id = ? AND r.workspace_id = ? AND r.status != 'cancelled'
+         AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = r.group_id AND gm.person_id = ?)`,
+      [templateId, req.account.workspace_id, req.account.person_id]
     );
     if (!result.affectedRows) return res.status(404).json({ error: 'Recurring expense not found.' });
     res.json({ ok: true, message: 'Recurring expense deactivated.' });
@@ -2421,9 +2433,10 @@ app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confir
     await connection.beginTransaction();
     inTransaction = true;
     const [templates] = await connection.execute(
-      `SELECT * FROM recurring_expenses
-       WHERE id = ? AND workspace_id = ? AND variable_amount = TRUE FOR UPDATE`,
-      [templateId, req.account.workspace_id]
+      `SELECT r.* FROM recurring_expenses r
+       JOIN group_members gm ON gm.group_id = r.group_id AND gm.person_id = ?
+       WHERE r.id = ? AND r.workspace_id = ? AND r.variable_amount = TRUE FOR UPDATE`,
+      [req.account.person_id, templateId, req.account.workspace_id]
     );
     if (!templates.length) {
       await connection.rollback();
@@ -2497,6 +2510,9 @@ app.get('/api/expenses', async (req, res) => {
   if (tripId !== null && (!Number.isInteger(tripId) || tripId <= 0)) return res.status(400).json({ error: 'Trip ID must be a positive integer.' });
 
   try {
+    if (groupId !== null && !await hasGroupMembership(pool, groupId, req.account)) {
+      return res.status(404).json({ error: 'Group not found.' });
+    }
     if (tripId !== null) {
       const trip = await findAccessibleTrip(tripId, req.account);
       if (!trip || (groupId !== null && trip.group_id !== groupId)) return res.status(404).json({ error: 'Trip not found.' });
@@ -2510,10 +2526,11 @@ app.get('/api/expenses', async (req, res) => {
        JOIN people p ON p.id = e.paid_by AND p.workspace_id = ?
        LEFT JOIN people voider ON voider.id = e.voided_by AND voider.workspace_id = ?
        JOIN \`groups\` g ON g.id = e.group_id
+       JOIN group_members actor_membership ON actor_membership.group_id = g.id AND actor_membership.person_id = ?
        LEFT JOIN trips t ON t.id = e.trip_id
        WHERE g.workspace_id = ? ${activeExpensesOnly} ${groupId === null ? '' : 'AND e.group_id = ?'} ${tripId === null ? '' : 'AND e.trip_id = ?'}
        ORDER BY e.created_at DESC, e.id DESC`,
-      [req.account.workspace_id, req.account.workspace_id, req.account.workspace_id,
+      [req.account.workspace_id, req.account.workspace_id, req.account.person_id, req.account.workspace_id,
         ...(groupId === null ? [] : [groupId]), ...(tripId === null ? [] : [tripId])]
     );
     if (!expenses.length) return res.json([]);
@@ -2622,16 +2639,25 @@ app.get('/api/reports', async (req, res) => {
   try {
     const workspaceId = req.account.workspace_id;
     if (groupId !== null) {
-      const groups = await q('SELECT id FROM `groups` WHERE id = ? AND workspace_id = ?', [groupId, workspaceId]);
+      const groups = await q(
+        'SELECT g.id FROM `groups` g JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = ? WHERE g.id = ? AND g.workspace_id = ?',
+        [req.account.person_id, groupId, workspaceId]
+      );
       if (!groups.length) return res.status(404).json({ error: 'Group not found in this workspace.' });
     }
     if (memberId !== null) {
-      const people = await q('SELECT id FROM people WHERE id = ? AND workspace_id = ?', [memberId, workspaceId]);
+      const people = groupId === null
+        ? await q('SELECT id FROM people WHERE id = ? AND workspace_id = ?', [memberId, workspaceId])
+        : await q(
+          `SELECT p.id FROM people p JOIN group_members gm ON gm.person_id = p.id
+           WHERE p.id = ? AND p.workspace_id = ? AND gm.group_id = ?`,
+          [memberId, workspaceId, groupId]
+        );
       if (!people.length) return res.status(404).json({ error: 'Member not found in this workspace.' });
     }
 
     if (reportType === 'outstanding') {
-      let balances = await getWorkspaceGroupBalances(workspaceId);
+      let balances = await getWorkspaceGroupBalances(workspaceId, pool, req.account.person_id);
       if (groupId !== null) balances = balances.filter(row => Number(row.group_id) === groupId);
       if (memberId !== null) balances = balances.filter(row => Number(row.id) === memberId);
       const records = balances.map(row => ({
@@ -2662,7 +2688,7 @@ app.get('/api/reports', async (req, res) => {
 
     if (reportType === 'settlement') {
       const { where, parameters } = buildSettlementReportFilter({
-        workspaceId, groupId, memberId, startDate, endDate,
+        workspaceId, viewerPersonId: req.account.person_id, groupId, memberId, startDate, endDate,
       });
       const [count] = await q(
         `SELECT COUNT(*) AS total_records, COALESCE(SUM(st.amount), 0) AS total_amount
@@ -2709,7 +2735,7 @@ app.get('/api/reports', async (req, res) => {
     }
 
     const { where, parameters } = buildExpenseReportFilter({
-      workspaceId, groupId, memberId, category, startDate, endDate,
+      workspaceId, viewerPersonId: req.account.person_id, groupId, memberId, category, startDate, endDate,
     });
     const [count] = await q(
       `SELECT COUNT(*) AS total_records, COALESCE(SUM(e.amount), 0) AS total_amount,
@@ -2901,8 +2927,9 @@ app.patch('/api/expenses/:expenseId/category', async (req, res) => {
     const [expenses] = await connection.execute(
       `SELECT e.id, e.group_id, e.title, e.category, e.voided_at FROM expenses e
        JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+       JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = ?
        WHERE e.id = ? FOR UPDATE`,
-      [req.account.workspace_id, expenseId]
+      [req.account.workspace_id, req.account.person_id, expenseId]
     );
     if (!expenses.length) {
       await connection.rollback();
@@ -2983,8 +3010,9 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
     const [expenses] = await connection.execute(
       `SELECT e.id, e.group_id, e.trip_id, e.receipt_date, e.tax_amount, e.paid_by, e.voided_at, g.name AS group_name
        FROM expenses e JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+       JOIN group_members actor_membership ON actor_membership.group_id = g.id AND actor_membership.person_id = ?
        WHERE e.id = ? FOR UPDATE`,
-      [req.account.workspace_id, expenseId]
+      [req.account.workspace_id, req.account.person_id, expenseId]
     );
     if (!expenses.length) {
       await connection.rollback(); inTransaction = false;
@@ -3254,9 +3282,10 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
       `SELECT e.id, e.paid_by, e.group_id, e.title, e.voided_at, g.name AS group_name
        FROM expenses e
        JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+       JOIN group_members actor_membership ON actor_membership.group_id = g.id AND actor_membership.person_id = ?
        JOIN people payer ON payer.id = e.paid_by AND payer.workspace_id = g.workspace_id
        WHERE e.id = ? FOR UPDATE`,
-      [req.account.workspace_id, expenseId]
+      [req.account.workspace_id, req.account.person_id, expenseId]
     );
     const expense = expenses[0];
     if (!expense) {
@@ -3603,11 +3632,11 @@ app.post('/api/expenses', async (req, res) => {
         `SELECT gm.person_id AS id FROM group_members gm
          JOIN people p ON p.id = gm.person_id AND p.workspace_id = ?
          JOIN \`groups\` g ON g.id = gm.group_id AND g.workspace_id = ?
-         WHERE gm.group_id = ? AND gm.person_id IN (${[normalizedPaidBy, ...participantIds].map(() => '?').join(',')})`,
-        [req.account.workspace_id, req.account.workspace_id, normalizedGroupId, normalizedPaidBy, ...participantIds]
+        WHERE gm.group_id = ? AND gm.person_id IN (${[req.account.person_id, normalizedPaidBy, ...participantIds].map(() => '?').join(',')})`,
+        [req.account.workspace_id, req.account.workspace_id, normalizedGroupId, req.account.person_id, normalizedPaidBy, ...participantIds]
       )
     ]);
-    if (!groups.length || members.length !== new Set([normalizedPaidBy, ...participantIds]).size) {
+    if (!groups.length || members.length !== new Set([req.account.person_id, normalizedPaidBy, ...participantIds]).size) {
       return res.status(400).json({ error: 'Choose a group member as payer and participants.' });
     }
     if (requestedTripId !== null) {
@@ -3915,8 +3944,8 @@ app.get('/api/groups/:groupId/analytics', async (req, res) => {
 
   try {
     const [groups] = await pool.execute(
-      'SELECT id FROM `groups` WHERE id = ? AND workspace_id = ?',
-      [groupId, req.account.workspace_id]
+      'SELECT g.id FROM `groups` g JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = ? WHERE g.id = ? AND g.workspace_id = ?',
+      [req.account.person_id, groupId, req.account.workspace_id]
     );
     if (!groups.length) return res.status(404).json({ error: 'Group not found.' });
 
@@ -4115,8 +4144,9 @@ app.put('/api/groups/:groupId/members', async (req, res) => {
     await connection.beginTransaction();
     inTransaction = true;
     const [groupRows] = await connection.execute(
-      'SELECT id, name FROM `groups` WHERE id = ? AND workspace_id = ? FOR UPDATE',
-      [groupId, req.account.workspace_id]
+      `SELECT g.id, g.name FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = ?
+       WHERE g.id = ? AND g.workspace_id = ? FOR UPDATE`,
+      [req.account.person_id, groupId, req.account.workspace_id]
     );
     if (!groupRows.length) {
       await connection.rollback();
@@ -4203,6 +4233,10 @@ app.post('/api/settlements', async (req, res) => {
         await connection.rollback();
         return res.status(404).json({ error: 'Group not found.' });
       }
+      if (!await hasGroupMembership(connection, normalizedGroupId, req.account)) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Group not found.' });
+      }
       await connection.execute(
         'SELECT id FROM people WHERE workspace_id = ? ORDER BY id FOR UPDATE',
         [req.account.workspace_id]
@@ -4231,6 +4265,10 @@ app.post('/api/settlements', async (req, res) => {
       settlementId = settlement.insertId;
       await recordGroupActivity(connection, { groupId: normalizedGroupId, activityType: 'settlement_recorded', actorId: req.account.person_id, entityType: 'settlement', entityId: settlementId, entityName: 'Settlement', description: 'recorded a group settlement', amount: amountCents / 100 });
     } else {
+      if (req.account.person_id !== normalizedPayerId && req.account.person_id !== normalizedPayeeId) {
+        await connection.rollback();
+        return res.status(403).json({ error: 'A personal settlement must include your account.' });
+      }
       const [settlement] = await connection.execute(
         'INSERT INTO settlements(payer_id, payee_id, amount, note) VALUES(?, ?, ?, ?)',
         [normalizedPayerId, normalizedPayeeId, amountCents / 100, note.trim()]
@@ -4266,14 +4304,15 @@ app.post('/api/settlements', async (req, res) => {
   }
 });
 
-app.use((error, _req, res, next) => {
+app.use((error, _req, res, _next) => {
   if (error.type === 'entity.too.large') {
     return res.status(413).json({ error: 'Request body is too large.' });
   }
   if (error.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Request body must contain valid JSON.' });
   }
-  return next(error);
+  console.error('Unhandled request error:', error?.code || error?.name || 'Error');
+  return res.status(500).json({ error: 'The request could not be completed.' });
 });
 
 const port = process.env.PORT || 5000;
