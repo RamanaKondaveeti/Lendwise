@@ -452,6 +452,8 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       );
       assert.ok(tripRouteAuthorization,
         'the exact group membership query used by the trip routes must match this authenticated identity');
+      expectStatus(await api(`/api/groups/${groupId}/activity`, { cookie: primary.cookie }), 200,
+        'authenticated group membership through the activity API');
       expectStatus(await api(`/api/groups/${groupId}/trips`, { cookie: primary.cookie }), 200,
         'group trip membership authorization immediately after membership restore');
 
