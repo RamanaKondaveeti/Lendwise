@@ -1,6 +1,6 @@
 const { isValidReportDate } = require('./reports');
 
-function buildGroupAnalyticsFilter({ period = '30d', startDate, endDate }) {
+function buildGroupAnalyticsFilter({ groupId, period = '30d', startDate, endDate }) {
   const periods = new Set(['7d', '30d', '90d', 'all']);
   if (!periods.has(period) || !isValidReportDate(startDate ?? null) || !isValidReportDate(endDate ?? null) ||
       (startDate && endDate && startDate > endDate)) {
@@ -8,7 +8,7 @@ function buildGroupAnalyticsFilter({ period = '30d', startDate, endDate }) {
   }
 
   const clauses = ['e.group_id = ?', 'e.voided_at IS NULL'];
-  const parameters = [];
+  const parameters = groupId === undefined ? [] : [groupId];
   if (startDate || endDate) {
     if (startDate) {
       clauses.push('e.created_at >= ?');

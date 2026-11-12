@@ -21,6 +21,12 @@ test('custom dates override period and use inclusive calendar bounds', () => {
   assert.deepEqual(filter.parameters, ['2025-01-03 00:00:00', '2025-01-31']);
 });
 
+test('group analytics parameters bind the group ID before date filters', () => {
+  const filter = buildGroupAnalyticsFilter({ groupId: 42, period: '30d' });
+  assert.equal(filter.where, 'e.group_id = ? AND e.voided_at IS NULL AND e.created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)');
+  assert.deepEqual(filter.parameters, [42, 30]);
+});
+
 test('rejects unsupported periods, malformed dates, and reversed ranges', () => {
   assert.throws(() => buildGroupAnalyticsFilter({ period: '14d' }), /Invalid analytics filters/);
   assert.throws(() => buildGroupAnalyticsFilter({ startDate: '2025-02-29' }), /Invalid analytics filters/);

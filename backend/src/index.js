@@ -3948,7 +3948,7 @@ app.get('/api/groups/:groupId/analytics', async (req, res) => {
   }
   let filter;
   try {
-    filter = buildGroupAnalyticsFilter(req.query);
+    filter = buildGroupAnalyticsFilter({ ...req.query, groupId });
   } catch (_error) {
     return res.status(400).json({ error: 'Provide a valid period and date range.' });
   }
@@ -3960,7 +3960,7 @@ app.get('/api/groups/:groupId/analytics', async (req, res) => {
     );
     if (!groups.length) return res.status(404).json({ error: 'Group not found.' });
 
-    const queryParams = [groupId, ...filter.parameters];
+    const queryParams = filter.parameters;
     const [summaryRows, memberRows, categoryRows, trendRows, topRows] = await Promise.all([
       pool.execute(
         `SELECT COALESCE(SUM(e.amount), 0) AS totalExpenses, COUNT(*) AS expenseCount
