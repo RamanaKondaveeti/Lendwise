@@ -103,6 +103,7 @@ const emailTransport = process.env.SMTP_HOST
   })
   : null;
 
+// Return mysql2's first result directly: SELECTs return a rows array here.
 const q = async (text, params = []) => {
   const [result] = await pool.execute(text, params);
   return result;
@@ -1286,7 +1287,7 @@ app.post('/api/budgets', async (req, res) => {
     let groupId = null;
     let personId = req.account.person_id;
     if (data.budgetType === 'group') {
-      const [groups] = await q(
+      const groups = await q(
         `SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id
          WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`,
         [data.groupId, req.account.workspace_id, req.account.person_id]
@@ -1346,7 +1347,7 @@ app.put('/api/budgets/:budgetId', async (req, res) => {
     const data = validateBudgetInput(req.body);
     let groupId = null; let personId = req.account.person_id;
     if (data.budgetType === 'group') {
-      const [groups] = await q(`SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`, [data.groupId, req.account.workspace_id, req.account.person_id]);
+      const groups = await q(`SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`, [data.groupId, req.account.workspace_id, req.account.person_id]);
       if (!groups.length) return res.status(403).json({ error: 'You must belong to this group to manage its budget.' });
       groupId = data.groupId; personId = null;
     }
@@ -2383,7 +2384,7 @@ app.patch('/api/recurring-expenses/:templateId/status', async (req, res) => {
       [status, templateId, req.account.workspace_id, req.account.person_id]
     );
     if (!result.affectedRows) {
-      const [templates] = await q(
+      const templates = await q(
         `SELECT r.id FROM recurring_expenses r JOIN group_members gm ON gm.group_id = r.group_id AND gm.person_id = ?
          WHERE r.id = ? AND r.workspace_id = ?`,
         [req.account.person_id, templateId, req.account.workspace_id]
@@ -3648,7 +3649,7 @@ app.post('/api/expenses', async (req, res) => {
       return res.status(400).json({ error: 'Choose a group member as payer and participants.' });
     }
     if (requestedTripId !== null) {
-      const [trips] = await q(
+      const trips = await q(
         `SELECT t.id FROM trips t JOIN \`groups\` g ON g.id = t.group_id
          JOIN group_members gm ON gm.group_id = g.id AND gm.person_id = ?
          WHERE t.id = ? AND t.group_id = ? AND g.workspace_id = ?`,
@@ -3790,7 +3791,7 @@ app.post('/api/groups/:groupId/trips', async (req, res) => {
   }
   let connection;
   try {
-    const [groups] = await q(
+    const groups = await q(
       `SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id
        WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`,
       [groupId, req.account.workspace_id, req.account.person_id]
@@ -3819,7 +3820,7 @@ app.get('/api/groups/:groupId/trips', async (req, res) => {
   const groupId = Number(req.params.groupId);
   if (!Number.isInteger(groupId) || groupId <= 0) return res.status(400).json({ error: 'Provide a valid group ID.' });
   try {
-    const [groups] = await q(
+    const groups = await q(
       `SELECT g.id FROM \`groups\` g JOIN group_members gm ON gm.group_id = g.id
        WHERE g.id = ? AND g.workspace_id = ? AND gm.person_id = ?`,
       [groupId, req.account.workspace_id, req.account.person_id]

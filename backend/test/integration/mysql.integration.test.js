@@ -409,6 +409,13 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       expectStatus(await api(`/api/groups/${groupId}/members`, {
         method: 'PUT', cookie: primary.cookie, body: { personIds: [primary.personId] },
       }), 200, 'remove group member');
+      const [[removedParticipant]] = await db.execute(
+        'SELECT COUNT(*) AS count FROM group_members WHERE group_id = ? AND person_id = ?',
+        [groupId, participantId]
+      );
+      assert.equal(Number(removedParticipant.count), 0, 'removed participant membership must not persist');
+      expectStatus(await api(`/api/groups/${groupId}/trips`, { cookie: primary.cookie }), 200,
+        'remaining group member can still list group trips');
       const deniedNonmember = await api('/api/expenses', {
         method: 'POST', cookie: primary.cookie,
         body: { groupId, title: 'Invalid membership expense', amount: 10, paidBy: primary.personId, participants: [participantId] },
@@ -417,6 +424,24 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       expectStatus(await api(`/api/groups/${groupId}/members`, {
         method: 'PUT', cookie: primary.cookie, body: { personIds: [primary.personId, participantId] },
       }), 200, 'restore group member');
+      const [[restoredParticipant]] = await db.execute(
+        'SELECT COUNT(*) AS count FROM group_members WHERE group_id = ? AND person_id = ?',
+        [groupId, participantId]
+      );
+      assert.equal(Number(restoredParticipant.count), 1, 'restored participant membership must persist exactly once');
+
+      const groupBudgetBody = {
+        name: `${runWorkspacePrefix} Group Budget`, budgetType: 'group', groupId,
+        amount: 250, currency: 'INR', period: 'monthly',
+        startDate: new Date().toISOString().slice(0, 10), endDate: null, alertThresholds: [80, 100],
+      };
+      const groupBudget = await api('/api/budgets', {
+        method: 'POST', cookie: primary.cookie, body: groupBudgetBody,
+      });
+      expectStatus(groupBudget, 201, 'group budget creation by restored member');
+      expectStatus(await api(`/api/budgets/${groupBudget.body.id}`, {
+        method: 'PUT', cookie: primary.cookie, body: { ...groupBudgetBody, name: `${runWorkspacePrefix} Group Budget Updated` },
+      }), 200, 'group budget update by restored member');
 
       const authenticatedIdentity = await api('/api/auth/me', { cookie: primary.cookie });
       expectStatus(authenticatedIdentity, 200, 'authenticated identity after membership restore');
@@ -642,6 +667,10 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       const [[generated]] = await db.execute('SELECT title, amount FROM expenses WHERE id = ?', [generatedExpenseId]);
       assert.equal(generated.title, `${runWorkspacePrefix} Recurring`);
       assert.equal(Math.round(Number(generated.amount) * 100), 1200);
+      await db.execute("UPDATE recurring_expenses SET status = 'completed' WHERE id = ?", [recurring.body.id]);
+      expectStatus(await api(`/api/recurring-expenses/${recurring.body.id}/status`, {
+        method: 'PATCH', cookie: primary.cookie, body: { status: 'active' },
+      }), 409, 'completed recurring expense cannot be resumed');
     });
   } finally {
     await stopApplication();
