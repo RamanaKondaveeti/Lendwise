@@ -1,6 +1,3 @@
-import { zipSync } from 'fflate'
-import { jsPDF } from 'jspdf'
-
 export const reportTypes = [
   { id: 'expense', label: 'Expense report', description: 'Detailed expenses, participants, shares, and settlement status.' },
   { id: 'monthly', label: 'Monthly expense statement', description: 'Expense activity organized by month.' },
@@ -119,7 +116,8 @@ function worksheetXml(headers, rows) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetRows}</sheetData></worksheet>`
 }
 
-export function reportXlsx(headers, rows, title = 'GroupBuk Report') {
+export async function reportXlsx(headers, rows, title = 'GroupBuk Report') {
+  const { zipSync } = await import('fflate')
   const safeTitle = String(title).replace(/[\\/?*[\]:]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31) || 'Report'
   const files = {
     '[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
@@ -131,7 +129,8 @@ export function reportXlsx(headers, rows, title = 'GroupBuk Report') {
   return zipSync(Object.fromEntries(Object.entries(files).map(([name, value]) => [name, new TextEncoder().encode(value)])))
 }
 
-export function reportPdf(headers, rows, title = 'GroupBuk Report') {
+export async function reportPdf(headers, rows, title = 'GroupBuk Report') {
+  const { jsPDF } = await import('jspdf')
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()

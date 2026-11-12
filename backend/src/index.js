@@ -251,15 +251,18 @@ async function getWorkspaceGroupBalances(workspaceId, executor = pool, memberPer
      LEFT JOIN (
        SELECT e.group_id, s.person_id, SUM(s.amount) AS amount
        FROM splits s JOIN expenses e ON e.id = s.expense_id AND e.voided_at IS NULL
+       JOIN \`groups\` scope ON scope.id = e.group_id AND scope.workspace_id = ?
        GROUP BY e.group_id, s.person_id
      ) split_totals ON split_totals.group_id = g.id AND split_totals.person_id = p.id
      LEFT JOIN (
-       SELECT group_id, paid_by AS person_id, SUM(amount) AS amount
-       FROM expenses WHERE voided_at IS NULL GROUP BY group_id, paid_by
+       SELECT e.group_id, e.paid_by AS person_id, SUM(e.amount) AS amount
+       FROM expenses e JOIN \`groups\` scope ON scope.id = e.group_id AND scope.workspace_id = ?
+       WHERE e.voided_at IS NULL GROUP BY e.group_id, e.paid_by
      ) paid_totals ON paid_totals.group_id = g.id AND paid_totals.person_id = p.id
      LEFT JOIN (
        SELECT COALESCE(st.group_id, e.group_id) AS group_id, st.payee_id AS person_id, SUM(st.amount) AS amount
        FROM settlements st LEFT JOIN expenses e ON e.id = st.expense_id
+       JOIN \`groups\` scope ON scope.id = COALESCE(st.group_id, e.group_id) AND scope.workspace_id = ?
        WHERE (st.group_id IS NOT NULL OR st.expense_id IS NOT NULL)
          AND (st.expense_id IS NULL OR e.voided_at IS NULL)
        GROUP BY COALESCE(st.group_id, e.group_id), st.payee_id
@@ -267,6 +270,7 @@ async function getWorkspaceGroupBalances(workspaceId, executor = pool, memberPer
      LEFT JOIN (
        SELECT COALESCE(st.group_id, e.group_id) AS group_id, st.payer_id AS person_id, SUM(st.amount) AS amount
        FROM settlements st LEFT JOIN expenses e ON e.id = st.expense_id
+       JOIN \`groups\` scope ON scope.id = COALESCE(st.group_id, e.group_id) AND scope.workspace_id = ?
        WHERE (st.group_id IS NOT NULL OR st.expense_id IS NOT NULL)
          AND (st.expense_id IS NULL OR e.voided_at IS NULL)
        GROUP BY COALESCE(st.group_id, e.group_id), st.payer_id
@@ -286,7 +290,9 @@ async function getWorkspaceGroupBalances(workspaceId, executor = pool, memberPer
        )
      )
      ORDER BY g.id, p.id`,
-    memberPersonId === null ? [workspaceId] : [workspaceId, memberPersonId]
+    memberPersonId === null
+      ? [workspaceId, workspaceId, workspaceId, workspaceId, workspaceId]
+      : [workspaceId, workspaceId, workspaceId, workspaceId, workspaceId, memberPersonId]
   );
   return balances;
 }
@@ -1918,11 +1924,9 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
 app.get('/api/summary', async (req, res) => {
   try {
     const workspaceId = req.account.workspace_id;
-    const people = await q(
-      'SELECT id, name, initials, color FROM people WHERE workspace_id = ? ORDER BY id',
-      [workspaceId]
-    );
-    const groups = await q(
+    const [people, groups, members, groupBalances, activity, activityCounts] = await Promise.all([
+      q('SELECT id, name, initials, color FROM people WHERE workspace_id = ? ORDER BY id', [workspaceId]),
+      q(
       `SELECT g.id, g.name, g.icon, g.color, COUNT(DISTINCT e.id) AS expenses,
               COALESCE(SUM(e.amount), 0) AS total
        FROM \`groups\` g
@@ -1932,8 +1936,8 @@ app.get('/api/summary', async (req, res) => {
        GROUP BY g.id
        ORDER BY g.id`,
       [req.account.person_id, workspaceId]
-    );
-    const members = await q(
+      ),
+      q(
       `SELECT gm.group_id, p.id, p.name, p.initials, p.color
        FROM group_members gm
        JOIN people p ON p.id = gm.person_id AND p.workspace_id = ?
@@ -1941,7 +1945,28 @@ app.get('/api/summary', async (req, res) => {
        WHERE EXISTS (SELECT 1 FROM group_members access WHERE access.group_id = g.id AND access.person_id = ?)
        ORDER BY p.name, p.id`,
       [workspaceId, workspaceId, req.account.person_id]
-    );
+      ),
+      getWorkspaceGroupBalances(workspaceId, pool, req.account.person_id),
+      q(
+        `SELECT e.id, e.title, e.amount, e.category, e.created_at, p.name AS payer,
+                p.initials, p.color, g.name AS group_name
+         FROM expenses e
+         JOIN people p ON p.id = e.paid_by AND p.workspace_id = ?
+         JOIN \`groups\` g ON g.id = e.group_id
+         JOIN group_members access ON access.group_id = g.id AND access.person_id = ?
+         WHERE g.workspace_id = ? AND e.voided_at IS NULL
+         ORDER BY e.created_at DESC
+         LIMIT 12`,
+        [workspaceId, req.account.person_id, workspaceId]
+      ),
+      q(
+        `SELECT COUNT(*) AS count FROM expenses e JOIN \`groups\` g ON g.id = e.group_id
+         WHERE g.workspace_id = ? AND e.voided_at IS NULL AND EXISTS
+           (SELECT 1 FROM group_members access WHERE access.group_id = g.id AND access.person_id = ?)`,
+        [workspaceId, req.account.person_id]
+      ),
+    ]);
+    const [activityCount] = activityCounts;
     const membersByGroup = new Map();
     for (const person of members) {
       const groupMembers = membersByGroup.get(person.group_id) || [];
@@ -1956,7 +1981,6 @@ app.get('/api/summary', async (req, res) => {
     for (const group of groups) {
       group.members = membersByGroup.get(group.id) || [];
     }
-    const groupBalances = await getWorkspaceGroupBalances(workspaceId, pool, req.account.person_id);
     const groupBalancesById = new Map();
     for (const person of groupBalances) {
       const balances = groupBalancesById.get(person.group_id) || [];
@@ -1978,24 +2002,6 @@ app.get('/api/summary', async (req, res) => {
         payment.payerId === req.account.person_id || payment.payeeId === req.account.person_id
       ) || null;
     }
-    const activity = await q(
-      `SELECT e.id, e.title, e.amount, e.category, e.created_at, p.name AS payer,
-              p.initials, p.color, g.name AS group_name
-       FROM expenses e
-       JOIN people p ON p.id = e.paid_by AND p.workspace_id = ?
-       JOIN \`groups\` g ON g.id = e.group_id
-       JOIN group_members access ON access.group_id = g.id AND access.person_id = ?
-       WHERE g.workspace_id = ? AND e.voided_at IS NULL
-       ORDER BY e.created_at DESC
-       LIMIT 12`,
-      [workspaceId, req.account.person_id, workspaceId]
-    );
-    const [activityCount] = await q(
-      `SELECT COUNT(*) AS count FROM expenses e JOIN \`groups\` g ON g.id = e.group_id
-       WHERE g.workspace_id = ? AND e.voided_at IS NULL AND EXISTS
-         (SELECT 1 FROM group_members access WHERE access.group_id = g.id AND access.person_id = ?)`,
-      [workspaceId, req.account.person_id]
-    );
     const netByPerson = new Map();
     for (const balance of groupBalances) {
       const cents = Math.round(Number(balance.balance) * 100);
@@ -3910,17 +3916,19 @@ app.get('/api/trips/:tripId/analytics', async (req, res) => {
   try {
     const trip = await findAccessibleTrip(tripId, req.account);
     if (!trip) return res.status(404).json({ error: 'Trip not found.' });
-    const [sumRows] = await pool.execute('SELECT COALESCE(SUM(amount), 0) AS totalSpent, COUNT(*) AS expenseCount FROM expenses WHERE trip_id = ? AND voided_at IS NULL', [tripId]);
-    const [members] = await pool.execute(
+    const [[sumRows], [members], [categories], [monthly], [top]] = await Promise.all([
+      pool.execute('SELECT COALESCE(SUM(amount), 0) AS totalSpent, COUNT(*) AS expenseCount FROM expenses WHERE trip_id = ? AND voided_at IS NULL', [tripId]),
+      pool.execute(
       `SELECT gm.person_id AS memberId, p.name AS memberName, COALESCE(paid.amount, 0) AS paid,
               COALESCE(shares.amount, 0) AS share, COALESCE(paid.amount, 0) - COALESCE(shares.amount, 0) AS netContribution
        FROM group_members gm JOIN people p ON p.id = gm.person_id
        LEFT JOIN (SELECT paid_by, SUM(amount) amount FROM expenses WHERE trip_id = ? AND voided_at IS NULL GROUP BY paid_by) paid ON paid.paid_by = gm.person_id
        LEFT JOIN (SELECT s.person_id, SUM(s.amount) amount FROM splits s JOIN expenses e ON e.id = s.expense_id WHERE e.trip_id = ? AND e.voided_at IS NULL GROUP BY s.person_id) shares ON shares.person_id = gm.person_id
-       WHERE gm.group_id = ? ORDER BY p.name`, [tripId, tripId, trip.group_id]);
-    const [categories] = await pool.execute('SELECT category, SUM(amount) totalAmount, COUNT(*) expenseCount FROM expenses WHERE trip_id = ? AND voided_at IS NULL GROUP BY category ORDER BY totalAmount DESC', [tripId]);
-    const [monthly] = await pool.execute("SELECT DATE_FORMAT(created_at, '%Y-%m') month, SUM(amount) totalAmount, COUNT(*) expenseCount FROM expenses WHERE trip_id = ? AND voided_at IS NULL GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY month", [tripId]);
-    const [top] = await pool.execute('SELECT e.id expenseId, e.title, e.amount, e.category, p.name paidBy, e.created_at createdAt FROM expenses e JOIN people p ON p.id = e.paid_by WHERE e.trip_id = ? AND e.voided_at IS NULL ORDER BY e.amount DESC, e.id DESC LIMIT 10', [tripId]);
+       WHERE gm.group_id = ? ORDER BY p.name`, [tripId, tripId, trip.group_id]),
+      pool.execute('SELECT category, SUM(amount) totalAmount, COUNT(*) expenseCount FROM expenses WHERE trip_id = ? AND voided_at IS NULL GROUP BY category ORDER BY totalAmount DESC', [tripId]),
+      pool.execute("SELECT DATE_FORMAT(created_at, '%Y-%m') month, SUM(amount) totalAmount, COUNT(*) expenseCount FROM expenses WHERE trip_id = ? AND voided_at IS NULL GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY month", [tripId]),
+      pool.execute('SELECT e.id expenseId, e.title, e.amount, e.category, p.name paidBy, e.created_at createdAt FROM expenses e JOIN people p ON p.id = e.paid_by WHERE e.trip_id = ? AND e.voided_at IS NULL ORDER BY e.amount DESC, e.id DESC LIMIT 10', [tripId]),
+    ]);
     const totalSpent = Number(sumRows[0].totalSpent || 0); const budget = trip.budget_amount === null ? null : Number(trip.budget_amount);
     res.json({ totalSpent, expenseCount: Number(sumRows[0].expenseCount), remainingBudget: budget === null ? null : budget - totalSpent,
       budgetPercentage: budget > 0 ? totalSpent / budget * 100 : budget === 0 ? null : null,

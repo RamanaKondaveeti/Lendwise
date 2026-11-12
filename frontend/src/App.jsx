@@ -1191,11 +1191,11 @@ function App() {
       if (format === 'csv') {
         blob = new Blob([`\uFEFF${reportCsv(headers, rows)}`], { type: 'text/csv;charset=utf-8' })
       } else if (format === 'xlsx') {
-        blob = new Blob([reportXlsx(headers, rows, type?.label)], {
+        blob = new Blob([await reportXlsx(headers, rows, type?.label)], {
           type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         })
       } else {
-        blob = new Blob([reportPdf(headers, rows, type?.label)], { type: 'application/pdf' })
+        blob = new Blob([await reportPdf(headers, rows, type?.label)], { type: 'application/pdf' })
       }
       const link = document.createElement('a')
       const url = URL.createObjectURL(blob)

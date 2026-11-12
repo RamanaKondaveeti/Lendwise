@@ -102,6 +102,24 @@ docker compose ps
 
 Use a lightweight external HTTPS uptime check against `/api/health/ready` for customer-facing API availability; the endpoint reveals only binary availability, not infrastructure details. Review backend JSON access logs for 5xx status and high `durationMs` values, and readiness failures for database connectivity. Check `docker compose ps` for unhealthy/restarting containers, `docker stats` for container memory/CPU, and `df -h` for disk pressure, including Docker's data directory. The host reverse proxy's access/error logs provide the customer-edge view. These logs are not a metrics store and Docker rotation is finite; alert thresholds and log export/retention should be configured to match operational needs.
 
+### Performance audit and API sampling
+
+The repository includes read-only MySQL query-plan/index inspection and a sequential API latency sampler. Run the database audit from the repository root on a host that can reach MySQL:
+
+```bash
+node backend/scripts/performance-audit.js
+```
+
+It prints MySQL version, indexes for key financial/feed tables, and `EXPLAIN` plans for representative expense, trip, and notification queries. The plan uses zero-valued IDs only; replace those predicates with representative values in a controlled production session when validating selectivity. The script does not change schema or data.
+
+Sample public endpoint latency from the host:
+
+```bash
+node backend/scripts/benchmark-api.js --base https://groupbuk.com --iterations 30 --path /api/health/live --path /api/health/ready
+```
+
+Add `--path /api/summary` or another authenticated endpoint to sample it. To authenticate, provide a session cookie through `GROUPBUK_BENCH_COOKIE` in the current shell environment; do not put a real cookie in command history or share benchmark output containing environment details. The sampler reports status counts, response bytes, and latency percentiles, never response bodies or cookie values. Take repeated before/after samples on the same host under comparable load; these are observational samples, not a production load test.
+
 ### EC2 host Nginx and Let's Encrypt
 
 For an EC2 host running Ubuntu/Debian, the repository includes a temporary HTTP proxy at `deploy/nginx/groupbuk.com.http.conf` and the final TLS/canonical-host configuration at `deploy/nginx/groupbuk.com.https.conf.example`. The first proxies both names to the frontend on `127.0.0.1:3000`; the final redirects HTTP and `www` to `https://groupbuk.com` and proxies the apex host. These files are host Nginx configuration; the Nginx inside the frontend container continues to serve the built app and proxy `/api` to the backend.
