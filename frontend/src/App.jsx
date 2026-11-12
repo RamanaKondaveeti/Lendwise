@@ -785,33 +785,6 @@ function SettlementSuggestions({ suggestions, formatMoney, onRecordSettlement, d
   )
 }
 
-function DashboardSettlementCard({ payment, currentUserId, formatMoney, disabled, onRecordSettlement }) {
-  const [expanded, setExpanded] = useState(false)
-  const currentIsPayer = Number(payment.payerId) === Number(currentUserId)
-  const counterpart = currentIsPayer ? payment.payee : payment.payer
-  const initials = counterpart?.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || '?'
-
-  return (
-    <article className={`dashboard-settlement-card ${expanded ? 'is-expanded' : ''}`}>
-      <button type="button" className="dashboard-settlement-main" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
-        <span className="dashboard-person-avatar">{initials}</span>
-        <span className="dashboard-settlement-copy">
-          <b>{counterpart}</b>
-          <small>{currentIsPayer ? 'You owe' : 'Owes you'} · {payment.groupName}</small>
-        </span>
-        <strong className={currentIsPayer ? 'is-owing' : 'is-owed'}>{formatMoney(payment.amount)}</strong>
-        <ChevronDown size={17} className="dashboard-settlement-chevron" />
-      </button>
-      {expanded && (
-        <div className="dashboard-settlement-details">
-          <span>{currentIsPayer ? `You pay ${payment.payee}` : `${payment.payer} pays you`} in <b>{payment.groupName}</b></span>
-          <button type="button" disabled={disabled} onClick={() => onRecordSettlement(payment)}>Record settlement</button>
-        </div>
-      )}
-    </article>
-  )
-}
-
 function ShareServiceIcon({ service }) {
   if (service === 'facebook') {
     return (
@@ -933,7 +906,6 @@ function App() {
   const reloadForUpdate = useRef(false)
   const [themePreference, setThemePreference] = useState(storedThemePreference)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [selectedTripId, setSelectedTripId] = useState(null)
   const [tripEditing, setTripEditing] = useState(null)
@@ -2731,7 +2703,7 @@ function App() {
   const pageTitle = tab === 'Group' ? selectedGroup?.name || 'Group' : tab === 'GroupActivity' ? `${selectedGroup?.name || 'Group'} Activity` : tab === 'Trip' ? activeTrip?.name || 'Trip' : tab
 
   return (
-    <div className={`app ${mobileNavOpen ? 'mobile-nav-open' : ''} ${sidebarCollapsed ? 'desktop-nav-collapsed' : ''}`}>
+    <div className={`app ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
       {mobileNavOpen && (
         <button
           type="button"
@@ -2818,7 +2790,7 @@ function App() {
       <main className="main">
         <header className="topbar">
           <div className="topbar-leading">
-            {tab !== 'Overview' && <button
+            <button
               type="button"
               className="mobile-nav-toggle"
               aria-label={mobileNavOpen ? 'Close navigation' : 'Open navigation'}
@@ -2826,7 +2798,7 @@ function App() {
               onClick={() => setMobileNavOpen(open => !open)}
             >
               {mobileNavOpen ? <X size={19} /> : <Menu size={19} />}
-            </button>}
+            </button>
             <div className="crumb">Workspace <span>/</span> <b>{pageTitle}</b></div>
           </div>
           <div className="top-actions">
@@ -2992,7 +2964,7 @@ function App() {
             } else window.location.reload()
           }}>Reload to update</button></div>}
           {iosInstallHelpOpen && <div className="pwa-install-help" role="status"><button type="button" className="pwa-help-close" aria-label="Close install instructions" onClick={() => setIosInstallHelpOpen(false)}><X size={16} /></button><b>Install GroupBuk on iPhone</b><span>In Safari, tap Share, then choose <strong>Add to Home Screen</strong>.</span></div>}
-          {tab !== 'Overview' && <div className="welcome-row">
+          <div className="welcome-row">
             <div>
               <div className="eyebrow"><span className="live-dot" />{today}</div>
               <h1>{tab === 'Overview' ? <>Good day<span className="wave">, {firstName}</span></> : pageTitle}</h1>
@@ -3014,7 +2986,7 @@ function App() {
               <button className="button button-light" onClick={() => setModal('group')}><Plus size={16} />Create group</button>
               <button className="button button-dark" disabled={!groups.some(group => group.members?.length)} onClick={openExpense}><Plus size={17} />Add an expense</button>
             </div>
-          </div>}
+          </div>
 
           {notice && <div className="toast" role="status" aria-live="polite"><Check size={16} />{notice}</div>}
 
@@ -3025,98 +2997,235 @@ function App() {
 
           {tab === 'Overview' && (
             <>
-              <section className="dashboard-balance-header" aria-label="Your balances">
-                <button type="button" className="dashboard-menu-button" aria-label={mobileNavOpen || sidebarCollapsed ? 'Open navigation' : 'Collapse navigation'} aria-expanded={window.matchMedia('(max-width: 760px)').matches ? mobileNavOpen : !sidebarCollapsed} onClick={() => {
-                  if (window.matchMedia('(max-width: 760px)').matches) setMobileNavOpen(open => !open)
-                  else setSidebarCollapsed(collapsed => !collapsed)
-                }}>
-                  {mobileNavOpen ? <X size={21} /> : <Menu size={21} />}
-                </button>
-                <div className="dashboard-balance-owed">
-                  <span>You owe</span>
-                  <strong>{formatMoney(owedByMe)}</strong>
-                </div>
-                <div className="dashboard-balance-pill">
-                  <span>You’re owed</span>
-                  <strong>{formatMoney(owedToMe)}</strong>
-                </div>
-                <button type="button" className="dashboard-add-expense" disabled={!groups.some(group => group.members?.length)} onClick={openExpense}>
-                  <Plus size={17} /> Add expense
-                </button>
+          <section className="monthly-summary" aria-label="Monthly expense summary">
+            <div className="monthly-summary-icon"><CalendarDays size={19} /></div>
+            <div className="monthly-summary-copy">
+              <span className="monthly-summary-label">MONTHLY SPENDING</span>
+              <label className="monthly-summary-select">
+                <span className="sr-only">Choose month for spending summary</span>
+                <select value={selectedMonth} onChange={event => setSelectedMonth(event.target.value)}>
+                  {monthOptions.map(month => <option value={month} key={month}>{monthName(month)}</option>)}
+                </select>
+                <ChevronDown size={14} aria-hidden="true" />
+              </label>
+            </div>
+            <div className="monthly-summary-stat">
+              <span>Total expenses</span>
+              <b>{activityLoading && !activityLoaded ? 'Loading…' : formatMoney(monthlyTotal)}</b>
+            </div>
+            <div className="monthly-summary-stat">
+              <span>Recorded expenses</span>
+              <b>{activityLoading && !activityLoaded ? '—' : monthlyExpenses.length}</b>
+            </div>
+          </section>
+          <section className="balance-grid">
+                <article className={`balance-card total-card ${myBalance > 0 ? 'owes-card' : ''}`}>
+                  <div className="card-top">
+                    <span className="card-title">YOUR NET BALANCE</span>
+                    <span className="card-symbol dark-symbol"><ArrowLeftRight size={17} /></span>
+                  </div>
+                  <div className="amount">{myBalance < 0 ? '+' : myBalance > 0 ? '−' : ''}{formatMoney(myBalance)}</div>
+                  <div className="balance-foot">
+                    <span className="balance-indicator">{myBalance < 0 ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}</span>
+                    {myBalance < 0 ? 'You are owed overall' : myBalance > 0 ? 'You owe overall' : 'You are all settled up'}
+                    <button className="plain-link" onClick={() => setTab('Balances')}>View balances <ArrowRight size={13} /></button>
+                  </div>
+                </article>
+                <article className="balance-card positive-card">
+                  <div className="card-top"><span className="card-title">YOU ARE OWED</span><span className="card-symbol green-symbol"><ArrowDownLeft size={17} /></span></div>
+                  <div className="amount">{formatMoney(owedToMe)}</div>
+                  <div className="small-detail"><span>Net amount owed to you</span></div>
+                  <div className="card-bottom-line"><span /><span /></div>
+                </article>
+                <article className="balance-card negative-card">
+                  <div className="card-top"><span className="card-title">YOU OWE</span><span className="card-symbol orange-symbol"><ArrowUpRight size={17} /></span></div>
+                  <div className="amount">{formatMoney(owedByMe)}</div>
+                  <div className="small-detail"><span>Net amount you owe</span></div>
+                  <div className="card-bottom-line orange-line"><span /><span /></div>
+                </article>
               </section>
-
-              <div className="dashboard-columns">
-                <section className="dashboard-column dashboard-groups-column" aria-labelledby="dashboard-groups-title">
-                  <header className="dashboard-column-heading">
-                    <div><h2 id="dashboard-groups-title">Groups</h2><p>Your expense groups</p></div>
-                    <button type="button" className="dashboard-heading-action" aria-label="Create group" onClick={() => setModal('group')}><Plus size={18} /></button>
-                  </header>
-                  <div className="dashboard-group-list">
-                    {groups.map(group => {
-                      const Icon = groupIcons[group.icon] || Users
-                      const balance = Number(group.user_balance || 0)
-                      const balanceClass = balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : 'is-settled'
-                      return (
-                        <article className="dashboard-group-card" key={group.id}>
-                          <button type="button" className="dashboard-group-main" onClick={() => openGroup(group.id)}>
-                            <span className="dashboard-group-icon" style={{ background: group.color }}><Icon size={21} /></span>
-                            <span className="dashboard-group-copy"><b>{group.name}</b><small>{group.members?.length || 0} members</small></span>
-                            <ArrowRight size={17} className="dashboard-card-arrow" />
-                          </button>
-                          <div className="dashboard-group-balance">
-                            <strong className={balanceClass}>{formatMoney(Math.abs(balance))}</strong>
-                            <span className={balanceClass}>{balance < 0 ? 'You’re owed' : balance > 0 ? 'You owe' : 'Settled'}</span>
-                          </div>
-                          {group.settlement_suggestion && <button type="button" className="dashboard-group-settle" disabled={!Number.isFinite(exchangeRate)} onClick={() => openGroupSettlement(group)}>Settle up</button>}
-                        </article>
-                      )
-                    })}
-                    {!groups.length && <div className="dashboard-empty"><Users size={23} /><b>No groups yet</b><span>Create a group to start tracking shared expenses.</span><button type="button" onClick={() => setModal('group')}>Create group</button></div>}
+          <div className="overview-insights-grid">
+          <section className="panel budget-overview-panel" aria-label="Budget overview">
+            <div className="budget-overview-heading">
+              <div><div className="section-title">Budget overview</div><div className="section-subtitle">{budgets.filter(budget => !budget.is_paused).length} active · {budgets.filter(budget => !budget.is_paused && budget.utilization.currentPeriod.percentUsed >= 100).length} exceeded</div></div>
+              <button type="button" className="budget-overview-link" onClick={() => setTab('Budgets')}>View budgets<ArrowRight size={14} /></button>
+            </div>
+            {budgets.filter(budget => !budget.is_paused).length ? (
+              <div className="budget-overview-list">
+                {budgets.filter(budget => !budget.is_paused).slice(0, 3).map(budget => {
+                  const utilization = budget.utilization.currentPeriod
+                  const pct = utilization.percentUsed
+                  const level = pct >= 100 ? 'red' : pct >= 80 ? 'amber' : 'green'
+                  const status = pct > 100 ? 'Budget exceeded' : pct >= 100 ? 'Budget reached' : pct >= 90 ? 'Near limit' : pct >= 80 ? 'Warning' : 'On track'
+                  return <div className="budget-overview-row" key={budget.id}>
+                    <div className="budget-overview-label"><b>{budget.name}</b><small className={`budget-overview-status budget-overview-text-${level}`}>{status}</small><span>{pct >= 100 ? `${formatBudgetMoney(budget, Math.abs(utilization.remaining))} over` : `${formatBudgetMoney(budget, utilization.remaining)} remaining`}</span></div>
+                    <div className={`budget-overview-meter budget-overview-${level}`}><i style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} /></div>
+                    <span className={`budget-overview-percent budget-overview-text-${level}`}>{pct.toFixed(0)}%</span>
                   </div>
-                  <button type="button" className="dashboard-view-all" onClick={() => setTab('Groups')}>View all groups <ArrowRight size={15} /></button>
-                </section>
-
-                <section className="dashboard-column dashboard-settlements-column" aria-labelledby="dashboard-settlements-title">
-                  <header className="dashboard-column-heading">
-                    <div><h2 id="dashboard-settlements-title">Settlements</h2><p>Who owes who</p></div>
-                    <span className="dashboard-count">{suggestedSettlements.filter(payment => Number(payment.payerId) === Number(data.currentUserId) || Number(payment.payeeId) === Number(data.currentUserId)).length}</span>
-                  </header>
-                  <div className="dashboard-settlement-list">
-                    {suggestedSettlements
-                      .filter(payment => Number(payment.payerId) === Number(data.currentUserId) || Number(payment.payeeId) === Number(data.currentUserId))
-                      .map((payment, index) => <DashboardSettlementCard key={`${payment.groupId}-${payment.payerId}-${payment.payeeId}-${index}`} payment={payment} currentUserId={data.currentUserId} formatMoney={formatMoney} disabled={!Number.isFinite(exchangeRate)} onRecordSettlement={item => { const group = groups.find(candidate => Number(candidate.id) === Number(item.groupId)); if (group) openGroupSettlement(group, item) }} />)}
-                    {!suggestedSettlements.some(payment => Number(payment.payerId) === Number(data.currentUserId) || Number(payment.payeeId) === Number(data.currentUserId)) && <div className="dashboard-empty"><ArrowLeftRight size={23} /><b>All settled up</b><span>Your groups have no outstanding balances.</span></div>}
-                  </div>
-                  <button type="button" className="dashboard-view-all" onClick={() => setTab('Balances')}>View balances <ArrowRight size={15} /></button>
-                </section>
-
-                <section className="dashboard-column dashboard-quick-column" aria-labelledby="dashboard-quick-title">
-                  <header className="dashboard-column-heading">
-                    <div><h2 id="dashboard-quick-title">Quick Stats</h2><p>Stats &amp; recent activity</p></div>
-                    <button type="button" className="dashboard-heading-action" aria-label="View activity" onClick={() => setTab('Activity')}><ArrowRight size={17} /></button>
-                  </header>
-                  <div className="dashboard-stats-card" aria-label="Group statistics">
-                    <div><strong>{groups.length}</strong><span>Groups</span></div>
-                    <div><strong>{groups.filter(group => Math.abs(Number(group.user_balance || 0)) >= 0.01).length}</strong><span>Active</span></div>
-                    <div><strong>{groups.filter(group => Math.abs(Number(group.user_balance || 0)) < 0.01).length}</strong><span>Settled</span></div>
-                  </div>
-                  <div className="dashboard-recent-heading"><h3>Recent activity</h3><button type="button" onClick={() => setTab('Activity')}>View all</button></div>
-                  <div className="dashboard-recent-list">
-                    {visibleActivity.slice(0, 6).map(expense => {
-                      const Icon = categoryIcons[expense.category] || ReceiptText
-                      const categoryStyle = categoryStyles[expense.category] || 'other'
-                      return (
-                        <button type="button" className="dashboard-recent-row" key={expense.id} onClick={() => openGroup(expense.group_id)}>
-                          <span className={`dashboard-expense-icon category-icon-${categoryStyle}`}><Icon size={18} /></span>
-                          <span className="dashboard-recent-copy"><b>{expense.title}</b><small>{expense.group_name} · {date(expense.created_at)}</small></span>
-                          <strong>{formatMoney(expense.amount)}</strong>
-                        </button>
-                      )
-                    })}
-                    {!visibleActivity.length && <div className="dashboard-recent-empty">{activityLoading ? 'Loading activity…' : 'Your recent expenses will appear here.'}</div>}
-                  </div>
-                </section>
+                })}
               </div>
+            ) : <div className="budget-overview-empty">{budgetsLoading ? 'Loading budgets…' : 'No active budgets yet.'}</div>}
+          </section>
+          <section className="panel analytics-panel" aria-label="Monthly analytics">
+            <div className="panel-heading analytics-heading">
+              <div>
+                <div className="section-title">Monthly analytics</div>
+                <div className="section-subtitle">Expense records and your actual split amounts</div>
+              </div>
+              <div className="analytics-filters">
+                <label>
+                  <span className="sr-only">Filter analytics by group</span>
+                  <select value={analyticsGroup} onChange={event => setAnalyticsGroup(event.target.value)}>
+                    <option value="all">All groups</option>
+                    {groups.map(group => <option value={group.id} key={group.id}>{group.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span className="sr-only">Filter analytics by category</span>
+                  <select value={analyticsCategory} onChange={event => setAnalyticsCategory(event.target.value)}>
+                    <option value="all">All categories</option>
+                    {categoryOptions.map(category => <option key={category}>{category}</option>)}
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div className="analytics-stats">
+              <div>
+                <span>Group expenses · {monthName(selectedMonth)}</span>
+                <b>{activityLoading && !activityLoaded ? 'Loading…' : formatMoney(monthlyAnalytics.total)}</b>
+              </div>
+              <div>
+                <span>Your personal share</span>
+                <b>{activityLoading && !activityLoaded ? 'Loading…' : formatMoney(monthlyAnalytics.personalShare)}</b>
+              </div>
+              <div>
+                <span>Compared with previous month</span>
+                <b className={monthlyAnalytics.changePercent === null ? '' : monthlyAnalytics.changePercent > 0 ? 'analytics-change-up' : 'analytics-change-down'}>
+                  {monthlyAnalytics.changePercent === null
+                    ? `${monthlyAnalytics.total > 0 ? 'New activity · ' : ''}${formatMoney(monthlyAnalytics.previousTotal)} previous`
+                    : `${monthlyAnalytics.changePercent > 0 ? '+' : ''}${monthlyAnalytics.changePercent.toFixed(1)}% · ${formatMoney(monthlyAnalytics.previousTotal)} previous`}
+                </b>
+              </div>
+            </div>
+          </section>
+          <section className="panel overview-expense-charts" aria-label="Expense charts">
+            <div className="section-title">Expense charts</div>
+            <div className="section-subtitle">Monthly spending and category breakdown</div>
+            <div className="overview-expense-chart-list">
+              <div className="analytics-chart-card">
+                <div className="analytics-chart-heading"><b>Monthly expenses</b><span>{selectedMonth.slice(0, 4)}</span></div>
+                <MonthlyExpenseChart series={monthlyAnalytics.monthlySeries} selectedMonth={selectedMonth} onSelectMonth={setSelectedMonth} formatMoney={formatMoney} />
+              </div>
+              <div className="analytics-chart-card">
+                <div className="analytics-chart-heading"><b>By category</b><span>{monthName(selectedMonth)}</span></div>
+                <CategoryDonutChart categories={monthlyAnalytics.categoryTotals} total={monthlyAnalytics.total} formatMoney={formatMoney} />
+              </div>
+            </div>
+          </section>
+          </div>
+
+              <SettlementSuggestions
+                suggestions={suggestedSettlements}
+                formatMoney={formatMoney}
+                disabled={!Number.isFinite(exchangeRate)}
+                onRecordSettlement={payment => {
+                  const group = groups.find(item => item.id === payment.groupId)
+                  if (group) openGroupSettlement(group, payment)
+                }}
+              />
+
+              <section className="lower-grid">
+                <div className="panel activity-panel">
+                  <div className="panel-heading">
+                    <div><div className="section-title">Recent activity <span className="title-count">{visibleActivity.length}</span></div><div className="section-subtitle">Latest expenses from your groups</div></div>
+                    <button className="select-button" onClick={() => setTab('Activity')}>View all <ArrowRight size={14} /></button>
+                  </div>
+                  <ExpenseRows expenses={visibleActivity.slice(0, 6)} currentUser={currentUser} onGroupClick={openGroup} showShare formatMoney={formatMoney} />
+                  <button className="view-all" onClick={() => setTab('Activity')}>View all activity <ArrowRight size={14} /></button>
+                </div>
+                <div className="right-column">
+                  <div className="panel recurring-upcoming-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <div className="section-title">Upcoming recurring</div>
+                        <div className="section-subtitle">Next scheduled group expenses</div>
+                      </div>
+                      <button className="more-button" aria-label="View recurring expenses" onClick={() => setTab('Recurring')}><ArrowRight size={15} /></button>
+                    </div>
+                    {recurringTemplates.filter(template => template.status === 'active' && template.next_occurrence_date).length ? (
+                      <div className="recurring-upcoming-list">
+                        {recurringTemplates
+                          .filter(template => template.status === 'active' && template.next_occurrence_date)
+                          .slice(0, 3)
+                          .map(template => (
+                            <article className="recurring-upcoming-row" key={template.id}>
+                              <span className="recurring-upcoming-icon"><Repeat size={15} /></span>
+                              <span className="recurring-upcoming-copy">
+                                <b>{template.title}</b>
+                                <small>{template.group_name} · Due {date(template.next_occurrence_date)}</small>
+                              </span>
+                              <strong>{new Intl.NumberFormat(template.currency === 'INR' ? 'en-IN' : 'en-US', {
+                                style: 'currency',
+                                currency: template.currency,
+                              }).format(Number(template.amount))}</strong>
+                            </article>
+                          ))}
+                      </div>
+                    ) : (
+                      <div className="recurring-upcoming-empty">
+                        {recurringLoading ? 'Loading schedule…' : 'No upcoming recurring expenses.'}
+                        <button type="button" onClick={() => setTab('Recurring')}>Set up a schedule</button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="panel groups-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <div className="section-title">Your groups <span className="title-count">{groups.length}</span></div>
+                        <div className="section-subtitle">Shared circles, one place</div>
+                      </div>
+                      <button className="more-button" aria-label="Create group" onClick={() => setModal('group')}><Plus size={17} /></button>
+                    </div>
+                    <div className="group-list">
+                      {groups.map(group => {
+                        const Icon = groupIcons[group.icon] || Users
+                        const balance = Number(group.user_balance || 0)
+                        return (
+                          <article className="group-row group-summary-row" key={group.id}>
+                            <span className="group-icon" style={{ background: group.color }}><Icon size={17} /></span>
+                            <span className="group-name">
+                              <b>{group.name}</b>
+                              <span>{group.members?.length || 0} members · {group.expenses} expenses · {formatMoney(group.total)} total</span>
+                              <span className={`group-user-balance ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : 'is-settled'}`}>
+                                {groupBalanceLabel(balance, formatMoney)}
+                              </span>
+                            </span>
+                            <span className="group-row-actions">
+                              <button type="button" className="group-action-button" onClick={() => openGroup(group.id)}>View Group</button>
+                              {group.settlement_suggestion && (
+                                <button type="button" className="group-action-button group-settle-button" disabled={!Number.isFinite(exchangeRate)} onClick={() => openGroupSettlement(group)}>
+                                  Settle Up
+                                </button>
+                              )}
+                            </span>
+                          </article>
+                        )
+                      })}
+                      {!groups.length && <div className="empty">Create a group to get started.</div>}
+                    </div>
+                    {Math.abs(unassignedBalance) >= 0.01 && (
+                      <p className="group-balance-note">
+                        Overall balance also includes {formatMoney(unassignedBalance)} from settlements not assigned to a group.
+                      </p>
+                    )}
+                    <button className="view-all" onClick={() => setTab('Groups')}>See all groups <ArrowRight size={14} /></button>
+                  </div>
+                  <div className="tip-card">
+                    <div className="tip-top"><div className="tip-icon"><Coffee size={17} /></div><span>YOUR WORKSPACE</span></div>
+                    <p><b>{groups.length}</b> {groups.length === 1 ? 'group' : 'groups'} · <b>{data.activityCount || 0}</b> expenses recorded</p>
+                  </div>
+                </div>
+              </section>
             </>
           )}
 
