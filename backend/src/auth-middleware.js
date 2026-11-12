@@ -1,3 +1,5 @@
+const { logError, logWarn } = require('./logger');
+
 function getSessionToken(req, cookieName = 'lendwise_session') {
   const cookies = req.headers.cookie || '';
   const cookie = cookies.split(';').map(value => value.trim())
@@ -8,16 +10,21 @@ function getSessionToken(req, cookieName = 'lendwise_session') {
 function createRequireAuth({ lookupAccount, clearSessionCookie }) {
   return async function requireAuth(req, res, next) {
     const token = getSessionToken(req);
-    if (!token) return res.status(401).json({ error: 'Sign in to continue.' });
+    if (!token) {
+      logWarn('authentication_failed');
+      return res.status(401).json({ error: 'Sign in to continue.' });
+    }
     try {
       const account = await lookupAccount(token);
       if (!account) {
+        logWarn('authentication_failed');
         clearSessionCookie(res);
         return res.status(401).json({ error: 'Your session has expired. Sign in again.' });
       }
       req.account = account;
       return next();
-    } catch {
+    } catch (error) {
+      logError('authentication_lookup_failed', error);
       return res.status(500).json({ error: 'Could not verify your session.' });
     }
   };

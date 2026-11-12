@@ -483,13 +483,28 @@ function BudgetHistoryChart({ rows, formatMoney }) {
 }
 
 async function request(url, options) {
-  const response = await fetch(url, options)
-  const body = await response.json()
+  let response
+  try {
+    response = await fetch(url, options)
+  } catch {
+    throw new Error('Could not connect to GroupBuk. Check your connection and try again.')
+  }
+  let body = null
+  try {
+    body = await response.json()
+  } catch {
+    // Proxies and unexpected failures can return HTML or an empty body.
+  }
   if (!response.ok) {
-    const error = new Error(body.error || 'The request could not be completed.')
+    const message = response.status >= 500
+      ? 'GroupBuk is temporarily unavailable. Please try again.'
+      : body?.error || 'The request could not be completed.'
+    const error = new Error(message)
     error.status = response.status
+    error.requestId = response.headers.get('X-Request-ID') || body?.requestId || null
     throw error
   }
+  if (body === null) throw new Error('GroupBuk returned an unexpected response. Please try again.')
   return body
 }
 

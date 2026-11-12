@@ -74,6 +74,34 @@ docker compose logs -f backend
 
 The frontend is published on port 3000 for the HTTPS proxy. The backend is only exposed on the internal Compose network and is not published directly. Route `/api` through the frontend proxy to the backend. Do not expose port 3000 directly to customers over plain HTTP.
 
+### Logging and operational monitoring
+
+The backend writes one-line JSON logs to stdout, so they are available through Docker Compose. API access records include the method, Express route template, status, duration, and request ID; query strings and request bodies are excluded. Error records include only an allowlisted error code/name, never the exception message or stack. The `X-Request-ID` header is accepted only when it contains a bounded safe identifier; otherwise the backend generates one and returns it in the response. API error JSON includes the same ID. Authentication failures, rate limits, readiness failures, and background-job failures are logged without credentials, tokens, or personal financial fields.
+
+`GET /api/health/live` is the process liveness check and does not query MySQL. `GET /api/health/ready` checks MySQL with a bounded query and returns only `{ "ok": true }` or HTTP 503 with `{ "ok": false }`. The existing `/api/health` path remains as a readiness alias. Compose uses readiness for the backend container health status and rotates each service's JSON logs at 10 MB per file, keeping three files.
+
+Useful host checks:
+
+```bash
+curl -fsS https://groupbuk.com/api/health/live
+curl -fsS https://groupbuk.com/api/health/ready
+docker compose ps
+docker compose logs --since=15m backend
+docker compose logs --since=15m frontend
+docker stats --no-stream
+df -h
+free -h
+```
+
+After deploying the logging or health-check changes, recreate the services so Docker applies the updated health check and log rotation settings:
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+Use a lightweight external HTTPS uptime check against `/api/health/ready` for customer-facing API availability; the endpoint reveals only binary availability, not infrastructure details. Review backend JSON access logs for 5xx status and high `durationMs` values, and readiness failures for database connectivity. Check `docker compose ps` for unhealthy/restarting containers, `docker stats` for container memory/CPU, and `df -h` for disk pressure, including Docker's data directory. The host reverse proxy's access/error logs provide the customer-edge view. These logs are not a metrics store and Docker rotation is finite; alert thresholds and log export/retention should be configured to match operational needs.
+
 ### EC2 host Nginx and Let's Encrypt
 
 For an EC2 host running Ubuntu/Debian, the repository includes a temporary HTTP proxy at `deploy/nginx/groupbuk.com.http.conf` and the final TLS/canonical-host configuration at `deploy/nginx/groupbuk.com.https.conf.example`. The first proxies both names to the frontend on `127.0.0.1:3000`; the final redirects HTTP and `www` to `https://groupbuk.com` and proxies the apex host. These files are host Nginx configuration; the Nginx inside the frontend container continues to serve the built app and proxy `/api` to the backend.

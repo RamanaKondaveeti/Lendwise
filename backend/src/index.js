@@ -40,6 +40,8 @@ const { hasGroupMembership } = require('./authorization');
 const { createRequireAuth, getSessionToken } = require('./auth-middleware');
 const { claimIdempotency, findIdempotencyReplay, readIdempotencyKey, saveIdempotentResponse } = require('./idempotency');
 const { maxReceiptBytes, prepareReceiptForTextract, scanReceipt, supportedTypes, validateReceiptFile } = require('./receipt-ocr');
+const { createHealthHandlers } = require('./health');
+const { logError, logInfo, logWarn, rateLimitHandler, requestObservability } = require('./logger');
 const envPath = path.resolve(__dirname, '../../.env');
 if (fs.existsSync(envPath)) require('dotenv').config({ path: envPath });
 
@@ -52,6 +54,7 @@ const scrypt = promisify(crypto.scrypt);
 const passwordHashOptions = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const app = express();
 app.set('trust proxy', 1);
+app.use(requestObservability);
 const pool = mysql.createPool({
   host: process.env.DB_HOST || '127.0.0.1',
   port: Number(process.env.DB_PORT || 3306),
@@ -62,6 +65,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   decimalNumbers: true
 });
+pool.on('error', error => logError('database_pool_error', error));
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -152,7 +156,7 @@ async function replayCompletedRequest(req, res, operation) {
       payload: req.body || {},
     });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not verify the request key.' });
     return true;
   }
@@ -373,13 +377,14 @@ const authRateLimit = rateLimit({
   limit: 8,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  message: { error: 'Too many attempts. Please wait 15 minutes and try again.' }
+  handler: (req, res) => rateLimitHandler(req, res, 'Too many attempts. Please wait 15 minutes and try again.')
 });
 const publicApiRateLimit = rateLimit({
   windowMs: 60 * 1000,
   limit: 120,
   standardHeaders: 'draft-8',
-  legacyHeaders: false
+  legacyHeaders: false,
+  handler: rateLimitHandler,
 });
 
 async function ensureColumn(table, column, definition) {
@@ -480,7 +485,7 @@ async function processDueRecurringTemplate(templateId) {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Recurring expense rollback failed', rollbackError);
+        logError('Recurring expense rollback failed', rollbackError);
       }
     }
     throw error;
@@ -504,13 +509,13 @@ async function runDueRecurringExpenses() {
         try {
           if (!await processDueRecurringTemplate(id)) break;
         } catch (error) {
-          console.error(`Recurring expense ${id} could not be generated.`, error);
+          logError('recurring_expense_job_failed', error);
           break;
         }
       }
     }
   } catch (error) {
-    console.error('Recurring expense scheduler failed.', error);
+    logError('recurring_scheduler_failed', error);
   } finally {
     recurringSchedulerRunning = false;
   }
@@ -553,11 +558,11 @@ async function runSettlementReminders(now = new Date()) {
           });
         }
       } catch (error) {
-        console.error(`Settlement reminders failed for workspace ${workspace.id}.`, error);
+        logError('settlement_reminder_job_failed', error);
       }
     }
   } catch (error) {
-    console.error('Settlement reminder scheduler failed.', error);
+    logError('settlement_reminder_scheduler_failed', error);
   } finally {
     settlementReminderSchedulerRunning = false;
   }
@@ -802,7 +807,7 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
   try {
     passwordHash = await derivePasswordHash(password, salt);
   } catch (error) {
-    console.error(error);
+    logError(error);
     return res.status(500).json({ error: 'Could not create your account.' });
   }
   const initials = normalizedName.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
@@ -888,13 +893,13 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Signup rollback failed', rollbackError);
+        logError('Signup rollback failed', rollbackError);
       }
     }
     if (error.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not create your account.' });
   } finally {
     connection?.release();
@@ -917,13 +922,13 @@ app.post('/api/auth/forgot-password', authRateLimit, async (req, res) => {
           text: `Reset your password: ${appUrl}/?reset=${encodeURIComponent(token)}`
         });
       } catch (emailError) {
-        console.error('Password reset email delivery failed', emailError);
+        logError('Password reset email delivery failed', emailError);
         return res.json({ message: 'If an account exists for that email, a reset link will be sent.' });
       }
     }
     res.json({ message: 'If an account exists for that email, a reset link will be sent.' });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not process the password reset request.' });
   }
 });
@@ -973,7 +978,7 @@ app.post('/api/auth/reset-password', authRateLimit, async (req, res) => {
     }
     res.json({ message: 'Password reset. You can now sign in with your new password.' });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not reset your password.' });
   }
 });
@@ -996,6 +1001,7 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
     );
     if (!account) {
       await derivePasswordHash(password, 'lendwise-invalid-account');
+      logWarn('authentication_failed');
       return res.status(401).json({ error: 'Email or password is incorrect.' });
     }
 
@@ -1003,6 +1009,7 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
     const storedHash = Buffer.from(account.password_hash, 'hex');
     if (storedHash.length !== passwordHash.length ||
         !crypto.timingSafeEqual(storedHash, passwordHash)) {
+      logWarn('authentication_failed');
       return res.status(401).json({ error: 'Email or password is incorrect.' });
     }
 
@@ -1015,7 +1022,7 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
       workspaceId: account.workspace_id
     });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not sign in.' });
   }
 });
@@ -1029,7 +1036,7 @@ app.post('/api/auth/logout', async (req, res) => {
     clearSessionCookie(res);
     res.json({ ok: true });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not sign out.' });
   }
 });
@@ -1084,7 +1091,7 @@ const receiptScanRateLimit = rateLimit({
   keyGenerator: req => req.account?.id
     ? `account:${req.account.id}`
     : ipKeyGenerator(req.ip),
-  message: { error: 'Receipt scan limit reached. Try again in 15 minutes.' },
+  handler: (req, res) => rateLimitHandler(req, res, 'Receipt scan limit reached. Try again in 15 minutes.'),
 });
 let textractClient;
 function getTextractClient() {
@@ -1124,7 +1131,7 @@ app.post('/api/receipts/scan', receiptScanRateLimit, (req, res, next) => {
     const extraction = await scanReceipt(documentBytes, client, AnalyzeExpenseCommand);
     return res.json(extraction);
   } catch (error) {
-    console.error(`Receipt OCR failed (${error?.name || 'provider error'}).`);
+    logError('receipt_ocr_failed', error);
     return res.status(502).json({ error: 'Receipt scanning failed. Check the image and try again.' });
   }
 });
@@ -1266,7 +1273,7 @@ async function runBudgetAlerts(workspaceId = null) {
       }
     }
   } catch (error) {
-    console.error('Budget alert processing failed', error);
+    logError('budget_alert_job_failed', error);
   }
 }
 
@@ -1294,7 +1301,7 @@ app.post('/api/budgets', async (req, res) => {
     res.status(201).json({ id: result.insertId, message: 'Budget created.' });
   } catch (error) {
     if (error instanceof TypeError) return res.status(400).json({ error: error.message });
-    console.error(error); res.status(500).json({ error: 'Could not create this budget.' });
+    logError(error); res.status(500).json({ error: 'Could not create this budget.' });
   }
 });
 
@@ -1312,7 +1319,7 @@ app.get('/api/budgets', async (req, res) => {
     );
     const withUtilization = await Promise.all(budgets.map(async budget => ({ ...budget, utilization: await getBudgetUtilization(budget) })));
     res.json(await attachBudgetAlertNotifications(withUtilization, req.account.id));
-  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load budgets.' }); }
+  } catch (error) { logError(error); res.status(500).json({ error: 'Could not load budgets.' }); }
 });
 
 app.get('/api/budgets/:budgetId', async (req, res) => {
@@ -1324,7 +1331,7 @@ app.get('/api/budgets/:budgetId', async (req, res) => {
     const withUtilization = { ...budget, utilization: await getBudgetUtilization(budget) };
     const [withAlerts] = await attachBudgetAlertNotifications([withUtilization], req.account.id);
     res.json(withAlerts);
-  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load this budget.' }); }
+  } catch (error) { logError(error); res.status(500).json({ error: 'Could not load this budget.' }); }
 });
 
 app.put('/api/budgets/:budgetId', async (req, res) => {
@@ -1343,7 +1350,7 @@ app.put('/api/budgets/:budgetId', async (req, res) => {
     await q(`UPDATE budgets SET name=?, budget_type=?, person_id=?, group_id=?, category=?, amount=?, currency=?, exchange_rate_to_inr=?, period=?, start_date=?, end_date=?, alert_thresholds=? WHERE id=? AND workspace_id=?`,
       [data.name, data.budgetType, personId, groupId, data.category, data.amount, data.currency, data.exchangeRateToInr, data.period, data.startDate, data.endDate, JSON.stringify(data.alertThresholds), id, req.account.workspace_id]);
     res.json({ ok: true, message: 'Budget updated.' });
-  } catch (error) { if (error instanceof TypeError) return res.status(400).json({ error: error.message }); console.error(error); res.status(500).json({ error: 'Could not update this budget.' }); }
+  } catch (error) { if (error instanceof TypeError) return res.status(400).json({ error: error.message }); logError(error); res.status(500).json({ error: 'Could not update this budget.' }); }
 });
 
 app.delete('/api/budgets/:budgetId', async (req, res) => {
@@ -1353,7 +1360,7 @@ app.delete('/api/budgets/:budgetId', async (req, res) => {
     if (!budget) return res.status(404).json({ error: 'Budget not found.' });
     await q('UPDATE budgets SET is_active = FALSE WHERE id = ? AND workspace_id = ?', [id, req.account.workspace_id]);
     res.json({ ok: true, message: 'Budget deactivated.' });
-  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not deactivate this budget.' }); }
+  } catch (error) { logError(error); res.status(500).json({ error: 'Could not deactivate this budget.' }); }
 });
 
 app.patch('/api/budgets/:budgetId/pause', async (req, res) => {
@@ -1364,13 +1371,13 @@ app.patch('/api/budgets/:budgetId/pause', async (req, res) => {
     if (typeof req.body?.paused !== 'boolean') return res.status(400).json({ error: 'Set paused to true or false.' });
     await q('UPDATE budgets SET is_paused = ? WHERE id = ? AND workspace_id = ?', [req.body.paused, id, req.account.workspace_id]);
     res.json({ ok: true, paused: req.body.paused });
-  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not change the budget state.' }); }
+  } catch (error) { logError(error); res.status(500).json({ error: 'Could not change the budget state.' }); }
 });
 
 app.get('/api/budgets/:budgetId/utilization', async (req, res) => {
   const id = Number(req.params.budgetId);
   try { const budget = await findAccessibleBudget(id, req.account); if (!budget) return res.status(404).json({ error: 'Budget not found.' }); res.json(await getBudgetUtilization(budget)); }
-  catch (error) { console.error(error); res.status(500).json({ error: 'Could not calculate budget utilization.' }); }
+  catch (error) { logError(error); res.status(500).json({ error: 'Could not calculate budget utilization.' }); }
 });
 
 app.get('/api/budgets/:budgetId/history', async (req, res) => {
@@ -1406,7 +1413,7 @@ app.get('/api/budgets/:budgetId/history', async (req, res) => {
       end.setTime(start.getTime());
     }
     res.json(history);
-  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load budget history.' }); }
+  } catch (error) { logError(error); res.status(500).json({ error: 'Could not load budget history.' }); }
 });
 
 app.get('/api/budgets/:budgetId/alerts', async (req, res) => {
@@ -1439,7 +1446,7 @@ app.get('/api/budgets/:budgetId/alerts', async (req, res) => {
       };
     }));
   }
-  catch (error) { console.error(error); res.status(500).json({ error: 'Could not load budget alerts.' }); }
+  catch (error) { logError(error); res.status(500).json({ error: 'Could not load budget alerts.' }); }
 });
 
 app.get('/api/notifications', async (req, res) => {
@@ -1475,7 +1482,7 @@ app.get('/api/notifications', async (req, res) => {
       hasMore,
     });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not load your notifications.' });
   }
 });
@@ -1500,7 +1507,7 @@ app.get('/api/notification-preferences', async (req, res) => {
       settlement_reminder_frequency: saved.settlement_reminder_frequency || 'weekly',
     });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not load notification preferences.' });
   }
 });
@@ -1561,7 +1568,7 @@ app.put('/api/notification-preferences', async (req, res) => {
       settlement_reminder_frequency: values.settlement_reminder_frequency,
     });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not save notification preferences.' });
   }
 });
@@ -1585,7 +1592,7 @@ app.patch('/api/notifications/:notificationId/read', async (req, res) => {
     }
     res.json({ ok: true });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not mark this notification as read.' });
   }
 });
@@ -1598,7 +1605,7 @@ app.post('/api/notifications/read-all', async (req, res) => {
     );
     res.json({ ok: true, count: result.affectedRows });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not mark your notifications as read.' });
   }
 });
@@ -1616,7 +1623,7 @@ app.delete('/api/notifications/:notificationId', async (req, res) => {
     if (!result.affectedRows) return res.status(404).json({ error: 'Notification not found.' });
     res.json({ ok: true });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not dismiss this notification.' });
   }
 });
@@ -1633,7 +1640,7 @@ app.get('/api/workspaces', async (req, res) => {
     );
     res.json(workspaces);
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not load your workspaces.' });
   }
 });
@@ -1656,19 +1663,17 @@ app.post('/api/workspaces/active', async (req, res) => {
     );
     res.json({ ok: true, workspaceId });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not switch workspaces.' });
   }
 });
 
-app.get('/api/health', async (_req, res) => {
-  try {
-    await q('SELECT 1');
-    res.json({ ok: true });
-  } catch {
-    res.status(503).json({ ok: false });
-  }
+const healthHandlers = createHealthHandlers({
+  checkDatabase: () => pool.query({ sql: 'SELECT 1', timeout: 3000 }),
 });
+app.get('/api/health/live', healthHandlers.live);
+app.get('/api/health/ready', healthHandlers.ready);
+app.get('/api/health', healthHandlers.ready);
 
 app.get('/api/invitations/:token', async (req, res) => {
   const token = req.params.token;
@@ -1688,7 +1693,7 @@ app.get('/api/invitations/:token', async (req, res) => {
     if (!invitation) return res.status(400).json({ error: 'Invitation link is invalid or expired.' });
     res.json(invitation);
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not load this invitation.' });
   }
 });
@@ -1716,7 +1721,7 @@ app.get('/api/users/search', async (req, res) => {
     );
     res.json(matches);
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not search users.' });
   }
 });
@@ -1799,7 +1804,7 @@ app.post('/api/invitations', async (req, res) => {
         text: `${req.account.name} invited you to join the ${req.account.workspace_name} GroupBuk workspace. Accept the invitation: ${inviteUrl}`
       });
     } catch (emailError) {
-      console.error('Workspace invitation email delivery failed', emailError);
+      logError('Workspace invitation email delivery failed', emailError);
       return res.status(201).json({
         message: 'Email could not be sent. Share the invitation link manually.',
         emailSent: false,
@@ -1812,7 +1817,7 @@ app.post('/api/invitations', async (req, res) => {
       invitationUrl: inviteUrl
     });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not create this invitation.' });
   }
 });
@@ -1907,7 +1912,7 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
     res.json({ ok: true, workspaceId: invitation.workspace_id });
   } catch (error) {
     if (connection) await connection.rollback();
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not accept this invitation.' });
   } finally {
     connection?.release();
@@ -2012,7 +2017,7 @@ app.get('/api/summary', async (req, res) => {
       currentUserId: req.account.person_id
     });
   } catch (error) {
-    console.error(error);
+    logError(error);
     const schemaErrors = ['ER_NO_SUCH_TABLE', 'ER_VIEW_INVALID'];
     const connectionErrors = [
       'ECONNREFUSED',
@@ -2084,7 +2089,7 @@ app.get('/api/recurring-expenses', async (req, res) => {
     }
     res.json({ templates, occurrences });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not load recurring expenses.' });
   }
 });
@@ -2201,10 +2206,10 @@ app.post('/api/recurring-expenses', async (req, res) => {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Recurring expense rollback failed', rollbackError);
+        logError('Recurring expense rollback failed', rollbackError);
       }
     }
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not save this recurring expense.' });
   } finally {
     connection?.release();
@@ -2351,10 +2356,10 @@ app.put('/api/recurring-expenses/:templateId', async (req, res) => {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Recurring expense rollback failed', rollbackError);
+        logError('Recurring expense rollback failed', rollbackError);
       }
     }
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not update this recurring expense.' });
   } finally {
     connection?.release();
@@ -2386,7 +2391,7 @@ app.patch('/api/recurring-expenses/:templateId/status', async (req, res) => {
     }
     res.json({ ok: true, message: status === 'paused' ? 'Recurring expense paused.' : 'Recurring expense resumed.' });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not update recurring expense status.' });
   }
 });
@@ -2406,7 +2411,7 @@ app.delete('/api/recurring-expenses/:templateId', async (req, res) => {
     if (!result.affectedRows) return res.status(404).json({ error: 'Recurring expense not found.' });
     res.json({ ok: true, message: 'Recurring expense deactivated.' });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not deactivate this recurring expense.' });
   }
 });
@@ -2489,10 +2494,10 @@ app.post('/api/recurring-expenses/:templateId/occurrences/:occurrenceDate/confir
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Recurring occurrence confirmation rollback failed', rollbackError);
+        logError('Recurring occurrence confirmation rollback failed', rollbackError);
       }
     }
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not record this recurring expense.' });
   } finally {
     connection?.release();
@@ -2608,7 +2613,7 @@ app.get('/api/expenses', async (req, res) => {
     }
     res.json(expenses);
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not load expenses.' });
   }
 });
@@ -2907,7 +2912,7 @@ app.get('/api/reports', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not generate this report.' });
   }
 });
@@ -2961,10 +2966,10 @@ app.patch('/api/expenses/:expenseId/category', async (req, res) => {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Expense update rollback failed', rollbackError);
+        logError('Expense update rollback failed', rollbackError);
       }
     }
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not update this expense category.' });
   } finally {
     connection?.release();
@@ -3171,9 +3176,9 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
     return res.json(output);
   } catch (error) {
     if (inTransaction) {
-      try { await connection.rollback(); } catch (rollbackError) { console.error('Expense update rollback failed', rollbackError); }
+      try { await connection.rollback(); } catch (rollbackError) { logError('Expense update rollback failed', rollbackError); }
     }
-    console.error(error);
+    logError(error);
     return res.status(500).json({ error: 'Could not update this expense.' });
   } finally {
     connection?.release();
@@ -3240,9 +3245,9 @@ app.delete('/api/expenses/:expenseId', async (req, res) => {
     return res.json({ ok: true, message: 'Expense voided. It remains available in expense history.', expense: updated[0] });
   } catch (error) {
     if (inTransaction) {
-      try { await connection.rollback(); } catch (rollbackError) { console.error('Expense void rollback failed', rollbackError); }
+      try { await connection.rollback(); } catch (rollbackError) { logError('Expense void rollback failed', rollbackError); }
     }
-    console.error(error);
+    logError(error);
     return res.status(500).json({ error: 'Could not void this expense.' });
   } finally {
     connection?.release();
@@ -3369,7 +3374,7 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
     res.status(201).json(responseBody);
   } catch (error) {
     if (connection) await connection.rollback();
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not settle the selected expense shares.' });
   } finally {
     connection?.release();
@@ -3465,7 +3470,7 @@ app.post('/api/settlements/bulk', async (req, res) => {
     res.status(201).json(responseBody);
   } catch (error) {
     if (connection) await connection.rollback();
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not record payments to clear your balance.' });
   } finally {
     connection?.release();
@@ -3499,7 +3504,7 @@ app.post('/api/people', async (req, res) => {
     );
     res.status(201).json(person);
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not create this person.' });
   }
 });
@@ -3577,7 +3582,7 @@ app.delete('/api/people/:id', async (req, res) => {
         error: 'This user has expense or settlement history and cannot be deleted.'
       });
     }
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not delete this user.' });
   } finally {
     connection?.release();
@@ -3699,10 +3704,10 @@ app.post('/api/expenses', async (req, res) => {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Expense rollback failed', rollbackError);
+        logError('Expense rollback failed', rollbackError);
       }
     }
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not save this expense.' });
   } finally {
     connection?.release();
@@ -3768,7 +3773,7 @@ app.get('/api/groups/:groupId/activity', async (req, res) => {
     const [rows] = await pool.execute(`${combined} ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?`, [...params, options.limit, options.offset]);
     res.json({ items: rows.map(row => ({ ...row, amount: row.amount === null ? null : Number(row.amount), metadata: row.metadata || undefined })), total: Number(countRows[0]?.total || 0), limit: options.limit, offset: options.offset });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not load group activity.' });
   }
 });
@@ -3802,7 +3807,7 @@ app.post('/api/groups/:groupId/trips', async (req, res) => {
     res.status(201).json(rows[0]);
   } catch (error) {
     await connection?.rollback();
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not create this trip.' });
   } finally { connection?.release(); }
 });
@@ -3826,7 +3831,7 @@ app.get('/api/groups/:groupId/trips', async (req, res) => {
     );
     res.json(rows.map(row => ({ ...row, spent: Number(row.spent), expense_count: Number(row.expense_count) })));
   } catch (error) {
-    console.error(error); res.status(500).json({ error: 'Could not load trips.' });
+    logError(error); res.status(500).json({ error: 'Could not load trips.' });
   }
 });
 
@@ -3847,7 +3852,7 @@ app.get('/api/trips/:tripId', async (req, res) => {
     const trip = await findAccessibleTrip(tripId, req.account);
     if (!trip) return res.status(404).json({ error: 'Trip not found.' });
     res.json(trip);
-  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load this trip.' }); }
+  } catch (error) { logError(error); res.status(500).json({ error: 'Could not load this trip.' }); }
 });
 
 app.put('/api/trips/:tripId', async (req, res) => {
@@ -3884,7 +3889,7 @@ app.put('/api/trips/:tripId', async (req, res) => {
     });
     await connection.commit();
     const [rows] = await pool.execute('SELECT * FROM trips WHERE id = ?', [tripId]); res.json(rows[0]);
-  } catch (error) { await connection?.rollback(); console.error(error); res.status(500).json({ error: 'Could not update this trip.' }); }
+  } catch (error) { await connection?.rollback(); logError(error); res.status(500).json({ error: 'Could not update this trip.' }); }
   finally { connection?.release(); }
 });
 
@@ -3899,7 +3904,7 @@ app.delete('/api/trips/:tripId', async (req, res) => {
     const [expenses] = await connection.execute('SELECT COUNT(*) AS count FROM expenses WHERE trip_id = ?', [tripId]);
     if (Number(expenses[0].count)) { await connection.rollback(); return res.status(409).json({ error: 'This trip has expenses. Cancel the trip to preserve its history.' }); }
     await connection.execute('DELETE FROM trips WHERE id = ?', [tripId]); await connection.commit(); res.json({ ok: true });
-  } catch (error) { await connection?.rollback(); console.error(error); res.status(500).json({ error: 'Could not delete this trip.' }); }
+  } catch (error) { await connection?.rollback(); logError(error); res.status(500).json({ error: 'Could not delete this trip.' }); }
   finally { connection?.release(); }
 });
 
@@ -3927,7 +3932,7 @@ app.get('/api/trips/:tripId/analytics', async (req, res) => {
       categoryStats: categories.map(row => ({ ...row, totalAmount: Number(row.totalAmount), expenseCount: Number(row.expenseCount), percentage: totalSpent ? Number(row.totalAmount) / totalSpent * 100 : 0 })),
       monthlyTrend: monthly.map(row => ({ ...row, totalAmount: Number(row.totalAmount), expenseCount: Number(row.expenseCount) })),
       topExpenses: top.map(row => ({ ...row, amount: Number(row.amount) })) });
-  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not load trip analytics.' }); }
+  } catch (error) { logError(error); res.status(500).json({ error: 'Could not load trip analytics.' }); }
 });
 
 app.get('/api/groups/:groupId/analytics', async (req, res) => {
@@ -4043,7 +4048,7 @@ app.get('/api/groups/:groupId/analytics', async (req, res) => {
       })),
     });
   } catch (error) {
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not load group analytics.' });
   }
 });
@@ -4102,10 +4107,10 @@ app.post('/api/groups', async (req, res) => {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Group rollback failed', rollbackError);
+        logError('Group rollback failed', rollbackError);
       }
     }
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not create this group.' });
   } finally {
     connection?.release();
@@ -4184,10 +4189,10 @@ app.put('/api/groups/:groupId/members', async (req, res) => {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Group member update rollback failed', rollbackError);
+        logError('Group member update rollback failed', rollbackError);
       }
     }
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not update this group’s members.' });
   } finally {
     connection?.release();
@@ -4294,10 +4299,10 @@ app.post('/api/settlements', async (req, res) => {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Group settlement rollback failed', rollbackError);
+        logError('Group settlement rollback failed', rollbackError);
       }
     }
-    console.error(error);
+    logError(error);
     res.status(500).json({ error: 'Could not save this settlement.' });
   } finally {
     connection?.release();
@@ -4311,7 +4316,7 @@ app.use((error, _req, res, _next) => {
   if (error.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Request body must contain valid JSON.' });
   }
-  console.error('Unhandled request error:', error?.code || error?.name || 'Error');
+  logError('unhandled_request_error', error);
   return res.status(500).json({ error: 'The request could not be completed.' });
 });
 
@@ -4327,9 +4332,25 @@ init()
     void runBudgetAlerts();
     const budgetAlertInterval = setInterval(() => { void runBudgetAlerts(); }, 60 * 1000);
     budgetAlertInterval.unref();
-    app.listen(port, '0.0.0.0', () => console.log(`GroupBuk API listening on ${port}`));
+    const server = app.listen(port, '0.0.0.0', () => {
+      logInfo('application_started', { dependency: 'http' });
+    });
+    let shuttingDown = false;
+    const shutdown = () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      logInfo('application_shutdown');
+      server.close(() => {
+        pool.end().then(() => process.exit(0)).catch(error => {
+          logError('database_shutdown_failed', error);
+          process.exit(1);
+        });
+      });
+    };
+    process.once('SIGTERM', shutdown);
+    process.once('SIGINT', shutdown);
   })
   .catch(error => {
-    console.error('Database startup failed', error);
+    logError('database_startup_failed', error);
     process.exit(1);
   });
