@@ -933,6 +933,7 @@ function App() {
   const [showVoidedExpenses, setShowVoidedExpenses] = useState(false)
   const [analyticsGroup, setAnalyticsGroup] = useState('all')
   const [analyticsCategory, setAnalyticsCategory] = useState('all')
+  const [analyticsDrawerOpen, setAnalyticsDrawerOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [activity, setActivity] = useState([])
@@ -1065,13 +1066,16 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!mobileNavOpen) return undefined
+    if (!mobileNavOpen && !analyticsDrawerOpen) return undefined
     const closeOnEscape = event => {
-      if (event.key === 'Escape') setMobileNavOpen(false)
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false)
+        setAnalyticsDrawerOpen(false)
+      }
     }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [mobileNavOpen])
+  }, [mobileNavOpen, analyticsDrawerOpen])
 
   const refresh = async () => {
     const summary = await request('/api/summary')
@@ -3024,6 +3028,9 @@ function App() {
                   </select>
                 </label>
               </div>
+              <button type="button" className="button button-light analytics-drawer-trigger" aria-expanded={analyticsDrawerOpen} onClick={() => setAnalyticsDrawerOpen(true)}>
+                View expense charts <ArrowRight size={14} />
+              </button>
             </div>
             <div className="analytics-stats">
               <div>
@@ -3043,32 +3050,27 @@ function App() {
                 </b>
               </div>
             </div>
-            <div className="analytics-charts">
-              <div className="analytics-chart-card">
-                <div className="analytics-chart-heading">
-                  <b>Monthly expenses</b>
-                  <span>{selectedMonth.slice(0, 4)} · Select a bar to view that month</span>
-                </div>
-                <MonthlyExpenseChart
-                  series={monthlyAnalytics.monthlySeries}
-                  selectedMonth={selectedMonth}
-                  onSelectMonth={setSelectedMonth}
-                  formatMoney={formatMoney}
-                />
-              </div>
-              <div className="analytics-chart-card">
-                <div className="analytics-chart-heading">
-                  <b>By category</b>
-                  <span>{monthName(selectedMonth)}</span>
-                </div>
-                <CategoryDonutChart
-                  categories={monthlyAnalytics.categoryTotals}
-                  total={monthlyAnalytics.total}
-                  formatMoney={formatMoney}
-                />
-              </div>
-            </div>
           </section>
+          {analyticsDrawerOpen && (
+            <div className="analytics-drawer-backdrop" onMouseDown={event => event.target === event.currentTarget && setAnalyticsDrawerOpen(false)}>
+              <aside className="analytics-drawer" role="dialog" aria-modal="true" aria-labelledby="analytics-drawer-title">
+                <div className="analytics-drawer-heading">
+                  <div><span className="eyebrow">MONTHLY ANALYTICS</span><h2 id="analytics-drawer-title">Expense charts</h2></div>
+                  <button type="button" className="close" aria-label="Close expense charts" onClick={() => setAnalyticsDrawerOpen(false)}><X size={18} /></button>
+                </div>
+                <div className="analytics-charts analytics-drawer-charts">
+                  <div className="analytics-chart-card">
+                    <div className="analytics-chart-heading"><b>Monthly expenses</b><span>{selectedMonth.slice(0, 4)} · Select a bar to view that month</span></div>
+                    <MonthlyExpenseChart series={monthlyAnalytics.monthlySeries} selectedMonth={selectedMonth} onSelectMonth={setSelectedMonth} formatMoney={formatMoney} />
+                  </div>
+                  <div className="analytics-chart-card">
+                    <div className="analytics-chart-heading"><b>By category</b><span>{monthName(selectedMonth)}</span></div>
+                    <CategoryDonutChart categories={monthlyAnalytics.categoryTotals} total={monthlyAnalytics.total} formatMoney={formatMoney} />
+                  </div>
+                </div>
+              </aside>
+            </div>
+          )}
           <section className="balance-grid">
                 <article className={`balance-card total-card ${myBalance > 0 ? 'owes-card' : ''}`}>
                   <div className="card-top">
