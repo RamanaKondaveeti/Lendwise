@@ -2700,7 +2700,7 @@ function App() {
           </button>
         </nav>
         <div className="nav-label groups-label">
-          YOUR GROUPS
+          MY GROUPS
           <button aria-label="Create group" onClick={() => { setModal('group'); setMobileNavOpen(false) }}><Plus size={15} /></button>
         </div>
         <div className="group-links">
