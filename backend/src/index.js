@@ -3199,6 +3199,13 @@ app.post('/api/expenses/:expenseId/settle', async (req, res) => {
       await connection.rollback();
       return res.status(409).json({ error: 'Voided expenses cannot be settled.' });
     }
+    // Serialize settlement balance checks across expense, group, and bulk paths.
+    // Locking only this expense would allow simultaneous payments against other
+    // expenses or group balances to observe the same workspace balance.
+    await connection.execute(
+      'SELECT id FROM people WHERE workspace_id = ? ORDER BY id FOR UPDATE',
+      [req.account.workspace_id]
+    );
     if (personIds.includes(expense.paid_by)) {
       await connection.rollback();
       return res.status(400).json({ error: 'The person who paid the expense has no share to settle with themselves.' });
@@ -3297,7 +3304,7 @@ app.post('/api/settlements/bulk', async (req, res) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     await connection.execute(
-      'SELECT id FROM people WHERE workspace_id = ? FOR UPDATE',
+      'SELECT id FROM people WHERE workspace_id = ? ORDER BY id FOR UPDATE',
       [req.account.workspace_id]
     );
     const balances = await getWorkspaceBalances(req.account.workspace_id, connection);
@@ -4113,6 +4120,10 @@ app.post('/api/settlements', async (req, res) => {
         await connection.rollback();
         return res.status(404).json({ error: 'Group not found.' });
       }
+      await connection.execute(
+        'SELECT id FROM people WHERE workspace_id = ? ORDER BY id FOR UPDATE',
+        [req.account.workspace_id]
+      );
       const groupBalances = await getWorkspaceGroupBalances(req.account.workspace_id, connection);
       const payerBalance = groupBalances.find(person =>
         person.group_id === normalizedGroupId && person.id === normalizedPayerId
