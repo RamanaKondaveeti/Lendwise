@@ -2981,6 +2981,32 @@ function App() {
               <b>{activityLoading && !activityLoaded ? '—' : monthlyExpenses.length}</b>
             </div>
           </section>
+          <section className="balance-grid">
+                <article className={`balance-card total-card ${myBalance > 0 ? 'owes-card' : ''}`}>
+                  <div className="card-top">
+                    <span className="card-title">YOUR NET BALANCE</span>
+                    <span className="card-symbol dark-symbol"><ArrowLeftRight size={17} /></span>
+                  </div>
+                  <div className="amount">{myBalance < 0 ? '+' : myBalance > 0 ? '−' : ''}{formatMoney(myBalance)}</div>
+                  <div className="balance-foot">
+                    <span className="balance-indicator">{myBalance < 0 ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}</span>
+                    {myBalance < 0 ? 'You are owed overall' : myBalance > 0 ? 'You owe overall' : 'You are all settled up'}
+                    <button className="plain-link" onClick={() => setTab('Balances')}>View balances <ArrowRight size={13} /></button>
+                  </div>
+                </article>
+                <article className="balance-card positive-card">
+                  <div className="card-top"><span className="card-title">YOU ARE OWED</span><span className="card-symbol green-symbol"><ArrowDownLeft size={17} /></span></div>
+                  <div className="amount">{formatMoney(owedToMe)}</div>
+                  <div className="small-detail"><span>Net amount owed to you</span></div>
+                  <div className="card-bottom-line"><span /><span /></div>
+                </article>
+                <article className="balance-card negative-card">
+                  <div className="card-top"><span className="card-title">YOU OWE</span><span className="card-symbol orange-symbol"><ArrowUpRight size={17} /></span></div>
+                  <div className="amount">{formatMoney(owedByMe)}</div>
+                  <div className="small-detail"><span>Net amount you owe</span></div>
+                  <div className="card-bottom-line orange-line"><span /><span /></div>
+                </article>
+              </section>
           <div className="overview-insights-grid">
           <section className="panel budget-overview-panel" aria-label="Budget overview">
             <div className="budget-overview-heading">
@@ -3060,32 +3086,6 @@ function App() {
             </div>
           </section>
           </div>
-          <section className="balance-grid">
-                <article className={`balance-card total-card ${myBalance > 0 ? 'owes-card' : ''}`}>
-                  <div className="card-top">
-                    <span className="card-title">YOUR NET BALANCE</span>
-                    <span className="card-symbol dark-symbol"><ArrowLeftRight size={17} /></span>
-                  </div>
-                  <div className="amount">{myBalance < 0 ? '+' : myBalance > 0 ? '−' : ''}{formatMoney(myBalance)}</div>
-                  <div className="balance-foot">
-                    <span className="balance-indicator">{myBalance < 0 ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}</span>
-                    {myBalance < 0 ? 'You are owed overall' : myBalance > 0 ? 'You owe overall' : 'You are all settled up'}
-                    <button className="plain-link" onClick={() => setTab('Balances')}>View balances <ArrowRight size={13} /></button>
-                  </div>
-                </article>
-                <article className="balance-card positive-card">
-                  <div className="card-top"><span className="card-title">YOU ARE OWED</span><span className="card-symbol green-symbol"><ArrowDownLeft size={17} /></span></div>
-                  <div className="amount">{formatMoney(owedToMe)}</div>
-                  <div className="small-detail"><span>Net amount owed to you</span></div>
-                  <div className="card-bottom-line"><span /><span /></div>
-                </article>
-                <article className="balance-card negative-card">
-                  <div className="card-top"><span className="card-title">YOU OWE</span><span className="card-symbol orange-symbol"><ArrowUpRight size={17} /></span></div>
-                  <div className="amount">{formatMoney(owedByMe)}</div>
-                  <div className="small-detail"><span>Net amount you owe</span></div>
-                  <div className="card-bottom-line orange-line"><span /><span /></div>
-                </article>
-              </section>
 
               <SettlementSuggestions
                 suggestions={suggestedSettlements}
