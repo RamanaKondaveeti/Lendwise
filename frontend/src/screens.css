@@ -980,3 +980,86 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
 /* Match insight card heights within each dashboard grid row. */
 .overview-insights-grid{align-items:stretch}
 .overview-insights-grid>.budget-overview-panel{align-self:stretch;min-height:100%}
+
+/* Sidebar polish: retain the existing structure, width, and responsive behavior. */
+.sidebar{
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  border-right-color:#e8edf4;
+  background:#fff;
+  scrollbar-width:thin;
+  scrollbar-color:#d7e0eb transparent;
+}
+.workspace-switcher{margin-bottom:24px}
+.workspace-switcher .workspace{
+  min-height:58px;
+  padding:9px 10px;
+  border-color:#e8edf4;
+  border-radius:11px;
+  background:#f7f9fc;
+  transition:background-color .16s ease,border-color .16s ease,box-shadow .16s ease;
+}
+.workspace-switcher .workspace:hover{
+  border-color:#d8e3ef;
+  background:#f1f6fc;
+  box-shadow:0 2px 7px #193b5d0b;
+}
+.workspace-switcher .workspace b{color:#27364b;font-weight:650}
+.workspace-switcher .workspace small{color:#748197}
+.workspace-switcher .workspace>svg{flex:none}
+.sidebar nav{gap:5px}
+.nav-label{margin-bottom:9px;color:#758196;font-size:10px;letter-spacing:.7px}
+.nav-item{
+  height:41px;
+  padding:0 11px;
+  gap:11px;
+  border-radius:9px;
+  color:#5f6d80;
+  font-size:13px;
+  font-weight:550;
+  transition:color .16s ease,background-color .16s ease;
+}
+.nav-item svg{width:19px;height:19px;flex:none;color:#78869a;transition:color .16s ease}
+.nav-item:hover:not(.active){background:#f5f8fc;color:#34445b}
+.nav-item:hover:not(.active) svg{color:#50647f}
+.nav-item.active{background:#eaf4ff;color:#087ce8;font-weight:650}
+.nav-item.active svg{color:#087ce8}
+.nav-count{background:#e7f0fb;color:#42658c}
+.nav-item.active .nav-count{background:#d5eaff;color:#087ce8}
+.groups-label{
+  margin-top:22px;
+  padding-top:15px;
+  border-top:1px solid #edf1f6;
+  color:#637188;
+  font-size:10px;
+  letter-spacing:.55px;
+}
+.groups-label button{
+  display:grid;
+  width:28px;
+  height:28px;
+  place-items:center;
+  border-radius:8px;
+  color:#596a82;
+  transition:background-color .16s ease,color .16s ease;
+}
+.groups-label button:hover{background:#edf5ff;color:#087ce8}
+.group-links{gap:3px}
+.group-link{
+  min-width:0;
+  min-height:39px;
+  padding:5px 8px;
+  gap:10px;
+  border-radius:9px;
+  color:#44536a;
+  font-size:12px;
+  font-weight:550;
+  transition:background-color .16s ease,color .16s ease;
+}
+.group-link:hover{background:#f3f7fc;color:#24364d}
+.group-link>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.group-ico{width:29px;height:29px;flex:none;border-radius:8px}
+.group-link:focus-visible,.nav-item:focus-visible,.groups-label button:focus-visible,.workspace-switcher .workspace:focus-visible{
+  outline:2px solid #83b8f0;
+  outline-offset:2px;
+}
