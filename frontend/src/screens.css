@@ -34,6 +34,38 @@
 .settlement-individual-action:focus-visible{outline:3px solid #4d805526;outline-offset:2px}
 .settlement-plan-total{display:flex;justify-content:space-between;padding-top:12px;color:#788a80;font-size:11px}
 .settlement-plan-total b{color:#27352b;font-size:13px}
+.settlement-modal{width:min(520px,100%);gap:16px;border:1px solid #e2ebe4;border-radius:16px;padding:25px;box-shadow:0 22px 70px #18332625}
+.settlement-modal .modal-top{align-items:flex-start;padding-bottom:13px;border-bottom:1px solid #edf2ed}
+.settlement-modal h2{letter-spacing:-.45px}
+.settlement-modal .form-hint{margin:0;padding:11px 13px;border:1px solid #e3eee4;border-radius:9px;background:#f6faf6;color:#6f8174;font-size:10px;line-height:1.55}
+.settlement-modal .form-row{gap:12px}
+.settlement-modal label{gap:7px;color:#51675a;font-size:10px}
+.settlement-modal input,.settlement-modal select{height:42px;border-color:#dfe9e1;border-radius:8px;background:#fff;font-size:11px}
+.settlement-modal input:focus-visible,.settlement-modal select:focus-visible{border-color:#82b395;outline:0;box-shadow:0 0 0 3px #21875e18}
+.settlement-modal .settlement-details{align-items:stretch}
+.settlement-modal .settlement-amount-field input{height:48px;border-color:#cfe2d3;color:#285c3c;font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
+.settlement-modal .modal-submit{height:44px;margin-top:0;border-radius:9px;font-size:11px}
+.settlement-modal .settlement-plan{max-height:320px;border-color:#e4ece5;border-radius:10px;background:#fff}
+.settlement-modal .settlement-plan-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px 12px;padding:13px 14px;border-bottom-color:#edf2ed}
+.settlement-payment-route{display:flex;flex-wrap:wrap;align-items:center;gap:5px 8px;min-width:0}
+.settlement-payment-route>span{overflow:hidden;max-width:45%;padding:5px 8px;border:1px solid #e6eee7;border-radius:7px;background:#f8fbf8;color:#455e4c;font-size:10px;font-weight:650;text-overflow:ellipsis;white-space:nowrap}
+.settlement-payment-route>small{color:#88968b;font-size:9px}
+.settlement-modal .settlement-payment-amount{color:#21875e;font-size:15px;font-weight:750;font-variant-numeric:tabular-nums}
+.settlement-modal .settlement-individual-action{grid-column:1/-1;justify-self:end;border-color:#d8e8dc;border-radius:7px;background:#f5faf6;padding:6px 10px;color:#37734a;font-size:9px}
+.settlement-modal .settlement-individual-action:hover:not(:disabled){border-color:#a9c9b0;background:#edf7ef}
+.settlement-modal .settlement-plan-total{align-items:center;gap:12px;padding:13px 14px;border:1px solid #dceadd;border-radius:10px;background:#f4faf4;color:#627668;font-size:10px}
+.settlement-modal .settlement-plan-total b{color:#245c3c;font-size:18px;font-weight:750;font-variant-numeric:tabular-nums}
+.settlement-modal .settlement-modal-hint{margin:0}
+.settlement-modal .settlement-plan+.settlement-plan-total{margin-top:-5px}
+@media(max-width:600px){
+  .settlement-modal{width:min(100%,520px);max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);overflow:auto;padding:19px;gap:13px;border-radius:14px}
+  .settlement-modal .modal-top{padding-bottom:10px}
+  .settlement-modal .settlement-participants,.settlement-modal .settlement-details{grid-template-columns:1fr;gap:10px}
+  .settlement-modal .settlement-plan{max-height:min(38vh,280px)}
+  .settlement-modal .settlement-plan-row{padding:11px}
+  .settlement-modal .settlement-plan-total{align-items:flex-start;flex-direction:column;gap:6px;padding:11px 12px}
+  .settlement-modal .settlement-plan-total b{font-size:17px}
+}
 .settlement-suggestions{margin-bottom:18px;padding:18px}
 .settlement-suggestions .panel-heading{margin-bottom:8px}
 .suggested-settlement-list{display:grid}

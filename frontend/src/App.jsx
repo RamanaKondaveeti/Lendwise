@@ -3794,7 +3794,7 @@ function App() {
 
       {modal && (
         <div className="overlay" onMouseDown={event => !busy && event.target === event.currentTarget && setModal('')}>
-          <form className={`modal${['expense', 'expense-edit'].includes(modal) ? ' expense-modal' : ''}`} onSubmit={submit}>
+          <form className={`modal${['expense', 'expense-edit'].includes(modal) ? ' expense-modal' : ''}${['settlement', 'settle-all'].includes(modal) ? ' settlement-modal' : ''}`} onSubmit={submit}>
             <div className="modal-top">
               <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'trip-create' ? 'Create trip' : modal === 'trip-edit' ? 'Edit trip' : modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-edit' ? 'Edit Expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'recurring' ? 'Create recurring expense' : modal === 'recurring-edit' ? 'Edit recurring expense' : modal === 'recurring-confirm' ? 'Confirm recurring amount' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" disabled={busy} onClick={() => setModal('')}><X size={18} /></button>
@@ -3826,19 +3826,19 @@ function App() {
 
             {modal === 'settle-all' && (
               <>
-                <p className="form-hint">Review the suggested payments. Confirming records payments to clear your net balance. Other people’s balances may remain.</p>
+                <p className="form-hint settlement-modal-hint">Review the suggested payments. Confirming records payments to clear your net balance. Other people’s balances may remain.</p>
                 <div className="settlement-plan">
                   {settlementPlan.map((payment, index) => (
                     <div className="settlement-plan-row" key={`${payment.payerId}-${payment.payeeId}-${index}`}>
-                      <span><b>{payment.payer}</b> pays <b>{payment.payee}</b></span>
-                      <strong>{formatMoney(payment.amount)}</strong>
+                      <div className="settlement-payment-route"><span>{payment.payer}</span><small>pays</small><span>{payment.payee}</span></div>
+                      <strong className="settlement-payment-amount">{formatMoney(payment.amount)}</strong>
                       <button type="button" className="settlement-individual-action" disabled={busy} onClick={() => openIndividualSuggestedSettlement(payment)}>Settle individually</button>
                     </div>
                   ))}
                 </div>
                 <div className="settlement-plan-total">
                   <span>Your balance to clear · {settlementPlan.length} {settlementPlan.length === 1 ? 'payment' : 'payments'}</span>
-                  <b>{formatMoney(settlementPlan.reduce((total, payment) => total + payment.amount, 0))}</b>
+                  <b className="settlement-total-amount">{formatMoney(settlementPlan.reduce((total, payment) => total + payment.amount, 0))}</b>
                 </div>
               </>
             )}
@@ -4146,12 +4146,12 @@ function App() {
                     This payment is assigned to {groups.find(group => group.id === Number(settlementDefaults.groupId))?.name || 'this group'} and will update both group and overall balances.
                   </p>
                 )}
-                <div className="form-row">
+                <div className="form-row settlement-participants">
                   <label>Paid by<select name="payerId" required defaultValue={settlementDefaults?.payerId || data.currentUserId}>{settlementPeople.map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
                   <label>Paid to<select name="payeeId" required defaultValue={settlementDefaults?.payeeId || settlementPeople.find(person => person.id !== data.currentUserId)?.id || ''}>{settlementPeople.filter(person => person.id !== (settlementDefaults?.payerId || data.currentUserId)).map(person => <option value={person.id} key={person.id}>{person.name}</option>)}</select></label>
                 </div>
-                <div className="form-row">
-                  <label>Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" defaultValue={settlementDefaults?.amount || ''} placeholder="0.00" disabled={!Number.isFinite(exchangeRate)} required /></label>
+                <div className="form-row settlement-details">
+                  <label className="settlement-amount-field">Amount ({currency})<input name="amount" type="number" min="0.01" step="0.01" defaultValue={settlementDefaults?.amount || ''} placeholder="0.00" disabled={!Number.isFinite(exchangeRate)} required /></label>
                   <label>Note<input name="note" maxLength="255" defaultValue="Settlement" required /></label>
                 </div>
               </>
