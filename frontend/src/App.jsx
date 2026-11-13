@@ -2997,7 +2997,7 @@ function App() {
 
           {tab === 'Overview' && (
             <>
-          <section className="monthly-summary" aria-label="Monthly expense summary">
+          <section className="monthly-summary overview-monthly-summary" aria-label="Monthly expense summary">
             <div className="monthly-summary-icon"><CalendarDays size={19} /></div>
             <div className="monthly-summary-copy">
               <span className="monthly-summary-label">MONTHLY SPENDING</span>
@@ -3018,7 +3018,7 @@ function App() {
               <b>{activityLoading && !activityLoaded ? '—' : monthlyExpenses.length}</b>
             </div>
           </section>
-          <section className="balance-grid">
+          <section className="balance-grid overview-balance-grid">
                 <article className={`balance-card total-card ${myBalance > 0 ? 'owes-card' : ''}`}>
                   <div className="card-top">
                     <span className="card-title">YOUR NET BALANCE</span>
@@ -3044,7 +3044,7 @@ function App() {
                   <div className="card-bottom-line orange-line"><span /><span /></div>
                 </article>
               </section>
-          <div className="overview-insights-grid">
+          <div className="overview-insights-grid overview-legacy-insights">
           <section className="panel budget-overview-panel" aria-label="Budget overview">
             <div className="budget-overview-heading">
               <div><div className="section-title">Budget overview</div><div className="section-subtitle">{budgets.filter(budget => !budget.is_paused).length} active · {budgets.filter(budget => !budget.is_paused && budget.utilization.currentPeriod.percentUsed >= 100).length} exceeded</div></div>
@@ -3124,7 +3124,7 @@ function App() {
           </section>
           </div>
 
-              <SettlementSuggestions
+              <div className="overview-settlement-wrap"><SettlementSuggestions
                 suggestions={suggestedSettlements}
                 formatMoney={formatMoney}
                 disabled={!Number.isFinite(exchangeRate)}
@@ -3132,7 +3132,7 @@ function App() {
                   const group = groups.find(item => item.id === payment.groupId)
                   if (group) openGroupSettlement(group, payment)
                 }}
-              />
+              /></div>
 
               <section className="lower-grid">
                 <div className="panel activity-panel">
@@ -3144,6 +3144,15 @@ function App() {
                   <button className="view-all" onClick={() => setTab('Activity')}>View all activity <ArrowRight size={14} /></button>
                 </div>
                 <div className="right-column">
+                  <section className="panel overview-quick-stats">
+                    <div className="section-title">Quick Stats</div><div className="section-subtitle">Stats &amp; recent activity</div>
+                    <div className="overview-stat-grid">
+                      <div><Users size={20}/><b>{groups.length}</b><span>Groups</span></div>
+                      <div><Zap size={20}/><b>{groups.filter(group => Number(group.expenses) > 0).length}</b><span>Active</span></div>
+                      <div><Check size={20}/><b>{groups.filter(group => Number(group.user_balance || 0) === 0).length}</b><span>Settled</span></div>
+                    </div>
+                  </section>
+                  <section className="panel overview-monthly-chart"><div className="panel-heading"><div><div className="section-title">Monthly Spending</div><div className="section-subtitle">{monthName(selectedMonth)}</div></div><button className="overview-text-link" onClick={() => setTab('Reports')}>View report <ArrowRight size={14}/></button></div><MonthlyExpenseChart series={monthlyAnalytics.monthlySeries} selectedMonth={selectedMonth} onSelectMonth={setSelectedMonth} formatMoney={formatMoney}/></section>
                   <div className="panel recurring-upcoming-panel">
                     <div className="panel-heading">
                       <div>
