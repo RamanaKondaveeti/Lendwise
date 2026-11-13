@@ -3593,7 +3593,7 @@ function App() {
           )}
 
           {tab === 'Users' && (
-            <section className="screen-panel">
+            <section className="screen-panel users-page">
               <div className="panel-heading screen-panel-heading">
                 <div>
                   <div className="section-title">All users <span className="title-count">{people.length}</span></div>
@@ -3636,11 +3636,11 @@ function App() {
                       )
                     })}
                   {!people.some(person => person.name.toLowerCase().includes(normalizedSearch)) && (
-                    <div className="empty">No users match “{search}”.</div>
+                    <div className="empty users-empty users-no-results"><span className="users-empty-icon"><Users size={19} /></span><b>No matching users</b><span>Try a different name in the search field.</span></div>
                   )}
                 </div>
               ) : (
-                <div className="empty">No users in this workspace yet. Add a user or invite someone to get started.</div>
+                <div className="empty users-empty"><span className="users-empty-icon"><Users size={20} /></span><b>No users in this workspace yet</b><span>Add a user or invite someone to get started.</span><div className="users-empty-actions"><button type="button" className="button button-light" onClick={() => setModal('person')}><Plus size={14} />Add user</button><button type="button" className="button button-dark" onClick={() => { setGlobalUserQuery(''); setGlobalUserResults([]); setManualInviteLink(''); setModal('invite') }}><Plus size={14} />Invite user</button></div></div>
               )}
             </section>
           )}

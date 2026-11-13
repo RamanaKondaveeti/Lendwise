@@ -135,6 +135,56 @@
 .user-delete-button:hover:not(:disabled){border-color:#d8aaa4;background:#fff7f6}
 .user-delete-button:focus-visible{outline:2px solid #b9685e;outline-offset:2px}
 .user-delete-button:disabled{opacity:.42;cursor:not-allowed}
+.users-page{min-width:0;overflow:hidden}
+.users-page>.screen-panel-heading{gap:16px;padding-bottom:18px}
+.users-page .user-screen-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.users-page .user-screen-actions .button{height:36px;padding:0 12px;border-radius:8px;font-size:10px}
+.users-page .user-screen-actions .button-light{border-color:#dfe9e1;color:#47624d}
+.users-page .user-screen-actions .button-light:hover:not(:disabled){border-color:#a9c9b0;background:#f5faf5;color:#2f7048}
+.users-page .workspace-user-list{gap:8px;padding-top:14px}
+.users-page .workspace-user-row{display:grid;grid-template-columns:40px minmax(0,1fr) minmax(112px,auto) 36px;gap:12px;min-height:78px;padding:12px;border:1px solid #e7eee8;border-radius:10px;background:#fff;transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease}
+.users-page .workspace-user-row:hover{border-color:#d1e1d4;background:#fcfefc;box-shadow:0 3px 10px #204a3308}
+.users-page .workspace-user-row:last-child{border-bottom:1px solid #e7eee8}
+.users-page .workspace-user-row>.avatar{width:40px;height:40px;border:2px solid #fff;box-shadow:0 0 0 1px #dfe9e0;font-size:10px}
+.users-page .workspace-user-copy{gap:5px}
+.users-page .workspace-user-copy b{color:#304536;font-size:12px;font-weight:700;white-space:nowrap}
+.users-page .workspace-user-copy span{color:#7d8c80;font-size:10px}
+.users-page .workspace-user-balance{min-width:112px;gap:5px}
+.users-page .workspace-user-balance b{color:#35493a;font-size:12px;font-weight:750;font-variant-numeric:tabular-nums}
+.users-page .workspace-user-balance.is-owed b{color:#21875e}
+.users-page .workspace-user-balance.is-owing b{color:#ad6d35}
+.users-page .workspace-user-balance span{display:inline-flex;align-items:center;justify-content:flex-end;gap:5px;width:max-content;max-width:100%;margin-left:auto;padding:4px 8px;border:1px solid #e5ebe4;border-radius:18px;background:#f7f8f6;color:#788579;font-size:9px;font-weight:650;text-transform:capitalize}
+.users-page .workspace-user-balance span::before{width:6px;height:6px;border-radius:50%;background:#a6b0a6;content:""}
+.users-page .workspace-user-balance.is-owed span{border-color:#d9ecdf;background:#eff8f1;color:#23764b}
+.users-page .workspace-user-balance.is-owed span::before{background:#35a469}
+.users-page .workspace-user-balance.is-owing span{border-color:#f0e2d2;background:#fdf6ed;color:#9b642f}
+.users-page .workspace-user-balance.is-owing span::before{background:#d6954e}
+.users-page .user-delete-button{width:36px;height:36px;border-radius:9px}
+.users-page .user-delete-button:disabled{opacity:.35}
+.users-page .users-empty{display:grid;justify-items:center;gap:9px;min-height:210px;margin-top:14px;padding:28px 18px;border:1px dashed #dce8dd;border-radius:10px;background:#fbfdfb}
+.users-page .users-empty-icon{display:grid;width:46px;height:46px;place-items:center;border:1px solid #e1ede2;border-radius:13px;background:#edf5ed;color:#4f8057}
+.users-page .users-empty>b{color:#344c39;font-size:13px}
+.users-page .users-empty>span:not(.users-empty-icon){max-width:380px;color:#7b897d;font-size:10px;line-height:1.55}
+.users-page .users-empty-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:3px}
+.users-page .users-empty-actions .button{height:34px;border-radius:8px;font-size:10px}
+.users-page .users-no-results{min-height:150px;margin:0;padding:20px}
+@media(max-width:800px){
+  .users-page .workspace-user-row{grid-template-columns:38px minmax(0,1fr) minmax(100px,auto) 36px;gap:10px;padding:11px}
+  .users-page .workspace-user-row>.avatar{width:38px;height:38px}
+}
+@media(max-width:600px){
+  .users-page>.screen-panel-heading{align-items:flex-start;flex-direction:column;gap:12px}
+  .users-page .user-screen-actions{width:100%;justify-content:flex-start}
+  .users-page .workspace-user-list{gap:8px;padding-top:11px}
+  .users-page .workspace-user-row{grid-template-columns:38px minmax(0,1fr) auto;gap:8px 10px;min-height:0;padding:12px}
+  .users-page .workspace-user-row>.avatar{grid-column:1;grid-row:1}
+  .users-page .workspace-user-copy{grid-column:2/4;grid-row:1;align-self:center}
+  .users-page .workspace-user-copy b{white-space:normal}
+  .users-page .workspace-user-balance{grid-column:2;grid-row:2;justify-self:start;min-width:0;text-align:left}
+  .users-page .workspace-user-balance span{margin-left:0;justify-content:flex-start}
+  .users-page .user-delete-button{grid-column:3;grid-row:2;justify-self:end;align-self:center}
+  .users-page .users-empty{min-height:190px;padding:22px 14px}
+}
 .activity-copy i{font-style:normal;padding:0 6px;color:#b5bab2}
 .range-select select{appearance:none;border:0;outline:0;background:transparent;color:#727b70;font-size:9px;cursor:pointer}
 .back-arrow{transform:rotate(180deg)}
