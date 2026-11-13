@@ -398,6 +398,25 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       expectStatus(byEmail, 200, 'existing user search by email');
       assert.ok(byEmail.body.some(user => Number(user.account_id) === Number(second.id)),
         'search by email should return the existing account');
+      const [person] = await db.execute(
+        'INSERT INTO people(workspace_id, name, initials) VALUES(?, ?, ?)',
+        [primary.workspaceId, `${runWorkspacePrefix} Guest`, 'IG']
+      );
+      await db.execute(
+        'INSERT INTO workspace_members(account_id, workspace_id, person_id) VALUES(?, ?, ?)',
+        [second.id, primary.workspaceId, person.insertId]
+      );
+      const currentMember = await api(`/api/users/search?q=${encodeURIComponent(second.email)}`, { cookie: primary.cookie });
+      expectStatus(currentMember, 200, 'existing user search for workspace member');
+      const memberResult = currentMember.body.find(user => Number(user.account_id) === Number(second.id));
+      assert.ok(memberResult, 'search should still show an account that is already in the workspace');
+      assert.equal(Number(memberResult.already_in_workspace), 1);
+      assert.equal(Number(memberResult.invitation_pending), 0);
+      await db.execute(
+        'DELETE FROM workspace_members WHERE account_id = ? AND workspace_id = ?',
+        [second.id, primary.workspaceId]
+      );
+      await db.execute('DELETE FROM people WHERE id = ? AND workspace_id = ?', [person.insertId, primary.workspaceId]);
     });
 
     await t.test('group membership, expense persistence/idempotency, edits, settlements, analytics, reports, trips, recurring execution, and IDOR', async () => {

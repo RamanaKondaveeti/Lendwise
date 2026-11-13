@@ -3850,12 +3850,16 @@ function App() {
                     <label>Search GroupBuk users<input value={globalUserQuery} onChange={event => setGlobalUserQuery(event.target.value)} maxLength="80" autoFocus placeholder="Type a name or email (2 characters minimum)" /></label>
                     <div className="global-user-results" aria-live="polite">
                       {globalSearchLoading && <span className="form-hint">Searching…</span>}
-                      {!globalSearchLoading && globalUserQuery.trim().length >= 2 && !globalUserResults.length && <span className="form-hint">No matching users available to invite.</span>}
+                      {!globalSearchLoading && globalUserQuery.trim().length >= 2 && !globalUserResults.length && <span className="form-hint">No matching accounts found. Search by their name or email.</span>}
                       {globalUserResults.map(user => (
                         <div className="global-user-result" key={user.account_id}>
                           <span className="avatar tiny">{user.name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase()}</span>
                           <b>{user.name}</b>
-                          <button type="button" className="button button-light" disabled={busy} onClick={() => inviteGlobalUser(user.account_id)}>Invite</button>
+                          {user.already_in_workspace
+                            ? <span className="form-hint">Already in this workspace</span>
+                            : user.invitation_pending
+                              ? <span className="form-hint">Invitation pending</span>
+                              : <button type="button" className="button button-light" disabled={busy} onClick={() => inviteGlobalUser(user.account_id)}>Invite</button>}
                         </div>
                       ))}
                     </div>
