@@ -1432,3 +1432,25 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
   .group-card-name{font-size:15px}
   .group-card-shell .group-card strong{font-size:18px}
 }
+
+/* Keep the actual group name visible even when card content is constrained. */
+.group-card-shell .group-card-name{
+  display:block;
+  flex:0 0 auto;
+  align-self:stretch;
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  margin-top:10px;
+  overflow:hidden;
+  color:#20352e;
+  font-size:16px;
+  font-weight:700;
+  line-height:1.35;
+  text-overflow:ellipsis;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  display:-webkit-box;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
+}
