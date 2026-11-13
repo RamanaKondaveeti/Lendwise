@@ -952,6 +952,7 @@ function App() {
   const [busy, setBusy] = useState(false)
   const financialRequestKeys = useRef(new Map())
   const financialSubmitInFlight = useRef(false)
+  const observedMemberJoinNotificationIds = useRef(new Set())
   const [notice, setNotice] = useState('')
   const [activity, setActivity] = useState([])
   const [activityLoading, setActivityLoading] = useState(false)
@@ -1272,7 +1273,14 @@ function App() {
     let active = true
     const loadNotifications = async () => {
       try {
-        await refreshNotifications(notificationLimit, 0, true)
+        const result = await refreshNotifications(notificationLimit, 0, true)
+        const hasNewMember = result.notifications.some(notification => {
+          if (notification.notification_type !== 'member_joined' ||
+              observedMemberJoinNotificationIds.current.has(notification.id)) return false
+          observedMemberJoinNotificationIds.current.add(notification.id)
+          return true
+        })
+        if (hasNewMember) await refresh()
       } catch (error) {
         if (active) setNotice(error.message)
       }

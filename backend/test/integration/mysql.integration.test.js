@@ -433,8 +433,6 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
           primary.id,
         ]
       );
-      const sessionToken = decodeURIComponent(second.cookie.slice('lendwise_session='.length));
-      const sessionTokenHash = crypto.createHash('sha256').update(sessionToken).digest('hex');
       let joinedPersonId = null;
       try {
         const accepted = await api('/api/invitations/accept', {
@@ -451,10 +449,43 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
         );
         assert.ok(membership, 'acceptance should create workspace membership');
         joinedPersonId = membership.person_id;
+
+        const [[movedAccount]] = await db.execute(
+          'SELECT workspace_id, person_id FROM accounts WHERE id = ?',
+          [second.id]
+        );
+        assert.equal(Number(movedAccount.workspace_id), Number(primary.workspaceId));
+        assert.equal(Number(movedAccount.person_id), Number(joinedPersonId));
+        const [accountMemberships] = await db.execute(
+          'SELECT workspace_id FROM workspace_members WHERE account_id = ?',
+          [second.id]
+        );
+        assert.deepEqual(accountMemberships.map(row => Number(row.workspace_id)), [Number(primary.workspaceId)]);
+
+        const currentWorkspaces = await api('/api/workspaces', { cookie: second.cookie });
+        expectStatus(currentWorkspaces, 200, 'workspaces after invitation acceptance');
+        assert.deepEqual(currentWorkspaces.body.map(workspace => Number(workspace.id)), [Number(primary.workspaceId)]);
+        const currentIdentity = await api('/api/auth/me', { cookie: second.cookie });
+        expectStatus(currentIdentity, 200, 'identity after invitation acceptance');
+        assert.equal(Number(currentIdentity.body.workspaceId), Number(primary.workspaceId));
+        assert.equal(Number(currentIdentity.body.personId), Number(joinedPersonId));
+        const joinedWorkspaceSummary = await api('/api/summary', { cookie: second.cookie });
+        expectStatus(joinedWorkspaceSummary, 200, 'invited workspace summary');
+        assert.ok(joinedWorkspaceSummary.body.people.some(person => Number(person.id) === Number(joinedPersonId)),
+          'the invitee should appear in the invited workspace user list');
       } finally {
         await db.execute(
-          'UPDATE auth_sessions SET workspace_id = ? WHERE token_hash = ? AND account_id = ?',
-          [second.workspaceId, sessionTokenHash, second.id]
+          'UPDATE accounts SET workspace_id = ?, person_id = ? WHERE id = ?',
+          [second.workspaceId, second.personId, second.id]
+        );
+        await db.execute(
+          `INSERT INTO workspace_members(account_id, workspace_id, person_id) VALUES(?, ?, ?)
+           ON DUPLICATE KEY UPDATE person_id = VALUES(person_id)`,
+          [second.id, second.workspaceId, second.personId]
+        );
+        await db.execute(
+          'UPDATE auth_sessions SET workspace_id = ? WHERE account_id = ?',
+          [second.workspaceId, second.id]
         );
         await db.execute(
           'DELETE FROM workspace_members WHERE account_id = ? AND workspace_id = ?',

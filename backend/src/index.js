@@ -1870,6 +1870,10 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'This invitation is invalid, expired, or for another account.' });
     }
 
+    await connection.execute(
+      'SELECT id FROM accounts WHERE id = ? FOR UPDATE',
+      [req.account.id]
+    );
     const [existingMembership] = await connection.execute(
       'SELECT person_id FROM workspace_members WHERE account_id = ? AND workspace_id = ?',
       [req.account.id, invitation.workspace_id]
@@ -1902,12 +1906,20 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
       );
     }
     await connection.execute(
+      'UPDATE accounts SET workspace_id = ?, person_id = ? WHERE id = ?',
+      [invitation.workspace_id, personId, req.account.id]
+    );
+    await connection.execute(
+      'DELETE FROM workspace_members WHERE account_id = ? AND workspace_id <> ?',
+      [req.account.id, invitation.workspace_id]
+    );
+    await connection.execute(
       'UPDATE workspace_invitations SET accepted_at = UTC_TIMESTAMP() WHERE id = ?',
       [invitation.id]
     );
     await connection.execute(
-      'UPDATE auth_sessions SET workspace_id = ? WHERE token_hash = ? AND account_id = ?',
-      [invitation.workspace_id, hashSessionToken(getSessionToken(req)), req.account.id]
+      'UPDATE auth_sessions SET workspace_id = ? WHERE account_id = ?',
+      [invitation.workspace_id, req.account.id]
     );
     await connection.execute(
       `UPDATE notifications SET read_at = COALESCE(read_at, UTC_TIMESTAMP())

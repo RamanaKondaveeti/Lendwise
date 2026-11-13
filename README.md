@@ -152,7 +152,7 @@ For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME` (normally `lend
 ## Included
 
 - Private workspace data isolation for people, groups, expenses, and settlements
-- Search registered account names globally and invite accounts into additional workspaces
+- Search registered account names globally and invite accounts into the current workspace; acceptance moves them from previous workspace memberships
 - Switch between workspaces an account has joined
 - Email/password signup and login with scrypt password hashes and database-backed sessions
 - Password reset and workspace invitation links
@@ -178,7 +178,7 @@ For local development, configure `DB_HOST`, `DB_PORT`, `DB_NAME` (normally `lend
 - Configure and verify HTTPS, SMTP, MySQL backups, monitoring, and an incident-response contact.
 - Define and implement customer data export/deletion and retention procedures before accepting customer data.
 
-Registered account display names are globally searchable so people can invite existing users. Search results reveal names only; email addresses are sent only as part of invitations. Accepting an invite adds a workspace membership without moving or merging the user's existing workspace data.
+Registered account display names are globally searchable so people can invite existing users. Search results reveal names only; email addresses are sent only as part of invitations. Accepting an invite moves the account to the inviter's workspace and removes its membership in other workspaces. Existing workspace records are preserved, but the account can no longer access them unless invited back.
 
 ## Receipt OCR
 
