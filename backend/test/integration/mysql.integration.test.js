@@ -419,6 +419,54 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       await db.execute('DELETE FROM people WHERE id = ? AND workspace_id = ?', [person.insertId, primary.workspaceId]);
     });
 
+    await t.test('accepts an existing-account invitation from its notification', async () => {
+      const token = crypto.randomBytes(32).toString('base64url');
+      const [invitation] = await db.execute(
+        `INSERT INTO workspace_invitations
+           (workspace_id, invitee_account_id, email, token_hash, invited_by, expires_at)
+         VALUES(?, ?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY))`,
+        [
+          primary.workspaceId,
+          second.id,
+          second.email,
+          crypto.createHash('sha256').update(token).digest('hex'),
+          primary.id,
+        ]
+      );
+      const sessionToken = decodeURIComponent(second.cookie.slice('lendwise_session='.length));
+      const sessionTokenHash = crypto.createHash('sha256').update(sessionToken).digest('hex');
+      let joinedPersonId = null;
+      try {
+        const accepted = await api('/api/invitations/accept', {
+          method: 'POST',
+          cookie: second.cookie,
+          body: { invitationId: Number(invitation.insertId) },
+        });
+        expectStatus(accepted, 200, 'existing-account invitation acceptance');
+        assert.equal(Number(accepted.body.workspaceId), Number(primary.workspaceId));
+
+        const [[membership]] = await db.execute(
+          'SELECT person_id FROM workspace_members WHERE account_id = ? AND workspace_id = ?',
+          [second.id, primary.workspaceId]
+        );
+        assert.ok(membership, 'acceptance should create workspace membership');
+        joinedPersonId = membership.person_id;
+      } finally {
+        await db.execute(
+          'UPDATE auth_sessions SET workspace_id = ? WHERE token_hash = ? AND account_id = ?',
+          [second.workspaceId, sessionTokenHash, second.id]
+        );
+        await db.execute(
+          'DELETE FROM workspace_members WHERE account_id = ? AND workspace_id = ?',
+          [second.id, primary.workspaceId]
+        );
+        if (joinedPersonId) {
+          await db.execute('DELETE FROM people WHERE id = ? AND workspace_id = ?', [joinedPersonId, primary.workspaceId]);
+        }
+        await db.execute('DELETE FROM workspace_invitations WHERE id = ?', [invitation.insertId]);
+      }
+    });
+
     await t.test('group membership, expense persistence/idempotency, edits, settlements, analytics, reports, trips, recurring execution, and IDOR', async () => {
       const groupResult = await api('/api/groups', {
         method: 'POST', cookie: primary.cookie,

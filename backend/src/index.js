@@ -1853,7 +1853,7 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
     const [invitations] = await connection.execute(
       `SELECT i.id, i.workspace_id, w.name AS workspace_name FROM workspace_invitations i
        JOIN workspaces w ON w.id = i.workspace_id
-       WHERE ((? IS NOT NULL AND token_hash = ?) OR (? IS NOT NULL AND id = ?))
+       WHERE ((? IS NOT NULL AND i.token_hash = ?) OR (? IS NOT NULL AND i.id = ?))
          AND i.invitee_account_id = ? AND i.accepted_at IS NULL
          AND i.expires_at > UTC_TIMESTAMP() FOR UPDATE`,
       [
