@@ -3794,7 +3794,7 @@ function App() {
 
       {modal && (
         <div className="overlay" onMouseDown={event => !busy && event.target === event.currentTarget && setModal('')}>
-          <form className={`modal${['expense', 'expense-edit'].includes(modal) ? ' expense-modal' : ''}${modal === 'expense' ? ' add-expense-modal' : ''}${['settlement', 'settle-all'].includes(modal) ? ' settlement-modal' : ''}`} onSubmit={submit}>
+          <form className={`modal${['expense', 'expense-edit'].includes(modal) ? ' expense-modal' : ''}${modal === 'expense' ? ' add-expense-modal' : ''}${['settlement', 'settle-all'].includes(modal) ? ' settlement-modal' : ''}${modal === 'group' ? ' create-group-modal' : ''}`} onSubmit={submit}>
             <div className="modal-top">
               <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'trip-create' ? 'Create trip' : modal === 'trip-edit' ? 'Edit trip' : modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-edit' ? 'Edit Expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'recurring' ? 'Create recurring expense' : modal === 'recurring-edit' ? 'Edit recurring expense' : modal === 'recurring-confirm' ? 'Confirm recurring amount' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" disabled={busy} onClick={() => setModal('')}><X size={18} /></button>
@@ -4119,13 +4119,13 @@ function App() {
 
             {modal === 'group' && (
               <>
-                <label>Group name<input required name="name" maxLength="255" placeholder="Enter a group name" /></label>
-                <label>Group icon<select name="icon"><option value="users">People</option><option value="house">Home</option><option value="mountain">Travel</option></select></label>
-                <fieldset className="participant-field">
+                <label className="create-group-name">Group name<input required name="name" maxLength="255" placeholder="Enter a group name" /></label>
+                <label className="create-group-icon">Group icon<select name="icon"><option value="users">People</option><option value="house">Home</option><option value="mountain">Travel</option></select></label>
+                <fieldset className="participant-field create-group-members">
                   <legend>Add users to this group</legend>
                   {people.length ? (
                     <div className="participant-list">
-                      {people.map(person => <label key={person.id}><input type="checkbox" name="memberIds" value={person.id} /><span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span>{person.name}</label>)}
+                      {people.map(person => <label className="create-group-member" key={person.id}><input type="checkbox" name="memberIds" value={person.id} /><span className="avatar tiny" style={{ background: person.color }}>{person.initials}</span><span className="create-group-member-name">{person.name}</span></label>)}
                     </div>
                   ) : <p className="form-hint">Add users first, then you can assign them to this group.</p>}
                 </fieldset>
@@ -4167,6 +4167,13 @@ function App() {
                   <button type="button" className="button button-light expense-cancel-button" disabled={busy} onClick={() => setModal('')}>Cancel</button>
                   <button className="button button-dark modal-submit" disabled={busy || !expenseSplitValid}>
                     {busy ? 'Saving…' : 'Save expense'}<ArrowRight size={15} />
+                  </button>
+                </div>
+              ) : modal === 'group' ? (
+                <div className="create-group-actions">
+                  <button type="button" className="button button-light" disabled={busy} onClick={() => setModal('')}>Cancel</button>
+                  <button className="button button-dark modal-submit" disabled={busy}>
+                    {busy ? 'Creating…' : 'Create group'}<ArrowRight size={15} />
                   </button>
                 </div>
               ) : (
