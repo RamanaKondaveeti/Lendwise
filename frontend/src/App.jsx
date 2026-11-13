@@ -3568,13 +3568,17 @@ function App() {
                           <span className={`group-card-balance ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : 'is-settled'}`}>
                             {groupBalanceLabel(balance, formatMoney)}
                           </span>
-                          <span className="group-card-link">View Group <ArrowRight size={14} /></span>
                         </button>
-                        {group.settlement_suggestion && (
-                          <button type="button" className="button button-light group-card-settle" disabled={!Number.isFinite(exchangeRate)} onClick={() => openGroupSettlement(group)}>
-                            Settle Up
+                        <div className="group-card-actions">
+                          <button type="button" className="group-card-view" onClick={() => openGroup(group.id)}>
+                            View Group <ArrowRight size={14} />
                           </button>
-                        )}
+                          {group.settlement_suggestion && (
+                            <button type="button" className="button button-light group-card-settle" disabled={!Number.isFinite(exchangeRate)} onClick={() => openGroupSettlement(group)}>
+                              Settle Up
+                            </button>
+                          )}
+                        </div>
                       </article>
                     )
                   })}
