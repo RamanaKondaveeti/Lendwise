@@ -108,6 +108,33 @@
 .share-instagram .share-brand{color:#c13584}
 .share-whatsapp .share-brand{color:#25a35a}
 .share-gmail .share-brand{color:#4285f4}
+.invite-user-modal{width:min(500px,100%);max-height:calc(100vh - 32px);max-height:90dvh;overflow-y:auto;gap:17px;padding:27px;border:1px solid #dfe9e3;border-radius:16px}
+.invite-user-modal .modal-top{align-items:flex-start;margin-bottom:0;padding-bottom:15px;border-bottom:1px solid #e8efea}
+.invite-user-modal h2{font-size:22px;letter-spacing:-.4px}
+.invite-user-modal label{gap:8px;font-size:11px;color:#51675a}
+.invite-user-modal input{height:44px;padding:0 12px;border-color:#dbe6dd;border-radius:9px;font-size:12px}
+.invite-user-modal input:focus-visible{border-color:#78a984;outline:0;box-shadow:0 0 0 3px #21875e18}
+.invite-user-modal input:user-invalid{border-color:#d98c72;box-shadow:0 0 0 3px #d98c721f}
+.invite-user-modal input:user-invalid:focus-visible{box-shadow:0 0 0 3px #d98c7230}
+.invite-user-modal .global-user-results{gap:7px;max-height:190px;padding:2px;overscroll-behavior:contain}
+.invite-user-modal .global-user-result{min-height:48px;gap:10px;padding:8px 10px;border-color:#e2ebe4;border-radius:9px;background:#fbfdfb}
+.invite-user-modal .global-user-result .avatar{width:30px;height:30px;font-size:9px}
+.invite-user-modal .global-user-result b{font-size:11px}
+.invite-user-modal .global-user-result .form-hint{margin:0;text-align:right;font-size:9px}
+.invite-user-modal .global-user-result .button{height:32px;padding:0 12px;border-radius:8px;font-size:10px}
+.invite-user-modal .form-hint{font-size:10px;line-height:1.55}
+.invite-user-modal .invite-help-text,.invite-user-modal .invite-ready-text{margin:0;padding:11px 13px;border:1px solid #e0eee4;border-radius:9px;background:#f4faf5;color:#6b7e70}
+.invite-user-modal .manual-invite{grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:12px;border-color:#d9ebde;border-radius:10px}
+.invite-user-modal .manual-invite input{height:40px;font-size:11px!important}
+.invite-user-modal .manual-invite .button{height:40px;padding:0 12px;border-radius:8px;font-size:10px}
+.invite-modal-actions{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:0}
+.invite-modal-actions .button{height:42px;min-width:110px;padding:0 16px;border-radius:9px;font-size:11px}
+.invite-modal-actions .modal-submit{min-width:170px;margin:0}
+.invite-modal-actions .modal-submit svg{margin-left:2px}
+.invite-user-modal .invitation-share{gap:9px;margin-top:0;padding-top:12px;border-top:1px solid #edf2ee}
+.invite-user-modal .share-buttons{gap:8px}
+.invite-user-modal .share-button{min-height:36px;border-radius:8px}
+@media(max-width:540px){.invite-user-modal{width:100%;max-height:94dvh;padding:20px;gap:15px;border-radius:14px}.invite-user-modal h2{font-size:20px}.invite-user-modal .global-user-results{max-height:160px}.invite-user-modal .global-user-result{gap:8px;padding:7px}.invite-user-modal .manual-invite{grid-template-columns:minmax(0,1fr);align-items:stretch}.invite-user-modal .manual-invite .button{width:100%}.invite-modal-actions{width:100%}.invite-modal-actions .button{flex:1;min-width:0;padding:0 10px}}
 .share-note{color:#788a80;font-size:9px;line-height:1.45}
 .site-share-buttons{display:flex;flex:none;align-items:center;gap:4px}
 .site-share-button{display:grid;width:29px;height:29px;place-items:center;border:1px solid #e8ece7;border-radius:8px;background:#fff;text-decoration:none;cursor:pointer}

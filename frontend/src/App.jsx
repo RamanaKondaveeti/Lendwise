@@ -3802,7 +3802,7 @@ function App() {
 
       {modal && (
         <div className="overlay" onMouseDown={event => !busy && event.target === event.currentTarget && setModal('')}>
-          <form className={`modal${['expense', 'expense-edit'].includes(modal) ? ' expense-modal' : ''}${modal === 'expense' ? ' add-expense-modal' : ''}${['settlement', 'settle-all'].includes(modal) ? ' settlement-modal' : ''}${modal === 'group' ? ' create-group-modal' : ''}`} onSubmit={submit}>
+          <form className={`modal${['expense', 'expense-edit'].includes(modal) ? ' expense-modal' : ''}${modal === 'expense' ? ' add-expense-modal' : ''}${['settlement', 'settle-all'].includes(modal) ? ' settlement-modal' : ''}${modal === 'group' ? ' create-group-modal' : ''}${modal === 'invite' ? ' invite-user-modal' : ''}`} onSubmit={submit}>
             <div className="modal-top">
               <div><span className="eyebrow">GROUPBUK</span><h2>{modal === 'trip-create' ? 'Create trip' : modal === 'trip-edit' ? 'Edit trip' : modal === 'person' ? 'Add a user' : modal === 'invite' ? 'Invite to workspace' : modal === 'members' ? 'Manage group members' : modal === 'expense' ? 'Add an expense' : modal === 'expense-edit' ? 'Edit Expense' : modal === 'expense-category' ? 'Edit expense category' : modal === 'recurring' ? 'Create recurring expense' : modal === 'recurring-edit' ? 'Edit recurring expense' : modal === 'recurring-confirm' ? 'Confirm recurring amount' : modal === 'group' ? 'Create a group' : modal === 'expense-settlement' ? 'Settle expense shares' : modal === 'settle-all' ? 'Settle your balance' : settlementDefaults?.groupId ? 'Settle group balance' : 'Record a settlement'}</h2></div>
               <button type="button" className="close" aria-label="Close" disabled={busy} onClick={() => setModal('')}><X size={18} /></button>
@@ -3855,7 +3855,7 @@ function App() {
               <>
                 {!manualInviteLink && (
                   <>
-                    <label>Search GroupBuk users<input value={globalUserQuery} onChange={event => setGlobalUserQuery(event.target.value)} maxLength="80" autoFocus placeholder="Type a name or email (2 characters minimum)" /></label>
+                    <label className="invite-search-field">Search GroupBuk users<input value={globalUserQuery} onChange={event => setGlobalUserQuery(event.target.value)} maxLength="80" autoFocus placeholder="Type a name or email (2 characters minimum)" /></label>
                     <div className="global-user-results" aria-live="polite">
                       {globalSearchLoading && <span className="form-hint">Searching…</span>}
                       {!globalSearchLoading && globalUserQuery.trim().length >= 2 && !globalUserResults.length && <span className="form-hint">No matching accounts found. Search by their name or email.</span>}
@@ -3871,13 +3871,13 @@ function App() {
                         </div>
                       ))}
                     </div>
-                    <label>Or invite by email<input name="email" type="email" maxLength="254" placeholder="person@example.com" required /></label>
-                    <p className="form-hint">Send an invitation to generate a link you can also share on Facebook, Instagram, WhatsApp, or Gmail.</p>
+                    <label className="invite-email-field">Or invite by email<input name="email" type="email" maxLength="254" placeholder="person@example.com" required /></label>
+                    <p className="form-hint invite-help-text">We’ll email an invitation and provide a shareable link if email delivery isn’t available.</p>
                   </>
                 )}
                 {manualInviteLink && (
                   <>
-                    <p className="form-hint">Your invitation is ready to share.</p>
+                    <p className="form-hint invite-ready-text">Your invitation is ready to share.</p>
                     <div className="manual-invite">
                       <label>Share this invitation link<input readOnly value={manualInviteLink} onFocus={event => event.target.select()} /></label>
                       <button type="button" className="button button-light" onClick={copyInviteLink}>Copy link</button>
@@ -4169,8 +4169,20 @@ function App() {
               </>
             )}
 
-            {!(modal === 'invite' && manualInviteLink) && (
-              modal === 'expense' ? (
+            {modal === 'invite' ? (
+              manualInviteLink ? (
+                <div className="invite-modal-actions">
+                  <button type="button" className="button button-dark" onClick={() => setModal('')}>Done</button>
+                </div>
+              ) : (
+                <div className="invite-modal-actions">
+                  <button type="button" className="button button-light" disabled={busy} onClick={() => setModal('')}>Cancel</button>
+                  <button className="button button-dark modal-submit" disabled={busy}>
+                    {busy ? 'Sending…' : 'Send invitation'}<ArrowRight size={15} />
+                  </button>
+                </div>
+              )
+            ) : modal === 'expense' ? (
                 <div className="add-expense-actions">
                   <button type="button" className="button button-light expense-cancel-button" disabled={busy} onClick={() => setModal('')}>Cancel</button>
                   <button className="button button-dark modal-submit" disabled={busy || !expenseSplitValid}>
@@ -4184,12 +4196,11 @@ function App() {
                     {busy ? 'Creating…' : 'Create group'}<ArrowRight size={15} />
                   </button>
                 </div>
-              ) : (
+            ) : (
                 <button className="button button-dark modal-submit" disabled={busy || (['expense', 'expense-edit'].includes(modal) && !expenseSplitValid)}>
                   {busy ? 'Saving…' : modal === 'trip-create' ? 'Create trip' : modal === 'trip-edit' ? 'Save trip' : modal === 'person' ? 'Add user' : modal === 'invite' ? 'Create invitation & show share buttons' : modal === 'members' ? 'Save members' : modal === 'expense' ? 'Save expense' : modal === 'expense-edit' ? 'Save Changes' : modal === 'expense-category' ? 'Save category' : modal === 'recurring' ? 'Create schedule' : modal === 'recurring-edit' ? 'Save schedule' : modal === 'recurring-confirm' ? 'Confirm & record expense' : modal === 'group' ? 'Create group' : modal === 'expense-settlement' ? 'Record selected payments' : modal === 'settle-all' ? 'Confirm & clear my balance' : 'Save settlement'}
                   <ArrowRight size={15} />
                 </button>
-              )
             )}
           </form>
         </div>
