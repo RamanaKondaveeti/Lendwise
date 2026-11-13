@@ -3745,7 +3745,7 @@ function App() {
           )}
 
           {tab === 'Balances' && (
-            <section className="panel screen-panel">
+            <section className="panel screen-panel balances-page">
               <div className="panel-heading screen-panel-heading">
                 <div><div className="section-title">People & balances <span className="title-count">{data.balances.length}</span></div><div className="section-subtitle">Net balance calculated from expenses, splits, and settlements.</div></div>
                 <div className="user-screen-actions">
@@ -3770,7 +3770,7 @@ function App() {
                       <b className={`balance-value ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : ''}`}>
                         {balance < 0 ? '+' : balance > 0 ? '−' : ''}{formatMoney(balance)}
                       </b>
-                      <span className={`balance-status ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : ''}`}>
+                      <span className={`balance-status ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : 'is-settled'}`}>
                         {balance < 0 ? 'Owed overall' : balance > 0 ? 'Owes overall' : 'Settled'}
                       </span>
                       {canSettle
@@ -3779,7 +3779,7 @@ function App() {
                     </div>
                   )
                 })}
-              </div> : <div className="empty">No people yet. Add a person to start setting up your workspace.</div>}
+              </div> : <div className="empty balances-empty"><span className="balances-empty-icon"><Users size={20} /></span><b>No people to show yet</b><span>Add a person to start tracking shared balances in this workspace.</span><button type="button" className="button button-light" onClick={() => setModal('person')}><Plus size={14} />Add a person</button></div>}
               {data.balances.length > 0 && <p className="balance-note">A positive balance means the person owes money overall; a negative balance means they are owed money overall.</p>}
             </section>
           )}

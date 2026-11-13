@@ -1237,6 +1237,61 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
   .balance-grid>.balance-card:hover{transform:none}
 }
 
+/* Balances page: keep the people ledger easy to scan at every width. */
+.balances-page{min-width:0;overflow:hidden}
+.balances-page>.screen-panel-heading{gap:18px;padding-bottom:18px}
+.balances-page .user-screen-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.balances-page .user-screen-actions .button{height:36px;border-radius:8px;font-size:10px}
+.balances-page .user-screen-actions .button-light{border-color:#e0e9e2;color:#47624d}
+.balances-page .user-screen-actions .button-light:hover:not(:disabled){border-color:#a9c9b0;background:#f5faf5;color:#2f7048}
+.balances-page .balance-table{margin-top:8px;border:1px solid #e7eee8;border-radius:10px;background:#fff;overflow:hidden}
+.balances-page .balance-table-header,.balances-page .balance-person-row{grid-template-columns:minmax(200px,1.25fr) minmax(135px,.8fr) minmax(130px,.8fr) 92px;gap:16px;padding-right:16px;padding-left:16px}
+.balances-page .balance-table-header{min-height:42px;padding-top:0;padding-bottom:0;background:#f7faf7;color:#7b897e;font-size:9px;letter-spacing:.65px}
+.balances-page .balance-person-row{min-height:76px;border-top-color:#edf2ed;transition:background-color .15s ease}
+.balances-page .balance-person-row:hover{background:#fbfdfb}
+.balances-page .balance-person{gap:12px}
+.balances-page .balance-person .avatar{width:38px;height:38px;border:2px solid #fff;box-shadow:0 0 0 1px #dfe9e0;font-size:10px}
+.balances-page .balance-person>div:last-child{gap:5px}
+.balances-page .balance-person b{color:#304536;font-size:12px;font-weight:700}
+.balances-page .balance-person span{color:#89968c;font-size:9px}
+.balances-page .balance-value{width:max-content;color:#35493a;font-size:13px;font-weight:750;font-variant-numeric:tabular-nums}
+.balances-page .balance-value.is-owed{color:#21875e}
+.balances-page .balance-value.is-owing{color:#ad6d35}
+.balances-page .balance-status{display:inline-flex;width:max-content;align-items:center;gap:6px;padding:5px 9px;border:1px solid #e5ebe4;border-radius:20px;background:#f7f8f6;color:#788579;font-size:9px;font-weight:650;white-space:nowrap}
+.balances-page .balance-status::before{width:6px;height:6px;border-radius:50%;background:#a6b0a6;content:""}
+.balances-page .balance-status.is-owed{border-color:#d9ecdf;background:#eff8f1;color:#23764b}
+.balances-page .balance-status.is-owed::before{background:#35a469}
+.balances-page .balance-status.is-owing{border-color:#f0e2d2;background:#fdf6ed;color:#9b642f}
+.balances-page .balance-status.is-owing::before{background:#d6954e}
+.balances-page .balance-status.is-settled{border-color:#e5ebe4;background:#f6f8f5;color:#718072}
+.balances-page .balance-settle-button{height:34px;min-width:76px;border-color:#d9e9dd;border-radius:8px;background:#f4faf5;color:#38744d;font-size:10px;font-weight:650}
+.balances-page .balance-settle-button:hover:not(:disabled){border-color:#a9c9b0;background:#eaf5ec}
+.balances-page .balance-settle-button:focus-visible{outline:2px solid #719978;outline-offset:2px}
+.balances-page .balance-note{margin:14px 0 0;padding-top:12px;color:#77877c;font-size:10px;line-height:1.5}
+.balances-empty{display:grid;justify-items:center;gap:9px;min-height:210px;margin-top:8px;padding:28px 18px;border:1px dashed #dce8dd;border-radius:10px;background:#fbfdfb}
+.balances-empty-icon{display:grid;width:46px;height:46px;place-items:center;border:1px solid #e1ede2;border-radius:13px;background:#edf5ed;color:#4f8057}
+.balances-empty>b{color:#344c39;font-size:13px}
+.balances-empty>span:not(.balances-empty-icon){max-width:380px;color:#7b897d;font-size:10px;line-height:1.55}
+.balances-empty .button{margin-top:3px}
+@media(max-width:800px){
+  .balances-page .balance-table-header,.balances-page .balance-person-row{grid-template-columns:minmax(160px,1.2fr) minmax(110px,.8fr) minmax(110px,.8fr) 78px;gap:10px;padding-right:12px;padding-left:12px}
+  .balances-page .balance-person .avatar{width:34px;height:34px}
+}
+@media(max-width:600px){
+  .balances-page>.screen-panel-heading{align-items:flex-start;flex-direction:column;gap:12px}
+  .balances-page .user-screen-actions{width:100%;justify-content:flex-start}
+  .balances-page .balance-table{margin-top:4px;border:0;border-radius:0;background:transparent;overflow:visible}
+  .balances-page .balance-table-header{display:none}
+  .balances-page .balance-person-row{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;min-height:0;margin-top:8px;padding:13px;border:1px solid #e7eee8;border-radius:10px;background:#fff}
+  .balances-page .balance-person-row:hover{background:#fbfdfb}
+  .balances-page .balance-person{grid-column:1;grid-row:1}
+  .balances-page .balance-value{grid-column:2;grid-row:1;align-self:center;font-size:12px}
+  .balances-page .balance-status{grid-column:1;grid-row:2;justify-self:start}
+  .balances-page .balance-settle-button{grid-column:2;grid-row:2;justify-self:end;min-width:86px}
+  .balances-page .balance-note{margin-top:12px;padding-top:10px}
+  .balances-empty{min-height:190px;padding:22px 14px}
+}
+
 /* Group cards and the compact group rows shown on the overview. */
 .group-grid{gap:15px}
 .group-card{
