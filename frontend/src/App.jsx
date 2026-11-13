@@ -987,6 +987,9 @@ function App() {
   const [notificationLimit, setNotificationLimit] = useState(25)
   const [notificationCenterOpen, setNotificationCenterOpen] = useState(false)
   const [notificationPreferencesOpen, setNotificationPreferencesOpen] = useState(false)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const profileMenuRef = useRef(null)
+  const profileTriggerRef = useRef(null)
   const [notificationPreferences, setNotificationPreferences] = useState({
     expense_created: true,
     expense_updated: true,
@@ -1313,6 +1316,25 @@ function App() {
     document.addEventListener('pointerdown', closeOnOutsideClick)
     return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
   }, [notificationCenterOpen])
+
+  useEffect(() => {
+    if (!profileMenuOpen) return undefined
+    const closeOnOutsideClick = event => {
+      if (!profileMenuRef.current?.contains(event.target)) setProfileMenuOpen(false)
+    }
+    const closeOnEscape = event => {
+      if (event.key === 'Escape') {
+        setProfileMenuOpen(false)
+        profileTriggerRef.current?.focus()
+      }
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [profileMenuOpen])
 
   useEffect(() => {
     if (modal !== 'invite' || globalUserQuery.trim().length < 2) {
@@ -2711,7 +2733,7 @@ function App() {
   const pageTitle = tab === 'Group' ? selectedGroup?.name || 'Group' : tab === 'GroupActivity' ? `${selectedGroup?.name || 'Group'} Activity` : tab === 'Trip' ? activeTrip?.name || 'Trip' : tab
 
   return (
-    <div className={`app ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
+    <div className={`app ${mobileNavOpen ? 'mobile-nav-open' : ''} ${profileMenuOpen ? 'profile-menu-open' : ''}`}>
       {mobileNavOpen && (
         <button
           type="button"
@@ -2959,8 +2981,44 @@ function App() {
             <button className="icon-button" aria-label="Record settlement" title="Record settlement" disabled={people.length < 2} onClick={openManualSettlement}>
               <ArrowLeftRight size={18} />
             </button>
-            <button type="button" className="sign-out-top-button" onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>
-            <div className="top-avatar">{currentUser?.initials || 'ME'}</div>
+            <div className="profile-dropdown" ref={profileMenuRef}>
+              <button
+                type="button"
+                className="profile-trigger"
+                ref={profileTriggerRef}
+                aria-label={`Account menu for ${currentUser?.name || authUser.name}`}
+                aria-expanded={profileMenuOpen}
+                aria-controls="profile-account-menu"
+                onClick={() => setProfileMenuOpen(open => !open)}
+              >
+                <span className="top-avatar">{currentUser?.initials || 'ME'}</span>
+                <ChevronDown className="profile-trigger-chevron" size={14} aria-hidden="true" />
+              </button>
+              {profileMenuOpen && (
+                <section className="profile-menu" id="profile-account-menu" aria-label="Account information">
+                  <div className="profile-menu-account">
+                    <span className="avatar profile-menu-avatar">{currentUser?.initials || 'ME'}</span>
+                    <div className="profile-menu-copy">
+                      <span className="profile-menu-label">SIGNED IN</span>
+                      <strong>{currentUser?.name || authUser.name}</strong>
+                      <span className="profile-menu-email">{authUser.email}</span>
+                    </div>
+                  </div>
+                  <div className="profile-menu-separator" role="separator" />
+                  <button
+                    type="button"
+                    className="profile-menu-sign-out"
+                    onClick={() => {
+                      setProfileMenuOpen(false)
+                      signOut()
+                    }}
+                  >
+                    <LogOut size={16} aria-hidden="true" />
+                    <span>Sign out</span>
+                  </button>
+                </section>
+              )}
+            </div>
           </div>
         </header>
 

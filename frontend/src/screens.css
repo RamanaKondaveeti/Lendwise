@@ -504,6 +504,11 @@ footer a{color:#668575}
 .sign-out-button:hover{background:#eaf4ed;color:#1c7853}
 .sign-out-top-button{display:grid;place-items:center;width:30px;height:30px;border:1px solid #dfe9e3;border-radius:8px;background:#fff;color:#64796c}
 .sign-out-top-button:hover{border-color:#81c9a4;background:#f0f8f3;color:#1c7853}
+.sidebar .profile{min-width:0;gap:10px;padding:15px 7px 2px}
+.sidebar .profile .avatar.me{width:36px;height:36px;background:var(--theme-secondary,#e2f5eb);color:var(--theme-primary,#167f68);box-shadow:0 0 0 1px var(--theme-border,#e1ebe5);font-size:10px}
+.sidebar .profile-copy{min-width:0;gap:4px}
+.sidebar .profile-copy b{overflow:hidden;color:var(--theme-text,#20352e);font-size:11px;text-overflow:ellipsis;white-space:nowrap}
+.sidebar .profile-copy small{overflow:hidden;color:var(--theme-muted,#788a80);font-size:9px;text-overflow:ellipsis;white-space:nowrap}
 .workspace-error{width:min(440px,calc(100vw - 32px));padding:28px;border:1px solid #e0ebe5;border-radius:14px;background:#fff;box-shadow:0 12px 40px #18332612}
 .workspace-error h1{margin:0 0 10px;color:#20352e;font:700 20px Manrope,sans-serif}
 .workspace-error p{margin:8px 0;color:#718479;line-height:1.55}
@@ -1352,10 +1357,83 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
   transition:box-shadow .16s ease,background-color .16s ease,color .16s ease;
 }
 .top-actions .top-avatar:hover{
-  background:#e4f1fb;
-  color:#356d9e;
-  box-shadow:0 0 0 3px #5b9bd514;
+  background:#d8f0e2;
+  color:#167f68;
+  box-shadow:0 0 0 3px #167f6818;
 }
+.profile-dropdown{position:relative;z-index:5;flex:none}
+.profile-trigger{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  min-height:40px;
+  padding:3px 6px 3px 3px;
+  border:1px solid transparent;
+  border-radius:12px;
+  background:transparent;
+  color:var(--theme-muted,#788a80);
+  transition:background-color .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease;
+}
+.profile-trigger:hover,.profile-trigger[aria-expanded="true"]{
+  border-color:var(--theme-border,#e1ebe5);
+  background:var(--theme-card-hover,#f6f9f6);
+  color:var(--theme-primary,#167f68);
+}
+.profile-trigger:focus-visible,.profile-menu-sign-out:focus-visible{
+  outline:3px solid #48ad7d;
+  outline-offset:3px;
+}
+.profile-trigger .top-avatar{
+  width:34px;
+  height:34px;
+  border:1px solid var(--theme-border,#dfe9e3);
+  background:var(--theme-secondary,#e2f5eb);
+  color:var(--theme-primary,#167f68);
+  font-size:10px;
+}
+.profile-trigger-chevron{transition:transform .16s ease}
+.profile-trigger[aria-expanded="true"] .profile-trigger-chevron{transform:rotate(180deg)}
+.profile-menu{
+  position:absolute;
+  top:calc(100% + 9px);
+  right:0;
+  z-index:20;
+  width:min(300px,calc(100vw - 24px));
+  padding:8px;
+  border:1px solid var(--theme-border,#dfe9e3);
+  border-radius:14px;
+  background:var(--theme-card,#fff);
+  color:var(--theme-text,#20352e);
+  box-shadow:0 14px 36px #18332620;
+}
+.profile-menu-account{display:flex;align-items:center;gap:11px;min-width:0;padding:11px 10px 12px}
+.profile-menu-avatar{width:40px;height:40px;flex:none;border:1px solid var(--theme-border,#dfe9e3);background:var(--theme-secondary,#e2f5eb);color:var(--theme-primary,#167f68);font-size:11px}
+.profile-menu-copy{display:grid;min-width:0;gap:3px}
+.profile-menu-label{color:var(--theme-muted,#788a80);font-size:9px;font-weight:700;letter-spacing:.9px}
+.profile-menu-copy strong{overflow:hidden;color:var(--theme-text,#20352e);font-size:12px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.profile-menu-email{overflow:hidden;color:var(--theme-muted,#788a80);font-size:10px;text-overflow:ellipsis;white-space:nowrap}
+.profile-menu-separator{height:1px;margin:0 4px;background:var(--theme-border,#e1ebe5)}
+.profile-menu-sign-out{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  width:100%;
+  min-height:40px;
+  margin-top:5px;
+  padding:0 10px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--theme-text,#52675b);
+  font-size:11px;
+  font-weight:600;
+  text-align:left;
+  transition:background-color .16s ease,color .16s ease;
+}
+.profile-menu-sign-out svg{color:var(--theme-muted,#788a80)}
+.profile-menu-sign-out:hover{background:var(--theme-secondary,#e2f5eb);color:var(--theme-primary,#167f68)}
+.profile-menu-sign-out:hover svg{color:var(--theme-primary,#167f68)}
+.app.profile-menu-open .topbar{position:relative;z-index:6}
 @media(min-width:801px){.top-actions{gap:12px}}
 
 /* Balance cards only: preserve their existing colors and data presentation. */
