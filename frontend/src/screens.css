@@ -1116,3 +1116,67 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
   box-shadow:0 0 0 3px #5b9bd514;
 }
 @media(min-width:801px){.top-actions{gap:12px}}
+
+/* Balance cards only: preserve their existing colors and data presentation. */
+.balance-grid>.balance-card{
+  height:174px;
+  min-height:0;
+  padding:19px 20px;
+  border-width:1px;
+  border-radius:13px;
+  box-shadow:0 4px 14px #204a3308;
+  transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
+}
+.balance-grid>.balance-card:hover{
+  transform:translateY(-1px);
+  border-color:#cddfd2;
+  box-shadow:0 7px 18px #204a330d;
+}
+.balance-grid>.total-card{height:174px}
+.balance-grid .card-top{min-height:30px;gap:12px}
+.balance-grid .card-title{
+  color:#718177;
+  font-size:10px;
+  line-height:1.3;
+  letter-spacing:.65px;
+}
+.balance-grid .card-symbol{
+  width:32px;
+  height:32px;
+  flex:none;
+  border:1px solid #ffffffb8;
+  border-radius:9px;
+}
+.balance-grid .card-symbol svg{width:17px;height:17px}
+.balance-grid .amount{
+  margin-top:12px;
+  font-size:30px;
+  line-height:1.15;
+  letter-spacing:-.65px;
+  font-variant-numeric:tabular-nums;
+}
+.balance-grid>.total-card .amount{margin-top:11px;font-size:32px}
+.balance-grid .balance-foot,.balance-grid .small-detail{margin-top:8px;font-size:10px;line-height:1.4}
+.balance-grid .balance-foot{gap:7px}
+.balance-grid .balance-indicator{display:inline-flex;align-items:center}
+.balance-grid .card-bottom-line{height:2px;opacity:.72}
+@media(min-width:1500px){
+  .balance-grid>.balance-card,.balance-grid>.total-card{height:190px}
+  .balance-grid .amount{font-size:32px}
+  .balance-grid>.total-card .amount{font-size:34px}
+}
+@media(max-width:800px){
+  .balance-grid>.balance-card{padding:17px 15px}
+  .balance-grid .amount{font-size:27px}
+  .balance-grid>.total-card .amount{font-size:30px}
+}
+@media(max-width:540px){
+  .balance-grid>.balance-card{height:150px;min-height:142px;padding:15px 13px;border-radius:12px}
+  .balance-grid>.total-card{height:150px}
+  .balance-grid .card-title{font-size:9px}
+  .balance-grid .card-symbol{width:29px;height:29px}
+  .balance-grid .amount{margin-top:10px;font-size:24px}
+  .balance-grid>.total-card .amount{font-size:30px}
+  .balance-grid .balance-foot,.balance-grid .small-detail{font-size:9px}
+  .balance-grid>.balance-card:hover{transform:none}
+}
