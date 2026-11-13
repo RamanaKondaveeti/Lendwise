@@ -3363,8 +3363,8 @@ function App() {
                   </div>
                 )}
                 {!reportResult && (reportLoading
-                  ? <LoadingSkeleton rows={4} label="Loading report preview" />
-                  : <div className="empty report-empty">Choose a report and filters, then generate a preview.</div>)}
+                  ? <div className="report-loading-state"><LoadingSkeleton rows={4} label="Loading report preview" /><span>Preparing your report preview…</span></div>
+                  : <div className="empty report-empty"><span className="report-empty-icon"><FileBarChart size={20} /></span><b>Your report preview will appear here</b><span>Choose a report type and filters, then generate a preview.</span></div>)}
                 {reportResult && visibleReportRows.length > 0 && (
                   <div className="report-table-wrap">
                     <table className="report-table">
@@ -3379,7 +3379,7 @@ function App() {
                     </table>
                   </div>
                 )}
-                {reportResult && !visibleReportRows.length && <div className="empty report-empty">No records match these filters.</div>}
+                {reportResult && !visibleReportRows.length && <div className="empty report-empty report-empty-compact"><span className="report-empty-icon"><FileBarChart size={18} /></span><b>No matching records</b><span>Try changing the date range or filters.</span></div>}
                 {reportResult?.hasMore && (
                   <div className="report-pagination">
                     <span>Preview and exports are capped at 5,000 rows. Narrow filters for larger reports.</span>
