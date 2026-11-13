@@ -3472,12 +3472,12 @@ function App() {
                             </div>
                           </div>
                           <div className="recurring-template-meta">
-                            <b>{new Intl.NumberFormat(template.currency === 'INR' ? 'en-IN' : 'en-US', {
+                            <b className="recurring-template-amount">{new Intl.NumberFormat(template.currency === 'INR' ? 'en-IN' : 'en-US', {
                               style: 'currency',
                               currency: template.currency,
                             }).format(Number(template.amount))}{template.variable_amount ? ' expected' : ''}</b>
-                            <span>{template.frequency[0].toUpperCase() + template.frequency.slice(1)} · {template.split_method === 'equal' ? 'Equal split' : 'Custom split'}</span>
-                            <span>{template.next_occurrence_date ? `Next · ${date(template.next_occurrence_date)}` : 'No future occurrence'}</span>
+                            <span className="recurring-template-frequency">{template.frequency[0].toUpperCase() + template.frequency.slice(1)} · {template.split_method === 'equal' ? 'Equal split' : 'Custom split'}</span>
+                            <span className="recurring-template-due">{template.next_occurrence_date ? `Next · ${date(template.next_occurrence_date)}` : 'No future occurrence'}</span>
                           </div>
                           <span className={`recurring-status recurring-status-${template.status}`}>{template.status}</span>
                           <div className="recurring-template-actions">
@@ -3493,7 +3493,7 @@ function App() {
                         </article>
                       ))}
                     </div>
-                    : <div className="empty">No recurring expenses yet. Create a template to schedule shared bills.</div>}
+                    : <div className="empty recurring-empty"><span className="recurring-empty-icon"><Repeat size={21} /></span><b>No recurring expenses yet</b><span>Create a template to schedule shared bills and keep upcoming costs visible.</span><button type="button" className="button button-dark" disabled={!groups.some(group => group.members?.length)} onClick={() => openRecurringEditor()}><Plus size={15} />Create recurring</button></div>}
               </section>
 
               <section className="panel screen-panel recurring-history-panel">
@@ -4076,16 +4076,18 @@ function App() {
 
             {(modal === 'recurring' || modal === 'recurring-edit') && (
               <>
-                <p className="form-hint">Fixed expenses are generated automatically. Variable bills will wait for confirmation before affecting analytics and balances.</p>
-                <RecurringExpenseFields
-                  key={recurringEditing?.id || 'new-recurring'}
-                  groups={groups}
-                  currency={currency}
-                  exchangeRate={exchangeRate}
-                  initial={recurringEditing}
-                  currentUserId={data.currentUserId}
-                  onCurrencyChange={setCurrency}
-                />
+                <div className="recurring-form-fields">
+                  <p className="form-hint">Fixed expenses are generated automatically. Variable bills will wait for confirmation before affecting analytics and balances.</p>
+                  <RecurringExpenseFields
+                    key={recurringEditing?.id || 'new-recurring'}
+                    groups={groups}
+                    currency={currency}
+                    exchangeRate={exchangeRate}
+                    initial={recurringEditing}
+                    currentUserId={data.currentUserId}
+                    onCurrencyChange={setCurrency}
+                  />
+                </div>
               </>
             )}
 

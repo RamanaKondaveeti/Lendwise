@@ -752,29 +752,44 @@ button:disabled{cursor:not-allowed}
   .activity-controls .range-select{flex:1}
   .activity-screen .panel-heading{align-items:flex-start;flex-wrap:wrap}
 }
-.recurring-page{display:grid;gap:15px}
-.recurring-template-list,.recurring-occurrence-list{display:grid}
-.recurring-template-card{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(140px,.8fr) auto auto;align-items:center;gap:15px;padding:14px 5px;border-bottom:1px solid #eef2ef}
+.recurring-page{display:grid;gap:18px}
+.recurring-templates-panel,.recurring-history-panel{overflow:hidden}
+.recurring-template-list,.recurring-occurrence-list{display:grid;gap:9px;padding-top:14px}
+.recurring-template-card{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(165px,.85fr) auto auto;align-items:center;gap:16px;padding:16px;border:1px solid #e8eee8;border-radius:10px;background:#fcfdfb;transition:border-color .16s ease,box-shadow .16s ease}
+.recurring-template-card:hover{border-color:#cbdccc;box-shadow:0 4px 14px #204a3309}
 .recurring-template-card:last-child,.recurring-occurrence-row:last-child{border-bottom:0}
-.recurring-template-main{display:flex;align-items:center;gap:10px;min-width:0}
-.recurring-template-main>div{display:grid;gap:4px;min-width:0}
-.recurring-template-icon,.recurring-upcoming-icon{display:grid;flex:none;width:34px;height:34px;place-items:center;border-radius:9px;background:#edf5ed;color:#4f8057}
-.recurring-template-main b,.recurring-occurrence-row b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#304536;font-size:11px}
-.recurring-template-main p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;color:#778477;font-size:9px}
-.recurring-template-main>div>span,.recurring-template-meta span,.recurring-occurrence-row>div>span{color:#8b958a;font-size:9px}
-.recurring-template-meta{display:grid;gap:4px;min-width:0}
-.recurring-template-meta>b,.recurring-occurrence-row>strong{color:#355840;font-size:11px;white-space:nowrap}
-.recurring-template-actions{display:flex;align-items:center;gap:5px}
-.recurring-template-actions .button{height:31px;padding:0 9px;font-size:9px}
-.recurring-delete-button{display:grid;width:30px;height:30px;place-items:center;border:1px solid #f0dfdc;border-radius:7px;background:#fff;color:#a95e55}
-.recurring-delete-button:hover:not(:disabled){background:#fff7f6}
-.recurring-status{width:max-content;padding:4px 8px;border-radius:20px;background:#f0f3ef;color:#718071;font-size:9px;font-weight:700;text-transform:capitalize}
+.recurring-template-main{display:flex;align-items:center;gap:12px;min-width:0}
+.recurring-template-main>div{display:grid;gap:5px;min-width:0}
+.recurring-template-icon,.recurring-upcoming-icon{display:grid;flex:none;width:40px;height:40px;place-items:center;border:1px solid #e1ede1;border-radius:11px;background:#edf5ed;color:#4f8057}
+.recurring-template-main b,.recurring-occurrence-row b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#304536;font-size:14px;font-weight:700;letter-spacing:-.01em}
+.recurring-template-main p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;color:#778477;font-size:11px}
+.recurring-template-main>div>span,.recurring-template-meta span,.recurring-occurrence-row>div>span{color:#829084;font-size:10px}
+.recurring-template-meta{display:grid;gap:6px;min-width:0}
+.recurring-template-meta>.recurring-template-amount,.recurring-occurrence-row>strong{color:#315d40;font-size:15px;font-weight:750;white-space:nowrap;font-variant-numeric:tabular-nums}
+.recurring-template-frequency{color:#426e4d!important;font-size:11px!important;font-weight:650}
+.recurring-template-due{display:flex;align-items:center;gap:5px;width:max-content;max-width:100%;padding:4px 8px;border:1px solid #e2eee2;border-radius:6px;background:#f2f8f1;color:#54745a!important;font-size:10px!important;font-weight:600}
+.recurring-template-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px}
+.recurring-template-actions .button{height:34px;padding:0 10px;font-size:10px}
+.recurring-delete-button{display:grid;width:34px;height:34px;place-items:center;border:1px solid #f0dfdc;border-radius:8px;background:#fff;color:#a95e55;cursor:pointer;transition:background .15s ease,border-color .15s ease}
+.recurring-delete-button:hover:not(:disabled){border-color:#e7c6c1;background:#fff7f6}
+.recurring-delete-button:focus-visible{outline:2px solid #719978;outline-offset:2px}
+.recurring-status{width:max-content;padding:5px 10px;border:1px solid #e5eae3;border-radius:20px;background:#f5f7f3;color:#697969;font-size:10px;font-weight:700;text-transform:capitalize;white-space:nowrap}
 .recurring-status-active,.recurring-status-generated{background:#e8f4e9;color:#4f8057}
 .recurring-status-paused,.recurring-status-needs_confirmation{background:#fff3dc;color:#9a7541}
 .recurring-status-cancelled{background:#f9ecea;color:#a95e55}
-.recurring-occurrence-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:14px;min-height:62px;padding:10px 5px;border-bottom:1px solid #eef2ef}
+.recurring-occurrence-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:16px;min-height:68px;padding:12px 6px;border-bottom:1px solid #eef2ef}
 .recurring-occurrence-row>div{display:grid;gap:5px;min-width:0}
-.recurring-occurrence-row .button{height:31px;padding:0 10px;font-size:9px}
+.recurring-occurrence-row .button{height:35px;padding:0 12px;font-size:10px}
+.recurring-empty{display:grid;justify-items:center;gap:9px;min-height:205px;margin-top:14px;padding:28px 18px;border:1px dashed #d9e6d9;border-radius:10px;background:#fbfdfb;text-align:center}
+.recurring-empty-icon{display:grid;width:48px;height:48px;place-items:center;border:1px solid #e0ece0;border-radius:14px;background:#edf5ed;color:#4f8057}
+.recurring-empty>b{color:#344c39;font-size:14px}
+.recurring-empty>span:not(.recurring-empty-icon){max-width:380px;color:#7a897b;font-size:11px;line-height:1.55}
+.recurring-empty .button{margin-top:4px}
+.recurring-form-fields{display:grid;gap:12px}
+.recurring-form-fields>.form-hint{margin:0;padding:10px 12px;border:1px solid #e3eee3;border-radius:8px;background:#f5faf4;line-height:1.5}
+.recurring-form-fields .form-row{gap:12px}
+.recurring-form-fields label{gap:6px}
+.recurring-form-fields input,.recurring-form-fields select,.recurring-form-fields textarea{min-height:40px;border-radius:8px}
 .recurring-upcoming-panel{padding:16px}
 .recurring-upcoming-list{display:grid;margin-top:8px}
 .recurring-upcoming-row{display:flex;align-items:center;gap:8px;min-width:0;padding:9px 0;border-top:1px solid #eef2ef}
@@ -798,16 +813,24 @@ button:disabled{cursor:not-allowed}
 .recurring-percent-input small{color:#788a80}
 .recurring-share-invalid{color:#a95e55}
 @media(max-width:900px){
-  .recurring-template-card{grid-template-columns:minmax(0,1fr) auto;gap:10px}
-  .recurring-template-meta{grid-column:1}
-  .recurring-template-card>.recurring-status{grid-column:2;grid-row:1}
-  .recurring-template-actions{grid-column:2;grid-row:2}
+  .recurring-template-card{grid-template-columns:minmax(0,1fr) auto;gap:12px}
+  .recurring-template-main{grid-column:1;grid-row:1}
+  .recurring-template-card>.recurring-status{grid-column:2;grid-row:1;justify-self:end}
+  .recurring-template-meta{grid-column:1;grid-row:2}
+  .recurring-template-actions{grid-column:2;grid-row:2;align-self:end}
 }
 @media(max-width:600px){
-  .recurring-template-card{grid-template-columns:minmax(0,1fr);gap:8px}
-  .recurring-template-card>.recurring-status,.recurring-template-meta,.recurring-template-actions{grid-column:1;grid-row:auto}
-  .recurring-template-actions{flex-wrap:wrap}
-  .recurring-occurrence-row{grid-template-columns:minmax(0,1fr) auto;gap:8px}
+  .recurring-page{gap:12px}
+  .recurring-template-list,.recurring-occurrence-list{gap:8px;padding-top:10px}
+  .recurring-template-card{grid-template-columns:minmax(0,1fr) auto;gap:11px;padding:13px}
+  .recurring-template-main{grid-column:1/-1;grid-row:1}
+  .recurring-template-card>.recurring-status{grid-column:2;grid-row:2;align-self:start}
+  .recurring-template-meta{grid-column:1;grid-row:2}
+  .recurring-template-actions{grid-column:1/-1;grid-row:3;justify-content:flex-start;padding-top:10px;border-top:1px solid #edf2ed}
+  .recurring-template-actions .button{flex:1;justify-content:center}
+  .recurring-delete-button{flex:none}
+  .recurring-empty{min-height:185px;padding:22px 14px}
+  .recurring-occurrence-row{grid-template-columns:minmax(0,1fr) auto;gap:9px}
   .recurring-occurrence-row>.button,.recurring-occurrence-row>.recurring-status{grid-column:1/-1}
   .recurring-occurrence-row>strong{justify-self:end}
 }
