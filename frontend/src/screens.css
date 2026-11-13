@@ -1290,3 +1290,34 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
   .group-summary-row{gap:8px;padding:9px 6px}
   .group-summary-row .group-icon{width:36px;height:36px}
 }
+.group-card-members{
+  display:flex;
+  min-width:0;
+  align-items:center;
+  gap:7px;
+  margin-top:7px;
+  color:#66796d;
+  font-size:10px;
+  line-height:1;
+}
+.group-card-avatar-stack{display:flex;align-items:center;padding-left:2px}
+.group-card-avatar{
+  display:grid;
+  width:22px;
+  height:22px;
+  flex:none;
+  place-items:center;
+  margin-left:-3px;
+  border:2px solid #fff;
+  border-radius:50%;
+  color:#345846;
+  font-size:7px;
+  font-weight:700;
+  line-height:1;
+  box-shadow:0 1px 2px #173b2418;
+}
+.group-card-avatar:first-child{margin-left:0}
+.group-card-shell .group-card-meta{margin-top:4px}
+@media(max-width:700px){
+  .group-card-avatar{width:21px;height:21px}
+}

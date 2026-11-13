@@ -3539,12 +3539,31 @@ function App() {
                   {groups.map(group => {
                     const Icon = groupIcons[group.icon] || Users
                     const balance = Number(group.user_balance || 0)
+                    const memberCount = group.members?.length || 0
+                    const memberProfiles = (group.members || []).slice(0, 4).map(member =>
+                      people.find(person => Number(person.id) === Number(member.id)) || member
+                    )
                     return (
                       <article className="group-card-shell" key={group.id}>
                         <button className="group-card" onClick={() => openGroup(group.id)}>
                           <span className="group-card-icon" style={{ background: group.color }}><Icon size={20} /></span>
                           <span className="group-card-name">{group.name}</span>
-                          <span className="group-card-meta">{group.members?.length || 0} members · {group.expenses} {group.expenses === 1 ? 'expense' : 'expenses'}</span>
+                          <span className="group-card-members" aria-label={`${memberCount} members`}>
+                            <span className="group-card-avatar-stack" aria-hidden="true">
+                              {memberProfiles.map((member, index) => (
+                                <span
+                                  className="group-card-avatar"
+                                  key={member.id ?? `${group.id}-${index}`}
+                                  style={{ background: member.color || group.color }}
+                                  title={member.name || 'Group member'}
+                                >
+                                  {member.initials || member.name?.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || '?'}
+                                </span>
+                              ))}
+                            </span>
+                            <span>{memberCount} {memberCount === 1 ? 'member' : 'members'}</span>
+                          </span>
+                          <span className="group-card-meta">{group.expenses} {group.expenses === 1 ? 'expense' : 'expenses'}</span>
                           <strong>{formatMoney(group.total)} total expenses</strong>
                           <span className={`group-card-balance ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : 'is-settled'}`}>
                             {groupBalanceLabel(balance, formatMoney)}
