@@ -3847,7 +3847,7 @@ function App() {
               <>
                 {!manualInviteLink && (
                   <>
-                    <label>Search GroupBuk users<input value={globalUserQuery} onChange={event => setGlobalUserQuery(event.target.value)} maxLength="80" autoFocus placeholder="Type a name (2 characters minimum)" /></label>
+                    <label>Search GroupBuk users<input value={globalUserQuery} onChange={event => setGlobalUserQuery(event.target.value)} maxLength="80" autoFocus placeholder="Type a name or email (2 characters minimum)" /></label>
                     <div className="global-user-results" aria-live="polite">
                       {globalSearchLoading && <span className="form-hint">Searching…</span>}
                       {!globalSearchLoading && globalUserQuery.trim().length >= 2 && !globalUserResults.length && <span className="form-hint">No matching users available to invite.</span>}

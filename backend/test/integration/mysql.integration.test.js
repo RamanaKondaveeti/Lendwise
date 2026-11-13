@@ -389,6 +389,15 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       primary.cookie = login.cookie;
       primary.password = 'integration-reset-pass-456';
       second = await createAccount(`${runWorkspacePrefix} Guest`, `gb-it-${runId}-guest@example.invalid`, 'integration-pass-789');
+
+      const byName = await api(`/api/users/search?q=${encodeURIComponent('Guest')}`, { cookie: primary.cookie });
+      expectStatus(byName, 200, 'existing user search by name');
+      assert.ok(byName.body.some(user => Number(user.account_id) === Number(second.id)),
+        'search by name should return the existing account');
+      const byEmail = await api(`/api/users/search?q=${encodeURIComponent(second.email)}`, { cookie: primary.cookie });
+      expectStatus(byEmail, 200, 'existing user search by email');
+      assert.ok(byEmail.body.some(user => Number(user.account_id) === Number(second.id)),
+        'search by email should return the existing account');
     });
 
     await t.test('group membership, expense persistence/idempotency, edits, settlements, analytics, reports, trips, recurring execution, and IDOR', async () => {

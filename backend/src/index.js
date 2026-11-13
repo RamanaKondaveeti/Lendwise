@@ -1720,17 +1720,18 @@ app.get('/api/users/search', async (req, res) => {
     const matches = await q(
       `SELECT a.id AS account_id, p.name
        FROM accounts a
-       JOIN people p ON p.id = a.person_id
+       JOIN people p ON p.id = a.person_id AND p.workspace_id = a.workspace_id
        LEFT JOIN workspace_members wm
          ON wm.account_id = a.id AND wm.workspace_id = ?
        LEFT JOIN workspace_invitations wi
          ON wi.invitee_account_id = a.id AND wi.workspace_id = ?
          AND wi.accepted_at IS NULL AND wi.expires_at > UTC_TIMESTAMP()
        WHERE a.id <> ? AND wm.account_id IS NULL AND wi.id IS NULL
-         AND LOCATE(LOWER(?), LOWER(p.name)) > 0
+         AND (LOCATE(LOWER(?), LOWER(p.name)) > 0
+           OR LOCATE(LOWER(?), LOWER(a.email)) > 0)
        ORDER BY p.name, a.id
        LIMIT 10`,
-      [req.account.workspace_id, req.account.workspace_id, req.account.id, search]
+      [req.account.workspace_id, req.account.workspace_id, req.account.id, search, search]
     );
     res.json(matches);
   } catch (error) {
