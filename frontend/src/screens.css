@@ -1274,6 +1274,43 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
 @media(max-width:760px){.budget-overview-list{grid-template-columns:1fr;gap:9px}.budget-overview-row{grid-template-columns:minmax(0,1fr) 42px}.budget-overview-label{grid-column:1/-1}}
 .budget-card{transition:border-color .18s ease,box-shadow .18s ease}.budget-card.budget-amber,.budget-card.budget-red{border-color:var(--budget-tone);box-shadow:inset 3px 0 0 var(--budget-tone)}.budget-meter i,.budget-analytics-meter b{transition:width .28s ease}.budget-status-pill{display:inline-flex;align-items:center;gap:4px}.budget-alert-indicator{display:flex;align-items:center;gap:6px;margin-top:10px;padding:7px 8px;border-radius:7px;background:var(--budget-soft);color:var(--budget-tone);font-size:9px}.budget-alert-indicator time,.budget-alert-indicator>span{margin-left:auto;color:var(--theme-muted);font-size:8px}.budget-history-rows{display:grid;gap:0;margin-top:11px;border-top:1px solid var(--theme-border)}.budget-history-detail{display:grid;grid-template-columns:1.2fr repeat(4,minmax(70px,1fr));gap:8px;align-items:center;padding:8px 3px;border-bottom:1px solid var(--theme-border);color:var(--theme-muted);font-size:9px}.budget-history-detail b,.budget-history-detail strong{color:var(--theme-text)}.budget-analytics-row>div.budget-analytics-values{display:grid;gap:4px}.budget-analytics-values span{white-space:normal;text-align:right}.budget-history-column{cursor:help}
 @media(max-width:640px){.budget-history-detail{grid-template-columns:1fr 1fr}.budget-history-detail b{grid-column:1/-1}.budget-history-detail strong{text-align:right}.budget-alert-indicator{flex-wrap:wrap}.budget-alert-indicator time,.budget-alert-indicator>span{width:100%;margin:0 0 0 19px}}
+/* Incremental polish for balances, settlements, recurring expenses, and reports. */
+.balances-page .balance-person-row{border-top-color:#eaf0eb}
+.balances-page .balance-person-row:hover .balance-person .avatar{box-shadow:0 0 0 2px #d3e5d7}
+.balances-page .balance-value,.balances-page .balance-status{font-variant-numeric:tabular-nums}
+.balances-page .user-screen-actions{flex-wrap:wrap}
+.balances-page .user-screen-actions .button{min-height:36px;border-radius:8px;transition:border-color .15s ease,background-color .15s ease,color .15s ease}
+.balances-page .user-screen-actions .button:focus-visible,.balances-page .balance-settle-button:focus-visible{outline:2px solid #719978;outline-offset:2px}
+.settlement-modal .settlement-payment-route>span{max-width:min(45%,220px);font-size:10px}
+.settlement-modal .settlement-plan-row:hover{background:#fbfdfb}
+.settlement-modal .modal-submit:focus-visible,.settlement-modal .settlement-individual-action:focus-visible{outline:2px solid #719978;outline-offset:2px}
+.recurring-page .panel-heading .section-title{color:#304536;font-weight:750}
+.recurring-template-card{border-color:#e4ece5;background:#fff}
+.recurring-template-card:focus-within{border-color:#b9d5c0;box-shadow:0 0 0 3px #39855c0b}
+.recurring-template-actions .button{min-height:34px;border-radius:8px;transition:border-color .15s ease,background-color .15s ease,color .15s ease}
+.recurring-template-actions .button:focus-visible,.recurring-delete-button:focus-visible{outline:2px solid #719978;outline-offset:2px}
+.recurring-occurrence-row{border-bottom-color:#e8eee9;transition:background-color .15s ease}
+.recurring-occurrence-row:hover{background:#fbfdfb}
+.recurring-occurrence-row>strong{font-variant-numeric:tabular-nums}
+.reports-page .report-type-card{min-height:98px;border-color:#e1eae3}
+.reports-page .report-type-card:hover{transform:translateY(-1px)}
+.reports-page .report-type-card.selected{border-color:#7eb392;background:#f3f9f4}
+.reports-page .report-filter-panel,.reports-page .report-preview-panel{border-color:#e2ebe4;border-radius:13px}
+.reports-page .report-generate-button{min-height:40px;transition:background-color .15s ease,box-shadow .15s ease}
+.reports-page .report-generate-button:focus-visible{box-shadow:0 0 0 3px #39855c20}
+.reports-page .report-export-actions .button{transition:border-color .15s ease,background-color .15s ease,color .15s ease}
+.reports-page .report-export-actions .button:hover:not(:disabled){border-color:#b8d1bf;background:#f5faf6;color:#286c49}
+.reports-page .report-total-strip>div{box-shadow:0 2px 8px #23432d05}
+.reports-page .report-table th,.reports-page .report-table td{font-variant-numeric:tabular-nums}
+.reports-page .report-pagination .button:focus-visible{outline:2px solid #719978;outline-offset:2px}
+@media(max-width:600px){
+  .balances-page .user-screen-actions .button{flex:1;justify-content:center}
+  .settlement-modal .settlement-payment-route>span{max-width:44%}
+  .recurring-template-main p{white-space:normal;line-height:1.4}
+  .recurring-occurrence-row{padding:12px 8px;border:1px solid #e8eee9;border-radius:9px;background:#fff}
+  .reports-page .report-type-card{min-height:82px}
+}
+
 .group-analytics{display:grid;gap:12px;margin:14px 0}.group-analytics-filters{display:flex;flex-wrap:wrap;align-items:center;gap:7px}.group-analytics-filters select,.group-analytics-filters input{height:34px;padding:0 9px;border:1px solid #e0e9e2;border-radius:7px;background:#fff;color:#344a3a;font:inherit;font-size:10px}.group-analytics-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.analytics-stat{display:grid;gap:6px;min-width:0;padding:12px;border:1px solid #e9eee8;border-radius:9px;background:#fff}.analytics-stat span{color:#818a80;font-size:10px}.analytics-stat b{overflow:hidden;color:#2e4935;font:700 16px Manrope,sans-serif;text-overflow:ellipsis;white-space:nowrap}.group-analytics-charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.group-analytics-charts .group-member-chart-card{grid-column:1/-1}.group-trend-chart{display:block;width:100%;height:auto;min-height:160px;overflow:visible}.group-chart-gridline{stroke:#e8eee7;stroke-width:1}.group-trend-line{fill:none;stroke:#4f8b5b;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.group-trend-point{fill:#4f8b5b;stroke:#fff;stroke-width:2}.group-trend-chart text{fill:#879286;font-size:10px}.group-member-bars{display:grid;gap:10px;margin:18px 0 8px}.group-member-bar-row{display:grid;grid-template-columns:minmax(80px,150px) minmax(30px,1fr) minmax(80px,auto);align-items:center;gap:10px;color:#66766a;font-size:10px}.group-member-bar-row>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.group-member-bar-row>i{height:10px;overflow:hidden;border-radius:8px;background:#edf2eb}.group-member-bar-row>i>b{display:block;height:100%;border-radius:8px;background:linear-gradient(90deg,#4f8b5b,#83ad7d)}.group-member-bar-row>strong{color:#344839;text-align:right;font-size:10px}.group-analytics-table-card{overflow:hidden}.group-analytics-table-scroll{overflow-x:auto}.group-analytics-table-scroll .report-table{min-width:640px}.group-analytics-loading,.group-analytics-state{display:flex;min-height:92px;align-items:center;justify-content:center;gap:10px;padding:18px}.group-analytics-state{flex-wrap:wrap}.group-analytics .analytics-legend{max-height:220px;overflow:auto}
 
 @media(max-width:760px){.group-analytics-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.group-analytics-charts{grid-template-columns:minmax(0,1fr)}.group-analytics-charts .group-member-chart-card{grid-column:auto}.group-analytics .panel-heading{align-items:flex-start;flex-direction:column}.group-analytics-filters{width:100%}.group-analytics-filters select,.group-analytics-filters input{max-width:100%}}
@@ -1374,7 +1411,8 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
 
 /* Match insight card heights within each dashboard grid row. */
 .overview-insights-grid{align-items:stretch}
-.overview-insights-grid>.budget-overview-panel{align-self:stretch;min-height:100%}
+.overview-insights-grid>.budget-overview-panel{display:flex;align-self:stretch;min-height:100%;flex-direction:column}
+.overview-insights-grid .budget-overview-list{min-height:0;max-height:none;flex:1 1 auto;overflow-y:auto}
 
 /* Sidebar polish: retain the existing structure, width, and responsive behavior. */
 .sidebar{
