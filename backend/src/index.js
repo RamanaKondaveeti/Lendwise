@@ -38,6 +38,7 @@ const { supportedCurrencies, currencyEnumSql, isSupportedCurrency } = require('.
 const { validTripInput } = require('./trips');
 const { cancellationEmail, cancellationRejection, invitationStatus } = require('./invitation-lifecycle');
 const { buildInvitationEmail } = require('./invitation-email');
+const { calculateWorkspaceBalanceLedger } = require('./personal-balances');
 const { hasGroupMembership } = require('./authorization');
 const { createApiAuthGate, createRequireAuth, getSessionToken } = require('./auth-middleware');
 const { claimIdempotency, findIdempotencyReplay, readIdempotencyKey, saveIdempotentResponse } = require('./idempotency');
@@ -243,6 +244,44 @@ async function getWorkspaceBalances(workspaceId, executor = pool) {
                         WHERE s.payer_id = p.id), 0) AS balance
      FROM people p WHERE p.workspace_id = ? ORDER BY p.id`,
     [workspaceId]
+  );
+  return balances;
+}
+
+async function getAccessiblePairBalances(workspaceId, memberPersonId, executor = pool) {
+  const [balances] = await executor.execute(
+    `SELECT debtor_id, creditor_id, CAST(SUM(amount_cents) AS SIGNED) AS amount_cents
+     FROM (
+       SELECT s.person_id AS debtor_id, e.paid_by AS creditor_id,
+              CAST(ROUND(SUM(s.amount) * 100) AS SIGNED) AS amount_cents
+       FROM splits s
+       JOIN expenses e ON e.id = s.expense_id AND e.voided_at IS NULL
+       JOIN \`groups\` g ON g.id = e.group_id AND g.workspace_id = ?
+       JOIN people debtor ON debtor.id = s.person_id AND debtor.workspace_id = g.workspace_id
+       JOIN people creditor ON creditor.id = e.paid_by AND creditor.workspace_id = g.workspace_id
+       WHERE s.person_id <> e.paid_by
+         AND EXISTS (SELECT 1 FROM group_members access WHERE access.group_id = g.id AND access.person_id = ?)
+       GROUP BY s.person_id, e.paid_by
+
+       UNION ALL
+
+       SELECT st.payer_id AS debtor_id, st.payee_id AS creditor_id,
+              -CAST(ROUND(SUM(st.amount) * 100) AS SIGNED) AS amount_cents
+       FROM settlements st
+       JOIN people debtor ON debtor.id = st.payer_id AND debtor.workspace_id = ?
+       JOIN people creditor ON creditor.id = st.payee_id AND creditor.workspace_id = ?
+       LEFT JOIN expenses linked ON linked.id = st.expense_id
+       LEFT JOIN \`groups\` settlement_group
+         ON settlement_group.id = COALESCE(st.group_id, linked.group_id)
+       WHERE (settlement_group.workspace_id = ? AND EXISTS (
+                SELECT 1 FROM group_members access
+                WHERE access.group_id = settlement_group.id AND access.person_id = ?
+              ))
+          OR (st.group_id IS NULL AND st.expense_id IS NULL)
+       GROUP BY st.payer_id, st.payee_id
+     ) ledger
+     GROUP BY debtor_id, creditor_id`,
+    [workspaceId, memberPersonId, workspaceId, workspaceId, workspaceId, memberPersonId]
   );
   return balances;
 }
@@ -2018,7 +2057,7 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
 app.get('/api/summary', async (req, res) => {
   try {
     const workspaceId = req.account.workspace_id;
-    const [people, groups, members, groupBalances, activity, activityCounts] = await Promise.all([
+    const [people, groups, members, groupBalances, pairBalances, activity, activityCounts] = await Promise.all([
       q('SELECT id, name, initials, color FROM people WHERE workspace_id = ? ORDER BY id', [workspaceId]),
       q(
       `SELECT g.id, g.name, g.icon, g.color, COUNT(DISTINCT e.id) AS expenses,
@@ -2041,6 +2080,7 @@ app.get('/api/summary', async (req, res) => {
       [workspaceId, workspaceId, req.account.person_id]
       ),
       getWorkspaceGroupBalances(workspaceId, pool, req.account.person_id),
+      getAccessiblePairBalances(workspaceId, req.account.person_id),
       q(
         `SELECT e.id, e.title, e.amount, e.category, e.created_at, p.name AS payer,
                 p.initials, p.color, g.name AS group_name
@@ -2096,20 +2136,31 @@ app.get('/api/summary', async (req, res) => {
         payment.payerId === req.account.person_id || payment.payeeId === req.account.person_id
       ) || null;
     }
-    const netByPerson = new Map();
-    for (const balance of groupBalances) {
-      const cents = Math.round(Number(balance.balance) * 100);
-      const current = netByPerson.get(balance.id) || { id: balance.id, name: balance.name, initials: balance.initials, color: balance.color, cents: 0 };
-      current.cents += cents;
-      netByPerson.set(balance.id, current);
-    }
-    const net = [...netByPerson.values()].map(({ cents, ...person }) => ({ ...person, balance: cents / 100 }));
+    const balanceLedger = calculateWorkspaceBalanceLedger(req.account.person_id, pairBalances);
+    const peopleById = new Map(people.map(person => [Number(person.id), person]));
+    const visiblePersonIds = new Set([
+      req.account.person_id,
+      ...groupBalances.map(balance => Number(balance.id)),
+      ...balanceLedger.balanceByPersonCents.keys(),
+    ]);
+    const net = [...visiblePersonIds]
+      .map(id => peopleById.get(Number(id)))
+      .filter(Boolean)
+      .map(person => ({
+        ...person,
+        balance: (balanceLedger.balanceByPersonCents.get(Number(person.id)) || 0) / 100,
+      }));
     res.json({
       people,
       groups,
       activity,
       activityCount: Number(activityCount.count),
       balances: net,
+      balanceSummary: {
+        owedToMeCents: balanceLedger.owedToMeCents,
+        owedByMeCents: balanceLedger.owedByMeCents,
+        netBalanceCents: balanceLedger.netBalanceCents,
+      },
       currentUserId: req.account.person_id
     });
   } catch (error) {

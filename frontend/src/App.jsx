@@ -1556,8 +1556,10 @@ function App() {
   const groups = data?.groups || []
   const people = data?.people || []
   const myBalance = Number(currentUser?.balance || 0)
-  const owedToMe = myBalance < 0 ? Math.abs(myBalance) : 0
-  const owedByMe = myBalance > 0 ? myBalance : 0
+  const balanceSummary = data?.balanceSummary
+  const owedToMe = Number(balanceSummary?.owedToMeCents || 0) / 100
+  const owedByMe = Number(balanceSummary?.owedByMeCents || 0) / 100
+  const dashboardNetBalance = Number(balanceSummary?.netBalanceCents || 0) / 100
   const selectedGroup = groups.find(group => group.id === Number(selectedGroupId))
   const selectedExpenseGroup = groups.find(group => group.id === Number(expenseGroupId))
   const expenseTotalCents = /^\d+(?:\.\d{1,2})?$/.test(expenseTotalInput)
@@ -3109,15 +3111,15 @@ function App() {
             </div>
           </section>
           <section className="balance-grid">
-                <article className={`balance-card total-card ${myBalance > 0 ? 'owes-card' : ''}`}>
+                <article className={`balance-card total-card ${dashboardNetBalance < 0 ? 'owes-card' : ''}`}>
                   <div className="card-top">
                     <span className="card-title">YOUR NET BALANCE</span>
                     <span className="card-symbol dark-symbol"><ArrowLeftRight size={17} /></span>
                   </div>
-                  <div className="amount">{myBalance < 0 ? '+' : myBalance > 0 ? '−' : ''}{formatMoney(myBalance)}</div>
+                  <div className="amount">{dashboardNetBalance > 0 ? '+' : dashboardNetBalance < 0 ? '−' : ''}{formatMoney(dashboardNetBalance)}</div>
                   <div className="balance-foot">
-                    <span className="balance-indicator">{myBalance < 0 ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}</span>
-                    {myBalance < 0 ? 'You are owed overall' : myBalance > 0 ? 'You owe overall' : 'You are all settled up'}
+                    <span className="balance-indicator">{dashboardNetBalance > 0 ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}</span>
+                    {dashboardNetBalance > 0 ? 'You are owed overall' : dashboardNetBalance < 0 ? 'You owe overall' : 'You are all settled up'}
                     <button className="plain-link" onClick={() => setTab('Balances')}>View balances <ArrowRight size={13} /></button>
                   </div>
                 </article>
