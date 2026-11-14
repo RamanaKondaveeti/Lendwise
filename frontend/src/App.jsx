@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownLeft,
   ArrowLeftRight,
@@ -916,6 +916,10 @@ function App() {
   const [sentInvitations, setSentInvitations] = useState([])
   const [invitationToCancel, setInvitationToCancel] = useState(null)
   const [tab, setTab] = useState('Overview')
+  const navigateToTab = nextTab => {
+    if (nextTab === 'Overview') window.scrollTo(0, 0)
+    setTab(nextTab)
+  }
   const [installPromptEvent, setInstallPromptEvent] = useState(null)
   const [appInstalled, setAppInstalled] = useState(() => isStandalone({
     displayModeMatches: window.matchMedia?.('(display-mode: standalone)').matches,
@@ -1037,6 +1041,10 @@ function App() {
   const [budgetHistory, setBudgetHistory] = useState([])
   const [budgetHistoryId, setBudgetHistoryId] = useState(null)
   const [budgetBusy, setBudgetBusy] = useState(false)
+
+  useLayoutEffect(() => {
+    if (tab === 'Overview') window.scrollTo(0, 0)
+  }, [tab])
 
   const setTheme = preference => {
     if (!themeOptions.has(preference)) return
@@ -2230,7 +2238,7 @@ function App() {
       const account = await request('/api/auth/me')
       setAuthUser(account)
       await Promise.all([refresh(), refreshWorkspaces(), refreshNotifications()])
-      setTab('Overview')
+      navigateToTab('Overview')
       setSelectedGroupId(null)
       setActivity([])
       setActivityLoaded(false)
@@ -2335,7 +2343,7 @@ function App() {
       const account = await request('/api/auth/me')
       setAuthUser(account)
       await Promise.all([refresh(), refreshWorkspaces()])
-      setTab('Overview')
+      navigateToTab('Overview')
       setSelectedGroupId(null)
       setWorkspaceMenuOpen(false)
       setActivity([])
@@ -2800,7 +2808,7 @@ function App() {
         />
       )}
       <aside className="sidebar">
-        <a className="brand" href="#" onClick={event => { event.preventDefault(); setTab('Overview') }}>
+        <a className="brand" href="#" onClick={event => { event.preventDefault(); navigateToTab('Overview') }}>
           <span className="brand-mark"><ArrowLeftRight size={19} /></span>
           <span>GroupBuk</span>
         </a>
@@ -2825,7 +2833,7 @@ function App() {
         <div className="nav-label">WORKSPACE</div>
         <nav>
           {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [Wallet, 'Budgets'], [CalendarClock, 'Recurring'], [FileBarChart, 'Reports'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
-            <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => { setTab(name); setMobileNavOpen(false) }}>
+            <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => { navigateToTab(name); setMobileNavOpen(false) }}>
               <Icon size={18} />{name}
               {name === 'Activity' && <span className="nav-count">{data.activityCount || 0}</span>}
               {name === 'Recurring' && recurringOccurrences.some(occurrence => occurrence.status === 'needs_confirmation') &&
