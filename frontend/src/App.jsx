@@ -3111,7 +3111,7 @@ function App() {
           </section>
           <section className="balance-grid">
                 <article className="balance-card positive-card">
-                  <div className="card-top"><span className="card-title">OTHERS OWE YOU</span><span className="card-symbol green-symbol"><ArrowDownLeft size={17} /></span></div>
+                  <div className="card-top"><span className="card-title">YOU ARE OWED</span><span className="card-symbol green-symbol"><ArrowDownLeft size={17} /></span></div>
                   <div className="amount">{formatMoney(owedToMe)}</div>
                   <div className="small-detail"><span>Outstanding receivables</span></div>
                   <div className="card-bottom-line"><span /><span /></div>
