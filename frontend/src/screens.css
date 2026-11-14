@@ -1415,6 +1415,26 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
 .overview-insights-grid .budget-overview-list{min-height:0;max-height:none;flex:1 1 0px;overflow-y:auto}
 @media(max-width:640px){.overview-insights-grid .budget-overview-list{flex:0 0 auto}}
 
+/* Keep Overview on the document scroll; the fixed sidebar remains its own scroll area. */
+html:has(.app .overview-insights-grid){
+  height:auto;
+  overflow-y:auto;
+  scrollbar-gutter:stable;
+  scrollbar-width:auto;
+  scrollbar-color:#8b9d90 #e9efea;
+}
+html:has(.app .overview-insights-grid)::-webkit-scrollbar{display:block;width:12px}
+html:has(.app .overview-insights-grid)::-webkit-scrollbar-track{background:#e9efea}
+html:has(.app .overview-insights-grid)::-webkit-scrollbar-thumb{min-height:34px;border:3px solid #e9efea;border-radius:99px;background:#8b9d90}
+body:has(.app .overview-insights-grid),
+body:has(.app .overview-insights-grid) #root,
+.app:has(.overview-insights-grid),
+.app:has(.overview-insights-grid) .main{
+  height:auto;
+  min-height:100vh;
+  overflow:visible;
+}
+
 /* Sidebar polish: retain the existing structure, width, and responsive behavior. */
 .sidebar{
   overflow-y:auto;
