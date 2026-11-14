@@ -3943,7 +3943,7 @@ function App() {
             </section>
           )}
 
-          <footer><span>Shared expenses, kept in sync.</span></footer>
+          <footer className={tab === 'Overview' ? 'overview-footer' : undefined}><span>Shared expenses, kept in sync.</span></footer>
         </div>
       </main>
 
