@@ -60,6 +60,7 @@ import {
   reportCsv,
   reportHeaders,
   reportPdf,
+  summarizeReportRows,
   reportTypes,
   reportXlsx,
 } from './reports.mjs'
@@ -1739,6 +1740,7 @@ function App() {
     style: 'currency',
     currency,
   }).format(Math.abs(Number(amount) || 0))
+  const formatReportCurrency = amount => Number.isFinite(exchangeRate) ? formatCurrentCurrency(amount) : '—'
   const toStoredAmount = amount => Math.round((Number(amount) / exchangeRate) * 100) / 100
   const availableYears = [...new Set([
     currentMonth,
@@ -1774,13 +1776,14 @@ function App() {
     convertReportRow(presentReportRow(record), exchangeRate, currency)
   )
   const hasReportRecords = visibleReportRows.length > 0
+  const reportSummary = summarizeReportRows(visibleReportRows)
 
   function reportCell(record, key) {
     if (['total_amount', 'personal_share', 'paid_amount', 'balance'].includes(key)) {
       const amount = Number(record[key] || 0)
       return key === 'balance' && amount !== 0
-        ? `${amount > 0 ? '−' : '+'}${formatMoney(amount)}`
-        : formatMoney(amount)
+        ? `${amount > 0 ? '−' : '+'}${formatReportCurrency(amount)}`
+        : formatReportCurrency(amount)
     }
     if (key === 'date') return record.date ? String(record.date).slice(0, 10) : ''
     if (key === 'month') return record.month || ''
@@ -3514,8 +3517,8 @@ function App() {
                 </div>
                 {hasReportRecords && (
                   <div className="report-total-strip">
-                    <div><span>Total expense amount</span><b>{formatMoney(reportResult.totals.total_amount)}</b></div>
-                    <div><span>Personal / selected-member share</span><b>{formatMoney(reportResult.totals.personal_share)}</b></div>
+                    <div><span>Total expense amount</span><b>{formatReportCurrency(reportSummary.totalAmount)}</b></div>
+                    <div><span>Personal / selected-member share</span><b>{formatReportCurrency(reportSummary.personalShare)}</b></div>
                     {reportResult.totals.balance !== undefined && (
                       <div><span>Net outstanding balance</span><b>{formatMoney(reportResult.totals.balance)}</b></div>
                     )}

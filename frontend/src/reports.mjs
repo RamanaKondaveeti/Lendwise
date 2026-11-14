@@ -188,3 +188,18 @@ export function convertReportRow(row, rate, currency) {
   converted.currency = currency
   return converted
 }
+
+export function summarizeReportRows(rows) {
+  const totals = rows.reduce((summary, row) => {
+    const totalAmount = Number(row.total_amount || 0)
+    const personalShare = Number(row.personal_share || 0)
+    summary.totalAmountCents += Number.isFinite(totalAmount) ? Math.round(totalAmount * 100) : 0
+    summary.personalShareCents += Number.isFinite(personalShare) ? Math.round(personalShare * 100) : 0
+    return summary
+  }, { totalAmountCents: 0, personalShareCents: 0 })
+
+  return {
+    totalAmount: totals.totalAmountCents / 100,
+    personalShare: totals.personalShareCents / 100,
+  }
+}

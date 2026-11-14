@@ -6,6 +6,7 @@ import {
   reportCsv,
   reportHeaders,
   reportPdf,
+  summarizeReportRows,
   reportXlsx,
 } from '../src/reports.mjs'
 
@@ -58,4 +59,13 @@ test('currency presentation converts report values without changing source recor
   assert.equal(usd.personal_share, 0.4)
   assert.equal(usd.currency, 'USD')
   assert.deepEqual(source, { total_amount: 100, personal_share: 33.33, currency: 'INR' })
+});
+
+test('report summary totals sum the converted report rows using their displayed amount fields', () => {
+  const convertedRows = [
+    convertReportRow({ total_amount: 20000, personal_share: 4000 }, 1, 'INR'),
+    convertReportRow({ total_amount: 125.55, personal_share: 75.25 }, 1, 'INR'),
+  ]
+  assert.deepEqual(summarizeReportRows(convertedRows), { totalAmount: 20125.55, personalShare: 4075.25 })
+  assert.deepEqual(summarizeReportRows([]), { totalAmount: 0, personalShare: 0 })
 });
