@@ -119,11 +119,18 @@ const notificationLabels = {
   budget_alert: 'Budget alerts',
 }
 const notificationIcon = type => {
-  if (type === 'budget_alert') return Wallet
-  if (type.startsWith('expense_')) return ReceiptText
-  if (type.startsWith('settlement_')) return ArrowLeftRight
-  if (type.startsWith('recurring_')) return Repeat
-  return Users
+  const icons = {
+    budget_alert: Wallet,
+    expense_created: ReceiptText,
+    expense_updated: Pencil,
+    settlement_recorded: CheckCheck,
+    settlement_reminder: CalendarClock,
+    group_invitation: Users,
+    member_joined: Check,
+    recurring_generated: Repeat,
+    recurring_confirmation: CircleHelp,
+  }
+  return icons[type] || Bell
 }
 const equalSharePercentages = ids => {
   const base = Math.floor(10000 / Math.max(ids.length, 1))
@@ -212,10 +219,22 @@ const suggestReceiptCategory = receipt => {
   if (/cinema|movie|theatre|concert/.test(text)) return 'Entertainment'
   return 'Other'
 }
-const notificationTimestamp = value => new Intl.DateTimeFormat('en-US', {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-}).format(new Date(value))
+const notificationTimestamp = value => {
+  const timestamp = new Date(value)
+  if (Number.isNaN(timestamp.getTime())) return 'Date unavailable'
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - timestamp.getTime()) / 1000))
+  if (elapsedSeconds < 60) return 'Just now'
+  if (elapsedSeconds < 3600) return `${Math.floor(elapsedSeconds / 60)}m ago`
+  if (elapsedSeconds < 86400) return `${Math.floor(elapsedSeconds / 3600)}h ago`
+  if (elapsedSeconds < 604800) return `${Math.floor(elapsedSeconds / 86400)}d ago`
+  return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' }).format(timestamp)
+}
+const notificationAbsoluteTimestamp = value => {
+  const timestamp = new Date(value)
+  return Number.isNaN(timestamp.getTime())
+    ? 'Date unavailable'
+    : new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp)
+}
 const todayIso = () => {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -2938,11 +2957,14 @@ function App() {
                   ) : (
                     <>
                       <div className="notification-toolbar">
-                        <button type="button" onClick={markAllNotificationsRead} disabled={!unreadNotificationCount}>
+                        <button className="notification-mark-all" type="button" onClick={markAllNotificationsRead} disabled={!unreadNotificationCount}>
                           <CheckCheck size={14} />Mark all as read
                         </button>
                         <button
+                          className="notification-view-all"
                           type="button"
+                          aria-controls="notification-list"
+                          aria-expanded={notificationLimit > 25}
                           onClick={async () => {
                             if (notificationLimit === 25) {
                               setNotificationLimit(100)
@@ -2962,20 +2984,37 @@ function App() {
                               : 'Show recent'}
                         </button>
                       </div>
-                      <div className="notification-list">
+                      <div className="notification-list" id="notification-list">
                         {notifications.length ? notifications.map(notification => {
                           const Icon = notificationIcon(notification.notification_type)
                           return (
-                            <article className={`notification-row ${notification.read_at ? '' : 'notification-unread'}`} key={notification.id}>
+                            <article className={`notification-row ${notification.read_at ? 'notification-read' : 'notification-unread'}`} key={notification.id}>
                               <button type="button" className="notification-open" onClick={() => openNotification(notification)}>
                                 <span className={`notification-type-icon notification-type-${notification.notification_type}`}><Icon size={15} /></span>
                                 <span className="notification-copy">
                                   <b>{notification.title}</b>
                                   <span>{notification.message}</span>
-                                  <small>{notification.workspace_name} · {notificationTimestamp(notification.created_at)}</small>
+                                  <small>
+                                    <span className="notification-workspace">{notification.workspace_name}</span>
+                                    <span className="notification-meta-separator" aria-hidden="true">·</span>
+                                    <time dateTime={Number.isNaN(new Date(notification.created_at).getTime()) ? undefined : new Date(notification.created_at).toISOString()} title={notificationAbsoluteTimestamp(notification.created_at)}>
+                                      {notificationTimestamp(notification.created_at)}
+                                    </time>
+                                  </small>
                                 </span>
-                                {!notification.read_at && <i className="notification-unread-dot" aria-label="Unread" />}
+                                {!notification.read_at && <i className="notification-unread-dot" aria-label="Unread" title="Unread" />}
                               </button>
+                              {!notification.read_at && (
+                                <button
+                                  type="button"
+                                  className="notification-mark-read"
+                                  aria-label={`Mark ${notification.title} as read`}
+                                  title="Mark as read"
+                                  onClick={() => markNotificationRead(notification.id)}
+                                >
+                                  <Check size={15} />
+                                </button>
+                              )}
                               {notification.target_type === 'invitation' && (
                                 <button
                                   type="button"
@@ -2996,7 +3035,13 @@ function App() {
                               </button>
                             </article>
                           )
-                        }) : <div className="notification-empty">You’re all caught up.</div>}
+                        }) : (
+                          <div className="notification-empty">
+                            <span className="notification-empty-icon"><Bell size={20} /></span>
+                            <b>You’re all caught up</b>
+                            <span>New expenses, settlements, and invitations will show up here.</span>
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
