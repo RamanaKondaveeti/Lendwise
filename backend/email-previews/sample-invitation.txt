@@ -1,0 +1,13 @@
+You're invited to join GroupBuk!
+
+Alex Morgan invited you to join the Weekend Trip workspace on GroupBuk.
+
+Use the link below to accept your invitation:
+https://groupbuk.example/#invite=PREVIEW_ONLY_NOT_A_REAL_TOKEN
+
+This invitation link expires 7 days after it was sent.
+
+If you were not expecting this invitation, you can ignore this email.
+
+Regards,
+GroupBuk Team

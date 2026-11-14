@@ -37,6 +37,7 @@ const { normalizeActivityQuery, activityTypeClause } = require('./group-activity
 const { supportedCurrencies, currencyEnumSql, isSupportedCurrency } = require('./currencies');
 const { validTripInput } = require('./trips');
 const { cancellationEmail, cancellationRejection, invitationStatus } = require('./invitation-lifecycle');
+const { buildInvitationEmail } = require('./invitation-email');
 const { hasGroupMembership } = require('./authorization');
 const { createApiAuthGate, createRequireAuth, getSessionToken } = require('./auth-middleware');
 const { claimIdempotency, findIdempotencyReplay, readIdempotencyKey, saveIdempotentResponse } = require('./idempotency');
@@ -362,13 +363,14 @@ function emailIsConfigured() {
   return Boolean(emailTransport && process.env.MAIL_FROM && process.env.APP_URL);
 }
 
-async function sendEmail({ to, subject, text }) {
+async function sendEmail({ to, subject, text, html }) {
   if (!emailIsConfigured()) throw new Error('Email delivery is not configured.');
   await emailTransport.sendMail({
     from: process.env.MAIL_FROM,
     to,
     subject,
-    text
+    text,
+    ...(html ? { html } : {})
   });
 }
 
@@ -1822,8 +1824,11 @@ app.post('/api/invitations', async (req, res) => {
     try {
       await sendEmail({
         to: targetEmail,
-        subject: 'You are invited to GroupBuk',
-        text: `${req.account.name} invited you to join the ${req.account.workspace_name} GroupBuk workspace. Accept the invitation: ${inviteUrl}`
+        ...buildInvitationEmail({
+          inviterName: req.account.name,
+          workspaceName: req.account.workspace_name,
+          invitationUrl: inviteUrl,
+        })
       });
     } catch (emailError) {
       logError('Workspace invitation email delivery failed', emailError);
