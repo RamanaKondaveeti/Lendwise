@@ -1027,7 +1027,7 @@ button:disabled{cursor:not-allowed}
 .notification-bell:hover,.notification-bell.is-open{border-color:#9dc8ab;background:#f3faf5;color:#197456;box-shadow:0 3px 9px #2f75500f}
 .notification-bell:focus-visible,.notification-heading-actions button:focus-visible,.notification-toolbar button:focus-visible,.notification-open:focus-visible,.notification-dismiss:focus-visible,.notification-accept:focus-visible,.notification-mark-read:focus-visible{outline:2px solid #719978;outline-offset:2px}
 .notification-badge{position:absolute;top:-5px;right:-5px;display:grid;min-width:17px;height:17px;place-items:center;padding:0 4px;border:2px solid #fff;border-radius:20px;background:#c96959;color:#fff;font-size:8px;font-weight:700;line-height:1}
-.notification-popover{position:absolute;z-index:47;top:calc(100% + 11px);right:0;display:flex;width:min(440px,calc(100vw - 32px));max-height:min(78vh,680px);flex-direction:column;overflow:hidden;border:1px solid #dce8df;border-radius:15px;background:#fff;box-shadow:0 18px 48px #1b352a29;animation:notification-popover-in .16s ease-out}
+.notification-popover{position:absolute;z-index:47;top:100%;right:0;display:flex;width:min(440px,calc(100vw - 32px));max-height:min(78vh,680px);flex-direction:column;overflow:hidden;border:1px solid #dce8df;border-radius:15px;background:#fff;box-shadow:0 18px 48px #1b352a29;animation:notification-popover-in .16s ease-out}
 @keyframes notification-popover-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
 .notification-popover-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 17px 14px;border-bottom:1px solid #edf2ee}
 .notification-popover-heading>div:first-child{display:grid;gap:4px}
@@ -1486,6 +1486,7 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
 .profile-menu-sign-out:hover{background:var(--theme-secondary,#e2f5eb);color:var(--theme-primary,#167f68)}
 .profile-menu-sign-out:hover svg{color:var(--theme-primary,#167f68)}
 .app.profile-menu-open .topbar{position:relative;z-index:6}
+.app.notification-panel-open .topbar{position:relative;z-index:60}
 @media(min-width:801px){.top-actions{gap:12px}}
 
 /* Balance cards only: preserve their existing colors and data presentation. */

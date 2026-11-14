@@ -1002,6 +1002,7 @@ function App() {
   const [occurrenceToConfirm, setOccurrenceToConfirm] = useState(null)
   const recurringNoticeKeys = useRef(new Set())
   const notificationCenterRef = useRef(null)
+  const notificationBellRef = useRef(null)
   const [notifications, setNotifications] = useState([])
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0)
   const [notificationsHaveMore, setNotificationsHaveMore] = useState(false)
@@ -1334,8 +1335,19 @@ function App() {
         setNotificationPreferencesOpen(false)
       }
     }
+    const closeOnEscape = event => {
+      if (event.key === 'Escape') {
+        setNotificationCenterOpen(false)
+        setNotificationPreferencesOpen(false)
+        notificationBellRef.current?.focus()
+      }
+    }
     document.addEventListener('pointerdown', closeOnOutsideClick)
-    return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
   }, [notificationCenterOpen])
 
   useEffect(() => {
@@ -2777,7 +2789,7 @@ function App() {
   const pageTitle = tab === 'Group' ? selectedGroup?.name || 'Group' : tab === 'GroupActivity' ? `${selectedGroup?.name || 'Group'} Activity` : tab === 'Trip' ? activeTrip?.name || 'Trip' : tab
 
   return (
-    <div className={`app ${mobileNavOpen ? 'mobile-nav-open' : ''} ${profileMenuOpen ? 'profile-menu-open' : ''}`}>
+    <div className={`app ${mobileNavOpen ? 'mobile-nav-open' : ''} ${profileMenuOpen ? 'profile-menu-open' : ''} ${notificationCenterOpen ? 'notification-panel-open' : ''}`}>
       {mobileNavOpen && (
         <button
           type="button"
@@ -2896,6 +2908,7 @@ function App() {
             <div className="notification-center" ref={notificationCenterRef}>
               <button
                 type="button"
+                ref={notificationBellRef}
                 className={`notification-bell ${notificationCenterOpen ? 'is-open' : ''}`}
                 aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`}
                 aria-expanded={notificationCenterOpen}
