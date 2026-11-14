@@ -1555,6 +1555,37 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
 
 /* Overview now presents two equally sized gross balance cards. */
 .balance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.balance-grid>.positive-card,.balance-grid>.negative-card{
+  display:flex;
+  min-width:0;
+  flex-direction:column;
+  border-radius:14px;
+  box-shadow:0 4px 16px #204a3308;
+  transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
+}
+.balance-grid>.positive-card{background:linear-gradient(125deg,#f0f8f2,#e8f4eb);border-color:#d7e8db}
+.balance-grid>.negative-card{background:linear-gradient(125deg,#fff7ef,#fcf0e5);border-color:#efdfce}
+.balance-grid .card-top{align-items:center}
+.balance-grid .card-title{color:#64776a;font-size:11px;font-weight:750;letter-spacing:.35px;text-transform:none}
+.balance-grid .amount{margin-top:10px;font-size:clamp(25px,2.15vw,32px);font-weight:750;line-height:1.18;letter-spacing:-.7px}
+.balance-grid>.positive-card .amount{color:#26724e}
+.balance-grid>.negative-card .amount{color:#a96334}
+.balance-grid .small-detail{margin-top:7px;color:#718176;font-size:11px;line-height:1.45}
+@media(hover:hover) and (prefers-reduced-motion:no-preference){
+  .balance-grid>.positive-card:hover{transform:translateY(-2px);border-color:#bfd9c6;box-shadow:0 8px 20px #2b714515}
+  .balance-grid>.negative-card:hover{transform:translateY(-2px);border-color:#e8d1b8;box-shadow:0 8px 20px #9c653014}
+}
+@media(max-width:800px){
+  .balance-grid>.positive-card,.balance-grid>.negative-card{height:174px;padding:17px 16px}
+  .balance-grid .amount{font-size:clamp(25px,3.4vw,30px)}
+}
+@media(max-width:540px){
+  .balance-grid{grid-template-columns:1fr}
+  .balance-grid>.positive-card,.balance-grid>.negative-card{height:150px;min-height:142px;padding:15px;border-radius:12px}
+  .balance-grid .card-title{font-size:10px}
+  .balance-grid .amount{margin-top:9px;font-size:27px}
+  .balance-grid .small-detail{font-size:10px}
+}
 
 /* Balances page: keep the people ledger easy to scan at every width. */
 .balances-page{min-width:0;overflow:hidden}
