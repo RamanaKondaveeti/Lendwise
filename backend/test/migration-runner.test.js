@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const {
+  detectTrackBAccountIdentity,
   assertDevelopmentTarget,
   detectMigrationCompatibility,
   runMigrations,
@@ -31,6 +32,38 @@ test('migration runner requires explicit development/test authorization and reje
     nodeEnv: 'test', allowMigrations: 'true', databaseName: 'groupbuk_restored_test',
     databaseUser: 'groupbuk_integration_test', expectedServer: 'localtest', databaseMarker: 'x'.repeat(32),
   }));
+});
+
+test('Track B compatibility requires applied migration and nullable account/group workspace references', async () => {
+  const pool = {
+    async execute(sql, params = []) {
+      if (sql.includes('information_schema.TABLES')) return [[{ present: 1 }], []];
+      if (sql.includes('SELECT checksum, status')) {
+        assert.equal(params[0], '003_track_b_account_identity');
+        return [[{ status: 'applied', checksum: 'x' }], []];
+      }
+      return [['people', 'accounts', 'auth_sessions', 'groups'].map(TABLE_NAME => ({
+        TABLE_NAME, COLUMN_NAME: 'workspace_id', IS_NULLABLE: 'YES',
+      })), []];
+    },
+  };
+  assert.equal(await detectTrackBAccountIdentity(pool), true);
+});
+
+test('Track B compatibility fails closed if an applied migration left a required reference non-nullable', async () => {
+  const pool = {
+    async execute(sql) {
+      if (sql.includes('information_schema.TABLES')) return [[{ present: 1 }], []];
+      if (sql.includes('SELECT checksum, status')) return [[{ status: 'applied' }], []];
+      return [[
+        { TABLE_NAME: 'people', COLUMN_NAME: 'workspace_id', IS_NULLABLE: 'YES' },
+        { TABLE_NAME: 'accounts', COLUMN_NAME: 'workspace_id', IS_NULLABLE: 'YES' },
+        { TABLE_NAME: 'auth_sessions', COLUMN_NAME: 'workspace_id', IS_NULLABLE: 'YES' },
+        { TABLE_NAME: 'groups', COLUMN_NAME: 'workspace_id', IS_NULLABLE: 'NO' },
+      ], []];
+    },
+  };
+  await assert.rejects(detectTrackBAccountIdentity(pool), /groups\.workspace_id/);
 });
 
 test('migration SQL splitter skips empty statements', () => {

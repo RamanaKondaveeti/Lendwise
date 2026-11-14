@@ -40,8 +40,16 @@ The backend authorization module now has account/group membership and explicit a
 
 ### Session compatibility status
 
-Migration `002` does not change `auth_sessions`; legacy sessions remain as-is. Login and session lookup still require an active workspace. Account-only sessions, session versioning/revocation policy, legacy-session migration/invalidation, and dual-read compatibility are not implemented. They must be introduced additively and tested before removing any workspace session dependency; no existing sessions should be invalidated implicitly.
+Migration `002` leaves `auth_sessions` unchanged. Migration `003` makes its workspace context nullable but leaves existing session rows and expiry/revocation behavior intact. Account lookup is account/person based, with optional validation of legacy workspace context against the account's existing workspace membership. No existing sessions are invalidated implicitly. Session versioning/revocation policy beyond logout/password reset and the frontend contract migration remain outstanding.
 
-### Phase C route status
+### Track B implementation status (development code only)
 
-The account/group helper is not yet wired into route handlers. `/api/groups`, expenses, balances, settlements, budgets, recurring expenses, reports, group activity, notifications, and user/account management still use workspace scoping in `backend/src/index.js`. No new group invitation lifecycle API, owner-resolution endpoint, or participant-only historical settlement read API exists yet. Existing financial calculations have not been changed; no migration-backed reconciliation has been performed.
+`003_track_b_account_identity.migration.sql` is an additive follow-on to `002`. It makes the legacy workspace reference nullable on people, accounts, auth sessions, and groups; it does not delete or reassign any existing records. It has **not** been executed. Startup now skips the legacy workspace backfill/NOT NULL normalizer only after the version ledger records `003` as applied and verifies all four columns are nullable. A failed or partial version blocks startup rather than being retried automatically.
+
+After both migrations are applied to an isolated test database, signup without a legacy invitation creates an account and identity without a workspace. Login/session lookup authenticates by account and person; a legacy workspace is optional session context. Existing sessions retain their stored workspace context. Workspace APIs are explicitly gated and reject a session without a workspace; the new `/api/account/groups` endpoints use direct `group_accounts` authorization. This does not change the frontend contract.
+
+Account group API currently supports list, create (creator becomes owner/admin), details/member list, update, and admin-controlled membership replacement using account IDs. It does not yet implement group invitations, member search, owner resolution for unassigned legacy groups, or safe group deletion. Financial and other route families remain workspace-scoped. Track B is a partial implementation and is not a completed migration.
+
+### Remaining Phase C route status
+
+The legacy `/api/groups` route and expense, balance, settlement, budget, recurring expense, report, activity, notification, and user/account routes still use workspace scoping in `backend/src/index.js`. New `/api/account/groups` supports direct account-group authorization but does not replace the legacy routes or their data adapters. No group invitation lifecycle API, owner-resolution endpoint, or participant-only historical settlement read API exists yet. Existing financial calculations have not been changed; no migration-backed reconciliation has been performed.

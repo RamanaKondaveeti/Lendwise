@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createRequireAuth, getSessionToken } = require('../src/auth-middleware');
+const { createApiAuthGate, createRequireAuth, getSessionToken } = require('../src/auth-middleware');
 
 function response() {
   return {
@@ -41,6 +41,27 @@ test('valid authenticated session reaches the protected handler with its account
   await middleware(req, res, () => { nextCalled = true; });
   assert.equal(nextCalled, true);
   assert.equal(req.account, account);
+  assert.deepEqual(req.auth, { accountId: 4, email: undefined, personId: 12 });
+});
+
+test('account-only identity is accepted by account routes but cannot access legacy workspace APIs', async () => {
+  const requireAuth = async (req, _res, next) => {
+    req.account = { id: 7, email: 'member@example.test', person_id: 19, workspace_id: null };
+    req.auth = { accountId: 7, email: 'member@example.test', personId: 19 };
+    return next();
+  };
+  const gate = createApiAuthGate({ requireAuth });
+  const accountResponse = response();
+  let accountContinued = false;
+  gate({ path: '/account/groups', method: 'GET' }, accountResponse, () => { accountContinued = true; });
+  assert.equal(accountContinued, true);
+
+  const legacyResponse = response();
+  let legacyContinued = false;
+  gate({ path: '/groups', method: 'GET' }, legacyResponse, () => { legacyContinued = true; });
+  assert.equal(legacyContinued, false);
+  assert.equal(legacyResponse.statusCode, 403);
+  assert.match(legacyResponse.body.error, /legacy workspace membership/);
 });
 
 test('session cookie parsing matches the cookie name exactly', () => {

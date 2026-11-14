@@ -39,8 +39,8 @@ const { validTripInput } = require('./trips');
 const { cancellationEmail, cancellationRejection, invitationStatus } = require('./invitation-lifecycle');
 const { buildInvitationEmail } = require('./invitation-email');
 const { calculateWorkspaceBalanceLedger } = require('./personal-balances');
-const { hasGroupMembership } = require('./authorization');
-const { detectMigrationCompatibility } = require('./migration-runner');
+const { hasGroupMembership, hasAccountGroupMembership, hasGroupAdministrationAccess } = require('./authorization');
+const { detectMigrationCompatibility, detectTrackBAccountIdentity, isMigrationApplied } = require('./migration-runner');
 const { createApiAuthGate, createRequireAuth, getSessionToken } = require('./auth-middleware');
 const { claimIdempotency, findIdempotencyReplay, readIdempotencyKey, saveIdempotentResponse } = require('./idempotency');
 const { maxReceiptBytes, prepareReceiptForTextract, scanReceipt, supportedTypes, validateReceiptFile } = require('./receipt-ocr');
@@ -59,6 +59,7 @@ const scrypt = promisify(crypto.scrypt);
 const passwordHashOptions = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const app = express();
 let groupAccountArchitectureEnabled = false;
+let trackBAccountIdentityEnabled = false;
 // Production traffic passes through the host Nginx and frontend Nginx before
 // reaching this private backend container. Trust only those two proxy hops.
 app.set('trust proxy', 2);
@@ -836,9 +837,16 @@ async function init() {
     ) NOT NULL`);
   }
   await q("UPDATE expenses SET category = 'Other' WHERE category IS NULL OR TRIM(category) = ''");
-  await migrateWorkspaceOwnership();
+  // The legacy startup migrator normalizes all nullable workspace references back to NOT NULL.
+  // Once Track B is applied, that behavior would silently undo account-only sessions/groups.
+  const trackBAlreadyApplied = await isMigrationApplied(pool, '003_track_b_account_identity');
+  if (!trackBAlreadyApplied) await migrateWorkspaceOwnership();
   const migrationCompatibility = await detectMigrationCompatibility(pool);
+  if (trackBAlreadyApplied && !migrationCompatibility.groupAccountArchitectureEnabled) {
+    throw new Error('Track B account identity is marked applied without its required group-account migration.');
+  }
   groupAccountArchitectureEnabled = migrationCompatibility.groupAccountArchitectureEnabled;
+  trackBAccountIdentityEnabled = groupAccountArchitectureEnabled && await detectTrackBAccountIdentity(pool);
   await q('DELETE FROM auth_sessions WHERE expires_at <= UTC_TIMESTAMP()');
   await q('DELETE FROM email_tokens WHERE expires_at <= UTC_TIMESTAMP()');
 }
@@ -872,6 +880,7 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
   let inTransaction = false;
   try {
     let invitedWorkspaceId = null;
+    const accountOnlySignup = trackBAccountIdentityEnabled && !invitationToken;
     connection = await pool.getConnection();
     await connection.beginTransaction();
     inTransaction = true;
@@ -891,7 +900,7 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
     }
 
     let workspaceId = invitedWorkspaceId;
-    if (workspaceId === null) {
+    if (workspaceId === null && !accountOnlySignup) {
       const [workspace] = await connection.execute(
         'INSERT INTO workspaces(name) VALUES(?)',
         [`${normalizedName}'s workspace`]
@@ -915,18 +924,20 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
     if (!personId) {
       const [person] = await connection.execute(
         'INSERT INTO people(workspace_id, name, initials) VALUES(?, ?, ?)',
-        [workspaceId, normalizedName, initials]
+        [accountOnlySignup ? null : workspaceId, normalizedName, initials]
       );
       personId = person.insertId;
     }
     const [account] = await connection.execute(
       'INSERT INTO accounts(workspace_id, email, password_salt, password_hash, person_id) VALUES(?, ?, ?, ?, ?)',
-      [workspaceId, normalizedEmail, salt, passwordHash.toString('hex'), personId]
+      [accountOnlySignup ? null : workspaceId, normalizedEmail, salt, passwordHash.toString('hex'), personId]
     );
-    await connection.execute(
-      'INSERT INTO workspace_members(account_id, workspace_id, person_id) VALUES(?, ?, ?)',
-      [account.insertId, workspaceId, personId]
-    );
+    if (!accountOnlySignup) {
+      await connection.execute(
+        'INSERT INTO workspace_members(account_id, workspace_id, person_id) VALUES(?, ?, ?)',
+        [account.insertId, workspaceId, personId]
+      );
+    }
     if (invitationToken) {
       const [accepted] = await connection.execute(
         `UPDATE workspace_invitations SET accepted_at = UTC_TIMESTAMP()
@@ -1052,7 +1063,8 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
     const [account] = await q(
       `SELECT a.id, a.email, a.password_salt, a.password_hash, a.person_id,
               a.workspace_id, p.name
-       FROM accounts a JOIN people p ON p.id = a.person_id AND p.workspace_id = a.workspace_id
+       FROM accounts a JOIN people p ON p.id = a.person_id
+         AND (p.workspace_id = a.workspace_id OR (p.workspace_id IS NULL AND a.workspace_id IS NULL))
        WHERE a.email = ?`,
       [normalizedEmail]
     );
@@ -1101,14 +1113,15 @@ app.post('/api/auth/logout', async (req, res) => {
 const requireAuth = createRequireAuth({
   lookupAccount: async token => {
     const [account] = await q(
-        `SELECT a.id, a.email, wm.person_id, s.workspace_id, p.name, w.name AS workspace_name
+        `SELECT a.id, a.email, a.person_id, s.workspace_id, p.name, w.name AS workspace_name
        FROM auth_sessions s
        JOIN accounts a ON a.id = s.account_id
-       JOIN workspace_members wm ON wm.account_id = a.id AND wm.workspace_id = s.workspace_id
-       JOIN people p ON p.id = wm.person_id AND p.workspace_id = wm.workspace_id
-       JOIN workspaces w ON w.id = s.workspace_id
+       JOIN people p ON p.id = a.person_id
+       LEFT JOIN workspace_members wm ON wm.account_id = a.id AND wm.workspace_id = s.workspace_id
+         AND wm.person_id = a.person_id
+       LEFT JOIN workspaces w ON w.id = s.workspace_id
          WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP()
-           AND a.workspace_id IS NOT NULL`,
+           AND (s.workspace_id IS NULL OR wm.account_id IS NOT NULL)`,
         [hashSessionToken(token)]
     );
     return account || null;
@@ -1117,6 +1130,198 @@ const requireAuth = createRequireAuth({
 });
 
 app.use('/api', createApiAuthGate({ requireAuth }));
+
+function requireTrackBAccountIdentity(res) {
+  if (trackBAccountIdentityEnabled) return true;
+  res.status(503).json({ error: 'Account-based group access is unavailable until the Track B migration is applied.' });
+  return false;
+}
+
+app.get('/api/account/groups', async (req, res) => {
+  if (!requireTrackBAccountIdentity(res)) return;
+  try {
+    const [groups] = await pool.execute(
+      `SELECT g.id, g.name, g.icon, g.color, g.owner_account_id AS ownerAccountId,
+              g.ownership_status AS ownershipStatus, ga.role, g.created_at AS createdAt
+       FROM group_accounts ga JOIN \`groups\` g ON g.id = ga.group_id
+       WHERE ga.account_id = ? ORDER BY g.created_at DESC, g.id DESC`,
+      [req.auth.accountId]
+    );
+    res.json({ groups });
+  } catch (error) {
+    logError(error);
+    res.status(500).json({ error: 'Could not load your groups.' });
+  }
+});
+
+app.put('/api/account/groups/:groupId', async (req, res) => {
+  if (!requireTrackBAccountIdentity(res)) return;
+  const groupId = Number(req.params.groupId);
+  const { name, icon, color } = req.body || {};
+  if (!Number.isSafeInteger(groupId) || groupId <= 0 || typeof name !== 'string' ||
+      !name.trim() || name.trim().length > 255 ||
+      (icon !== undefined && (typeof icon !== 'string' || icon.length > 64)) ||
+      (color !== undefined && (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)))) {
+    return res.status(400).json({ error: 'Provide a valid group name and appearance.' });
+  }
+  try {
+    if (!await hasGroupAdministrationAccess(pool, groupId, req.auth.accountId)) {
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+    const [updated] = await pool.execute(
+      `UPDATE \`groups\` SET name = ?, icon = COALESCE(?, icon), color = COALESCE(?, color)
+       WHERE id = ? AND (owner_account_id = ? OR EXISTS (
+         SELECT 1 FROM group_accounts WHERE group_id = ? AND account_id = ? AND role = 'admin'
+       ))`,
+      [name.trim(), icon ?? null, color ?? null, groupId, req.auth.accountId, groupId, req.auth.accountId]
+    );
+    if (!updated.affectedRows) return res.status(404).json({ error: 'Group not found.' });
+    const [[group]] = await pool.execute(
+      `SELECT id, name, icon, color, owner_account_id AS ownerAccountId,
+              ownership_status AS ownershipStatus FROM \`groups\` WHERE id = ?`, [groupId]
+    );
+    res.json({ group });
+  } catch (error) {
+    logError(error);
+    res.status(500).json({ error: 'Could not update this group.' });
+  }
+});
+
+app.post('/api/account/groups', async (req, res) => {
+  if (!requireTrackBAccountIdentity(res)) return;
+  const { name, icon = 'users', color = '#e9ddf2', memberAccountIds = [] } = req.body || {};
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 255 ||
+      !Array.isArray(memberAccountIds) || memberAccountIds.length !== 0) {
+    return res.status(400).json({ error: 'Provide a group name. Invite or add members after creating the group.' });
+  }
+  const normalizedIcon = typeof icon === 'string' && icon.length <= 64 ? icon : 'users';
+  const normalizedColor = typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) ? color : '#e9ddf2';
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [group] = await connection.execute(
+      `INSERT INTO \`groups\`(workspace_id, name, icon, color, owner_account_id, ownership_status)
+       VALUES(NULL, ?, ?, ?, ?, 'assigned')`,
+      [name.trim(), normalizedIcon, normalizedColor, req.auth.accountId]
+    );
+    await connection.execute(
+      `INSERT INTO group_accounts(group_id, account_id, role) VALUES(?, ?, 'admin')`,
+      [group.insertId, req.auth.accountId]
+    );
+    await connection.commit();
+    res.status(201).json({
+      id: group.insertId, name: name.trim(), icon: normalizedIcon, color: normalizedColor,
+      ownerAccountId: req.auth.accountId, ownershipStatus: 'assigned', role: 'admin'
+    });
+  } catch (error) {
+    await connection.rollback();
+    logError(error);
+    res.status(500).json({ error: 'Could not create this group.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.get('/api/account/groups/:groupId', async (req, res) => {
+  if (!requireTrackBAccountIdentity(res)) return;
+  const groupId = Number(req.params.groupId);
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) return res.status(400).json({ error: 'Choose a valid group.' });
+  try {
+    if (!await hasAccountGroupMembership(pool, groupId, req.auth.accountId)) {
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+    const [[group]] = await pool.execute(
+      `SELECT g.id, g.name, g.icon, g.color, g.owner_account_id AS ownerAccountId,
+              g.ownership_status AS ownershipStatus, ga.role, g.created_at AS createdAt
+       FROM \`groups\` g JOIN group_accounts ga ON ga.group_id = g.id AND ga.account_id = ?
+       WHERE g.id = ?`,
+      [req.auth.accountId, groupId]
+    );
+    const [members] = await pool.execute(
+      `SELECT a.id AS accountId, a.email, p.name, p.initials, p.color, ga.role, ga.joined_at AS joinedAt
+       FROM group_accounts ga JOIN accounts a ON a.id = ga.account_id
+       LEFT JOIN people p ON p.id = a.person_id
+       WHERE ga.group_id = ? ORDER BY ga.joined_at, a.id`,
+      [groupId]
+    );
+    res.json({ group, members });
+  } catch (error) {
+    logError(error);
+    res.status(500).json({ error: 'Could not load this group.' });
+  }
+});
+
+app.put('/api/account/groups/:groupId/members', async (req, res) => {
+  if (!requireTrackBAccountIdentity(res)) return;
+  const groupId = Number(req.params.groupId);
+  const desiredIds = req.body?.accountIds;
+  if (!Number.isSafeInteger(groupId) || groupId <= 0 || !Array.isArray(desiredIds) ||
+      desiredIds.some(id => !Number.isSafeInteger(Number(id)) || Number(id) <= 0) ||
+      new Set(desiredIds.map(Number)).size !== desiredIds.length) {
+    return res.status(400).json({ error: 'Provide a valid group ID and unique account IDs.' });
+  }
+  const accountIds = desiredIds.map(Number);
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [[group]] = await connection.execute(
+      'SELECT id, owner_account_id FROM `groups` WHERE id = ? FOR UPDATE', [groupId]
+    );
+    if (!group || !await hasGroupAdministrationAccess(connection, groupId, req.auth.accountId)) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+    if (group.owner_account_id && !accountIds.includes(Number(group.owner_account_id))) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'The group owner must remain a member.' });
+    }
+    if (accountIds.length) {
+      const [accounts] = await connection.execute(
+        `SELECT id FROM accounts WHERE id IN (${accountIds.map(() => '?').join(',')})`, accountIds
+      );
+      if (accounts.length !== accountIds.length) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'One or more accounts do not exist.' });
+      }
+    }
+    const [current] = await connection.execute(
+      'SELECT account_id, role FROM group_accounts WHERE group_id = ? FOR UPDATE', [groupId]
+    );
+    const existingRoles = new Map(current.map(item => [Number(item.account_id), item.role]));
+    const resultingAdminCount = accountIds.filter(id =>
+      Number(group.owner_account_id) === id || existingRoles.get(id) === 'admin'
+    ).length;
+    if (!group.owner_account_id && resultingAdminCount === 0) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'An unassigned group must retain an authorized administrator.' });
+    }
+    for (const accountId of accountIds) {
+      const role = Number(group.owner_account_id) === accountId || existingRoles.get(accountId) === 'admin'
+        ? 'admin' : 'member';
+      await connection.execute(
+        `INSERT INTO group_accounts(group_id, account_id, role) VALUES(?, ?, ?)
+         ON DUPLICATE KEY UPDATE role = VALUES(role)`,
+        [groupId, accountId, role]
+      );
+    }
+    if (accountIds.length) {
+      await connection.execute(
+        `DELETE FROM group_accounts WHERE group_id = ? AND account_id NOT IN (${accountIds.map(() => '?').join(',')})`,
+        [groupId, ...accountIds]
+      );
+    } else {
+      await connection.execute('DELETE FROM group_accounts WHERE group_id = ?', [groupId]);
+    }
+    await connection.commit();
+    res.json({ ok: true, accountIds });
+  } catch (error) {
+    await connection.rollback();
+    logError(error);
+    res.status(500).json({ error: 'Could not update this group’s members.' });
+  } finally {
+    connection.release();
+  }
+});
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({

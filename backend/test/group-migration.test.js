@@ -43,3 +43,15 @@ test('historical settlement access migration selects only original payer/payee l
   assert.match(migration, /WHERE st\.group_id IS NULL/);
   assert.match(migration, /st\.expense_id IS NULL OR e\.id IS NULL OR e\.group_id IS NULL/);
 });
+
+test('Track B migration makes workspace context optional without dropping legacy records or schema', () => {
+  const migration = fs.readFileSync(
+    path.join(__dirname, '../db/migrations/003_track_b_account_identity.migration.sql'), 'utf8'
+  );
+  assert.match(migration, /ALTER TABLE people MODIFY workspace_id INT NULL/);
+  assert.match(migration, /ALTER TABLE accounts MODIFY workspace_id INT NULL/);
+  assert.match(migration, /ALTER TABLE auth_sessions MODIFY workspace_id INT NULL/);
+  assert.match(migration, /ALTER TABLE `groups` MODIFY workspace_id INT NULL/);
+  assert.doesNotMatch(migration, /\bDROP\s+(TABLE|COLUMN|DATABASE)\b/i);
+  assert.doesNotMatch(migration, /\bDELETE\s+FROM\b/i);
+});

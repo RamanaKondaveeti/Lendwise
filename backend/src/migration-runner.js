@@ -169,10 +169,46 @@ async function detectMigrationCompatibility(pool, version = '002_group_account_a
   return { mode: status ? 'group-account-v1' : 'legacy', groupAccountArchitectureEnabled: Boolean(status) };
 }
 
+async function isMigrationApplied(pool, version) {
+  const [ledger] = await pool.execute(
+    `SELECT 1 FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schema_migrations'`
+  );
+  if (!ledger.length) return false;
+  const status = await getMigrationStatus(pool, version);
+  if (status && status.status !== 'applied') {
+    throw new Error(`Required migration ${version} is ${status.status}; startup is blocked pending repair.`);
+  }
+  return status?.status === 'applied';
+}
+
+async function detectTrackBAccountIdentity(pool) {
+  const applied = await isMigrationApplied(pool, '003_track_b_account_identity');
+  if (!applied) return false;
+  const [columns] = await pool.execute(
+    `SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND
+       ((TABLE_NAME = 'people' AND COLUMN_NAME = 'workspace_id') OR
+        (TABLE_NAME = 'accounts' AND COLUMN_NAME = 'workspace_id') OR
+        (TABLE_NAME = 'auth_sessions' AND COLUMN_NAME = 'workspace_id') OR
+        (TABLE_NAME = 'groups' AND COLUMN_NAME = 'workspace_id'))`
+  );
+  const nullable = new Set(columns.filter(column => column.IS_NULLABLE === 'YES')
+    .map(column => `${column.TABLE_NAME}.${column.COLUMN_NAME}`));
+  const required = ['people.workspace_id', 'accounts.workspace_id', 'auth_sessions.workspace_id', 'groups.workspace_id'];
+  const missing = required.filter(name => !nullable.has(name));
+  if (missing.length) {
+    throw new Error(`Required schema for 003_track_b_account_identity is incomplete; workspace references remain NOT NULL: ${missing.join(', ')}.`);
+  }
+  return true;
+}
+
 module.exports = {
   assertDevelopmentTarget,
   detectMigrationCompatibility,
+  detectTrackBAccountIdentity,
   getMigrationStatus,
+  isMigrationApplied,
   runMigrations,
   splitSqlStatements,
   verifyMigrationDatabaseTarget,

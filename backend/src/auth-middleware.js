@@ -22,6 +22,11 @@ function createRequireAuth({ lookupAccount, clearSessionCookie }) {
         return res.status(401).json({ error: 'Your session has expired. Sign in again.' });
       }
       req.account = account;
+      req.auth = Object.freeze({
+        accountId: account.id,
+        email: account.email,
+        personId: account.person_id ?? null,
+      });
       return next();
     } catch (error) {
       logError('authentication_lookup_failed', error);
@@ -37,7 +42,14 @@ function createApiAuthGate({ requireAuth }) {
         req.path.startsWith('/auth/') ||
         (req.method === 'POST' && req.path === '/invitations/preview') ||
         (req.method === 'GET' && /^\/invitations\/[^/]+$/.test(req.path))) return next();
-    return requireAuth(req, res, next);
+    return requireAuth(req, res, () => {
+      // Workspace APIs stay explicitly scoped during the compatibility period.
+      // Account/group endpoints are the only routes available to workspace-less sessions.
+      if (!req.path.startsWith('/account/') && !req.account.workspace_id) {
+        return res.status(403).json({ error: 'This endpoint requires a legacy workspace membership.' });
+      }
+      return next();
+    });
   };
 }
 
