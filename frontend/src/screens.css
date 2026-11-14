@@ -465,6 +465,72 @@ footer svg{vertical-align:middle}
   .add-expense-actions .modal-submit{min-width:0;padding:0 12px}
 }
 
+/* Groups, group detail, activity, and expense edit surfaces only. */
+.groups-screen .group-grid{gap:14px}
+.groups-screen .group-card-shell{height:246px;padding:10px;border-color:#e3ece5;border-radius:14px;box-shadow:0 3px 12px #204a3307;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}
+.groups-screen .group-card-shell:hover,.groups-screen .group-card-shell:focus-within{transform:translateY(-2px);border-color:#c5dacb;box-shadow:0 8px 18px #204a330d}
+.groups-screen .group-card-shell .group-card strong{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin-top:9px;color:#26724e;font-size:18px;font-variant-numeric:tabular-nums;line-height:1.25}
+.groups-screen .group-card-shell .group-card strong small{color:#78877c;font-size:9px;font-weight:600}
+.groups-screen .group-card-actions{min-height:35px}
+.groups-screen .group-card-view:focus-visible,.groups-screen .group-card-settle:focus-visible{outline:2px solid #79ab88;outline-offset:2px}
+.groups-screen .group-list-empty{display:grid;min-height:190px;place-items:center;margin-top:14px;padding:26px;border:1px dashed #d8e6da;border-radius:12px;background:#fbfdfb;color:#6f8174;line-height:1.55}
+.content:has(.group-members-panel) .welcome-row{align-items:center;margin-bottom:20px}
+.content:has(.group-members-panel) .welcome-row h1{color:#263d30;letter-spacing:-.6px}
+.content:has(.group-members-panel) .welcome-row .subtitle{max-width:560px;line-height:1.5}
+.group-members-panel{padding:18px}
+.group-members-panel .screen-panel-heading{align-items:center;gap:14px}
+.group-member-list{gap:9px;padding-top:14px}
+.group-members-panel .group-member{min-width:0;min-height:42px;padding:6px 11px;border-color:#e1ebe3;background:#f8fbf8;transition:border-color .15s ease,background-color .15s ease}
+.group-members-panel .group-member:hover{border-color:#c9dfce;background:#f1f8f2}
+.group-members-panel .group-member .avatar{width:28px;height:28px;border:1px solid #fff;box-shadow:0 0 0 1px #dce8de;font-size:8px}
+.group-members-panel .group-member b{overflow:hidden;color:#40574a;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
+.content:has(.group-members-panel) .settlement-suggestions{margin-bottom:14px;padding:17px;border-color:#e3ece5;border-radius:12px}
+.content:has(.group-members-panel) .trips-panel,.content:has(.group-members-panel) .group-members-panel{margin-bottom:14px;border-radius:12px}
+.content:has(.group-members-panel) .trip-controls select{min-height:35px;border-color:#dfe9e2;border-radius:8px}
+.activity-screen.workspace-activity-screen .activity-controls,.activity-screen.group-expense-screen .activity-controls{row-gap:8px}
+.activity-screen.workspace-activity-screen .activity-controls>.select-button,.activity-screen.group-expense-screen .activity-controls>.select-button{min-width:0;padding:0 10px;border-color:#e0e9e2;background:#fff}
+.activity-screen.workspace-activity-screen .activity-row-actions button:focus-visible,.activity-screen.group-expense-screen .activity-row-actions button:focus-visible{outline:2px solid #79ab88;outline-offset:2px}
+.activity-screen.workspace-activity-screen .data-list .activity-row,.activity-screen.group-expense-screen .data-list .activity-row{border-radius:10px}
+.group-activity-feed{overflow:hidden;border-color:#e2ebe4;border-radius:13px}
+.group-activity-timeline{padding-top:4px}
+.group-activity-item{gap:13px;padding:14px 0;border-bottom-color:#e9efea}
+.group-activity-copy{color:#42574a;font-size:11px;line-height:1.55}
+.group-activity-copy small{color:#849187;font-size:9px}
+.group-activity-entity{min-width:0}
+.group-activity-entity button{max-width:100%;overflow:hidden;color:#277653;text-overflow:ellipsis;white-space:nowrap}
+.expense-modal:not(.add-expense-modal){border-color:#dfe9e1;border-radius:15px;box-shadow:0 18px 54px #1d37252b}
+.expense-modal:not(.add-expense-modal) .modal-top{border-bottom:1px solid #edf2ed}
+.expense-modal:not(.add-expense-modal) .modal-top h2{color:#263d30;font-size:21px;letter-spacing:-.35px}
+.expense-modal:not(.add-expense-modal) .expense-title-field input{height:44px;border-color:#dfe9e1;border-radius:8px;font-size:13px}
+.expense-modal:not(.add-expense-modal) .expense-amount-field input{height:48px;border-color:#cfe2d3;border-radius:9px;background:#f8fcf8;color:#245d3d;font-size:20px;font-weight:750;font-variant-numeric:tabular-nums}
+.expense-modal:not(.add-expense-modal) .participant-field{border-radius:10px;background:#fbfdfb}
+.expense-modal:not(.add-expense-modal) .expense-share-option{border-color:#e4ece5;border-radius:9px}
+.expense-modal:not(.add-expense-modal) .expense-share-option:focus-within{border-color:#b8d6c0;box-shadow:0 0 0 2px #21875e10}
+.expense-modal:not(.add-expense-modal) .modal-submit:focus-visible{outline:2px solid #79ab88;outline-offset:2px}
+@media(max-width:900px){
+  .groups-screen .group-card-shell{height:240px}
+  .content:has(.group-members-panel) .welcome-row{align-items:flex-start}
+  .content:has(.group-members-panel) .welcome-actions{gap:7px}
+  .activity-screen.workspace-activity-screen .data-list .activity-row,.activity-screen.group-expense-screen .data-list .activity-row{grid-template-columns:34px minmax(0,1fr) minmax(86px,.38fr) auto auto;gap:8px;padding-right:6px;padding-left:6px}
+}
+@media(max-width:600px){
+  .groups-screen .group-card-shell{height:232px;padding:8px}
+  .groups-screen .group-card-shell .group-card strong{font-size:17px}
+  .content:has(.group-members-panel) .welcome-row{margin-bottom:16px}
+  .content:has(.group-members-panel) .welcome-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+  .content:has(.group-members-panel) .welcome-actions .button{min-width:0;padding:0 8px;font-size:9px}
+  .group-members-panel{padding:14px}
+  .group-members-panel .screen-panel-heading{align-items:flex-start;flex-direction:column}
+  .group-members-panel .screen-panel-heading>.button{align-self:flex-start}
+  .group-member-list{gap:7px}
+  .group-members-panel .group-member{max-width:100%;padding:5px 9px}
+  .content:has(.group-members-panel) .settlement-suggestions{padding:14px}
+  .activity-screen.workspace-activity-screen .data-list .activity-row,.activity-screen.group-expense-screen .data-list .activity-row{grid-template-columns:32px minmax(0,1fr) minmax(76px,auto) auto;gap:5px 7px}
+  .group-activity-item{grid-template-columns:32px minmax(0,1fr);gap:8px;padding:12px 0}
+  .group-activity-icon{width:30px;height:30px}
+  .group-activity-entity{grid-column:2;justify-items:start;text-align:left}
+}
+
 :root{color-scheme:light;color:#20352e;background:#f3f9f6}
 body{background:#f3f9f6;color:#20352e}
 .sidebar,.topbar,.panel,.screen-panel,.balance-card,.modal{background:#fff;border-color:#e0ebe5}

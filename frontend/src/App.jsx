@@ -3668,7 +3668,7 @@ function App() {
           )}
 
           {tab === 'Groups' && (
-            <section className="screen-panel">
+            <section className="screen-panel groups-screen">
               <div className="panel-heading screen-panel-heading">
                 <div>
                   <div className="section-title">All groups <span className="title-count">{groups.length}</span></div>
@@ -3705,7 +3705,7 @@ function App() {
                             <span>{memberCount} {memberCount === 1 ? 'member' : 'members'}</span>
                           </span>
                           <span className="group-card-meta">{group.expenses} {group.expenses === 1 ? 'expense' : 'expenses'}</span>
-                          <strong>{formatMoney(group.total)} total expenses</strong>
+                          <strong><span>{formatMoney(group.total)}</span><small>total expenses</small></strong>
                           <span className={`group-card-balance ${balance < 0 ? 'is-owed' : balance > 0 ? 'is-owing' : 'is-settled'}`}>
                             {groupBalanceLabel(balance, formatMoney)}
                           </span>
@@ -3724,7 +3724,7 @@ function App() {
                     )
                   })}
                 </div>
-              ) : <div className="empty">No groups yet. Create one to start sharing expenses.</div>}
+              ) : <div className="empty group-list-empty">No groups yet. Create one to start sharing expenses.</div>}
               {Math.abs(unassignedBalance) >= 0.01 && (
                 <p className="group-balance-note">
                   Overall balance also includes {formatMoney(unassignedBalance)} from settlements not assigned to a group.
@@ -3859,7 +3859,7 @@ function App() {
               />
               </>
             )}
-            <section className="panel screen-panel activity-screen">
+            <section className={`panel screen-panel activity-screen${tab === 'Activity' ? ' workspace-activity-screen' : tab === 'Group' ? ' group-expense-screen' : ''}`}>
               <div className="panel-heading screen-panel-heading">
                 <div>
                   <div className="section-title">{tab === 'Group' ? 'Group expenses' : tab === 'Trip' ? 'Trip expenses' : 'All activity'} <span className="title-count">{visibleActivity.length}</span></div>
