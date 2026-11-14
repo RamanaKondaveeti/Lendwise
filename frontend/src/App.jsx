@@ -2808,6 +2808,7 @@ function App() {
     year: 'numeric',
   }).format(new Date())
   const firstName = currentUser?.name?.split(' ')[0] || 'there'
+  const activeBudgets = budgets.filter(budget => !budget.is_paused)
   const activeTrip = groupTrips.find(trip => Number(trip.id) === Number(selectedTripId))
   const pageTitle = tab === 'Group' ? selectedGroup?.name || 'Group' : tab === 'GroupActivity' ? `${selectedGroup?.name || 'Group'} Activity` : tab === 'Trip' ? activeTrip?.name || 'Trip' : tab
 
@@ -3214,14 +3215,14 @@ function App() {
                 </article>
               </section>
           <div className="overview-insights-grid">
-          <section className="panel budget-overview-panel" aria-label="Budget overview">
+          <section className={`panel budget-overview-panel${activeBudgets.length === 4 ? ' budget-overview-four' : ''}`} aria-label="Budget overview">
             <div className="budget-overview-heading">
-              <div><div className="section-title">Budget overview</div><div className="section-subtitle">{budgets.filter(budget => !budget.is_paused).length} active · {budgets.filter(budget => !budget.is_paused && budget.utilization.currentPeriod.percentUsed >= 100).length} exceeded</div></div>
+              <div><div className="section-title">Budget overview</div><div className="section-subtitle">{activeBudgets.length} active · {activeBudgets.filter(budget => budget.utilization.currentPeriod.percentUsed >= 100).length} exceeded</div></div>
               <button type="button" className="budget-overview-link" onClick={() => setTab('Budgets')}>View budgets<ArrowRight size={14} /></button>
             </div>
-            {budgets.filter(budget => !budget.is_paused).length ? (
+            {activeBudgets.length ? (
               <div className="budget-overview-list" role="region" aria-label="Active budget list" tabIndex={0}>
-                {budgets.filter(budget => !budget.is_paused).map(budget => {
+                {activeBudgets.map(budget => {
                   const utilization = budget.utilization.currentPeriod
                   const pct = utilization.percentUsed
                   const level = pct >= 100 ? 'red' : pct >= 80 ? 'amber' : 'green'
