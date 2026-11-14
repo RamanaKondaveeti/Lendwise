@@ -1770,6 +1770,7 @@ function App() {
     analyticsCategory,
   ), [analyticsCategory, analyticsGroup, analyticsSource, data?.currentUserId, selectedMonth])
   const reportColumns = reportHeaders(selectedReportType)
+  const hasReportRecords = Number(reportResult?.totalRecords) > 0
   const visibleReportRows = (reportResult?.records || []).map(record =>
     convertReportRow(presentReportRow(record), exchangeRate, currency)
   )
@@ -3500,18 +3501,18 @@ function App() {
                     </div>
                   </div>
                   <div className="report-export-actions">
-                    <button className="button button-light" disabled={!reportResult || reportLoading || !Number.isFinite(exchangeRate)} onClick={() => exportReport('xlsx')}>
+                    <button className="button button-light" disabled={!hasReportRecords || reportLoading || !Number.isFinite(exchangeRate)} onClick={() => exportReport('xlsx')}>
                       <FileSpreadsheet size={14} />Excel
                     </button>
-                    <button className="button button-light" disabled={!reportResult || reportLoading || !Number.isFinite(exchangeRate)} onClick={() => exportReport('csv')}>
+                    <button className="button button-light" disabled={!hasReportRecords || reportLoading || !Number.isFinite(exchangeRate)} onClick={() => exportReport('csv')}>
                       <FileDown size={14} />CSV
                     </button>
-                    <button className="button button-light" disabled={!reportResult || reportLoading || !Number.isFinite(exchangeRate)} onClick={() => exportReport('pdf')}>
+                    <button className="button button-light" disabled={!hasReportRecords || reportLoading || !Number.isFinite(exchangeRate)} onClick={() => exportReport('pdf')}>
                       <Download size={14} />PDF
                     </button>
                   </div>
                 </div>
-                {reportResult && (
+                {hasReportRecords && (
                   <div className="report-total-strip">
                     <div><span>Total expense amount</span><b>{formatMoney(reportResult.totals.total_amount)}</b></div>
                     <div><span>Personal / selected-member share</span><b>{formatMoney(reportResult.totals.personal_share)}</b></div>
@@ -3520,7 +3521,7 @@ function App() {
                     )}
                   </div>
                 )}
-                {reportResult?.breakdown?.length > 0 && (
+                {hasReportRecords && reportResult?.breakdown?.length > 0 && (
                   <div className="report-breakdown">
                     <div className="section-title">
                       {selectedReportType === 'monthly' ? 'Monthly totals' : selectedReportType === 'group' ? 'Group totals' : 'Member contributions'}
@@ -3555,7 +3556,8 @@ function App() {
                     </table>
                   </div>
                 )}
-                {reportResult && !visibleReportRows.length && <div className="empty report-empty report-empty-compact"><span className="report-empty-icon"><FileBarChart size={18} /></span><b>No matching records</b><span>Try changing the date range or filters.</span></div>}
+                {reportResult && !hasReportRecords && <div className="empty report-empty"><span className="report-empty-icon"><FileBarChart size={20} /></span><b>No expenses found</b><span>No expenses found for the selected filters. Try adjusting the date range, group, member, or category.</span></div>}
+                {hasReportRecords && !visibleReportRows.length && <div className="empty report-empty report-empty-compact"><span className="report-empty-icon"><FileBarChart size={18} /></span><b>No preview rows available</b><span>Matching report records could not be loaded into the preview.</span></div>}
                 {reportResult?.hasMore && (
                   <div className="report-pagination">
                     <span>Preview and exports are capped at 5,000 rows. Narrow filters for larger reports.</span>
