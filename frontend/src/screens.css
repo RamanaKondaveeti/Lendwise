@@ -230,9 +230,7 @@
 :is(.users-page,.invitations-page) .invitation-status{min-width:76px;padding:5px 9px;text-align:center;text-transform:capitalize}
 :is(.users-page,.invitations-page) .invitation-cancel-button{min-height:32px;padding:0 11px;border-radius:8px;transition:border-color .15s ease,background-color .15s ease,color .15s ease}
 :is(.users-page,.invitations-page) .invitation-cancel-button:focus-visible,.users-page .user-delete-button:focus-visible{outline-offset:3px}
-.invitations-page>.screen-panel-heading{gap:16px;padding-bottom:18px}
-.invitations-page .user-screen-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
-.invitations-page .user-screen-actions .button{height:36px;padding:0 12px;border-radius:8px;font-size:10px}
+.invitations-page .sent-invitations{margin-top:0;padding-top:0;border-top:0}
 @media(max-width:800px){
   .users-page .workspace-user-row{grid-template-columns:38px minmax(0,1fr) minmax(100px,auto) 36px;gap:10px;padding:11px}
   .users-page .workspace-user-row>.avatar{width:38px;height:38px}
@@ -254,8 +252,6 @@
   :is(.users-page,.invitations-page) .invitation-history-copy b{white-space:normal;overflow-wrap:anywhere}
   :is(.users-page,.invitations-page) .invitation-status{justify-self:start}
   :is(.users-page,.invitations-page) .invitation-cancel-button{justify-self:end}
-  .invitations-page>.screen-panel-heading{align-items:flex-start;flex-direction:column;gap:12px}
-  .invitations-page .user-screen-actions{width:100%;justify-content:flex-start}
 }
 .activity-copy i{font-style:normal;padding:0 6px;color:#b5bab2}
 .range-select select{appearance:none;border:0;outline:0;background:transparent;color:#727b70;font-size:9px;cursor:pointer}

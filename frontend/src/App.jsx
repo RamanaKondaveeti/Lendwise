@@ -3158,12 +3158,18 @@ function App() {
                 {tab === 'Recurring' && 'Schedule shared expenses and review generated bills.'}
               </p>
             </div>
-            {tab !== 'Invitations' && <div className="welcome-actions">
-              <button className="button button-light" onClick={() => setModal('person')}><Plus size={16} />Add user</button>
-              {tab !== 'Users' && <button className="button button-light" onClick={() => { setGlobalUserQuery(''); setGlobalUserResults([]); setManualInviteLink(''); setModal('invite') }}><Plus size={16} />Invite user</button>}
-              <button className="button button-light" onClick={() => setModal('group')}><Plus size={16} />Create group</button>
-              <button className="button button-dark" disabled={!groups.some(group => group.members?.length)} onClick={openExpense}><Plus size={17} />Add an expense</button>
-            </div>}
+            {tab === 'Invitations' ? (
+              <div className="welcome-actions">
+                <button className="button button-dark" onClick={() => { setGlobalUserQuery(''); setGlobalUserResults([]); setManualInviteLink(''); setModal('invite') }}><Plus size={16} />Invite user</button>
+              </div>
+            ) : (
+              <div className="welcome-actions">
+                <button className="button button-light" onClick={() => setModal('person')}><Plus size={16} />Add user</button>
+                {tab !== 'Users' && <button className="button button-light" onClick={() => { setGlobalUserQuery(''); setGlobalUserResults([]); setManualInviteLink(''); setModal('invite') }}><Plus size={16} />Invite user</button>}
+                <button className="button button-light" onClick={() => setModal('group')}><Plus size={16} />Create group</button>
+                <button className="button button-dark" disabled={!groups.some(group => group.members?.length)} onClick={openExpense}><Plus size={17} />Add an expense</button>
+              </div>
+            )}
           </div>
 
           {notice && <div className="toast" role="status" aria-live="polite"><Check size={16} />{notice}</div>}
@@ -3816,15 +3822,6 @@ function App() {
 
           {tab === 'Invitations' && (
             <section className="screen-panel invitations-page">
-              <div className="panel-heading screen-panel-heading">
-                <div>
-                  <div className="section-title">Invitations <span className="title-count">{sentInvitations.length}</span></div>
-                  <div className="section-subtitle">Sent invitations for {authUser.workspaceName || 'this workspace'}.</div>
-                </div>
-                <div className="user-screen-actions">
-                  <button className="button button-dark" onClick={() => { setGlobalUserQuery(''); setGlobalUserResults([]); setManualInviteLink(''); setModal('invite') }}><Plus size={15} />Invite user</button>
-                </div>
-              </div>
               <section className="sent-invitations" aria-labelledby="sent-invitations-title">
                 <div className="section-title" id="sent-invitations-title">Sent invitations <span className="title-count">{sentInvitations.length}</span></div>
                 <div className="section-subtitle">Pending invitations can be cancelled. Accepted, cancelled, and expired invitations remain in your history.</div>
