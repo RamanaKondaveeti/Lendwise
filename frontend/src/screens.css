@@ -1375,19 +1375,16 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
   .pwa-update-banner { align-items: flex-start; flex-direction: column; }
 }
 
-/* Keep budget names readable and scroll long budget lists inside their card. */
-.overview-insights-grid{align-items:start}
-.overview-insights-grid>.budget-overview-panel{height:auto;min-height:0;align-self:start}
-.overview-insights-grid .budget-overview-list{grid-template-columns:minmax(0,1fr);max-height:190px;overflow-y:auto;overscroll-behavior:contain;gap:11px;margin-top:14px;padding-right:5px;scrollbar-width:auto;scrollbar-color:#6f9b77 #e5eee6;scrollbar-gutter:stable}
+/* Let budget rows grow the dashboard naturally; only the sidebar scrolls independently. */
+.overview-insights-grid{align-items:stretch}
+.overview-insights-grid>.budget-overview-panel{height:auto;min-height:0;align-self:stretch}
+.overview-insights-grid .budget-overview-list{grid-template-columns:minmax(0,1fr);max-height:none;overflow:visible;gap:11px;margin-top:14px;padding-right:0}
 .overview-insights-grid .budget-overview-row{grid-template-columns:minmax(0,1fr) 38px;column-gap:9px;row-gap:5px}
 .overview-insights-grid .budget-overview-label{display:grid;grid-column:1/-1;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;justify-content:initial;gap:8px;white-space:nowrap}
 .overview-insights-grid .budget-overview-label b{min-width:0}
 .overview-insights-grid .budget-overview-label small,.overview-insights-grid .budget-overview-label span{white-space:nowrap}
 .overview-insights-grid .budget-overview-meter{grid-column:1;grid-row:2}
 .overview-insights-grid .budget-overview-percent{grid-column:2;grid-row:2;text-align:right}
-.overview-insights-grid .budget-overview-list::-webkit-scrollbar{display:block;width:10px}
-.overview-insights-grid .budget-overview-list::-webkit-scrollbar-track{border-radius:8px;background:#e5eee6}
-.overview-insights-grid .budget-overview-list::-webkit-scrollbar-thumb{min-height:28px;border:2px solid #e5eee6;border-radius:8px;background:#6f9b77}
 .overview-insights-grid .budget-overview-heading .section-title{color:#294638;font-size:14px;letter-spacing:-.2px}
 .overview-insights-grid .budget-overview-link{min-height:30px;padding:0 8px;border:1px solid transparent;border-radius:8px;font-size:10px;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
 .overview-insights-grid .budget-overview-link:hover{border-color:#d5e9dc;background:#f1f8f3;color:#176b4c}
@@ -1407,32 +1404,6 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
 @media(max-width:760px){
   .overview-insights-grid .budget-overview-list{grid-template-columns:minmax(0,1fr)}
   .overview-insights-grid .budget-overview-row{grid-template-columns:minmax(0,1fr) 42px}
-}
-
-/* Match insight card heights within each dashboard grid row. */
-.overview-insights-grid{align-items:stretch}
-.overview-insights-grid>.budget-overview-panel{display:flex;align-self:stretch;min-height:100%;flex-direction:column}
-.overview-insights-grid .budget-overview-list{min-height:0;max-height:none;flex:1 1 0px;overflow-y:auto}
-@media(max-width:640px){.overview-insights-grid .budget-overview-list{flex:0 0 auto}}
-
-/* Keep Overview on the document scroll; the fixed sidebar remains its own scroll area. */
-html:has(.app .overview-insights-grid){
-  height:auto;
-  overflow-y:auto;
-  scrollbar-gutter:stable;
-  scrollbar-width:auto;
-  scrollbar-color:#8b9d90 #e9efea;
-}
-html:has(.app .overview-insights-grid)::-webkit-scrollbar{display:block;width:12px}
-html:has(.app .overview-insights-grid)::-webkit-scrollbar-track{background:#e9efea}
-html:has(.app .overview-insights-grid)::-webkit-scrollbar-thumb{min-height:34px;border:3px solid #e9efea;border-radius:99px;background:#8b9d90}
-body:has(.app .overview-insights-grid),
-body:has(.app .overview-insights-grid) #root,
-.app:has(.overview-insights-grid),
-.app:has(.overview-insights-grid) .main{
-  height:auto;
-  min-height:100vh;
-  overflow:visible;
 }
 
 /* Sidebar polish: retain the existing structure, width, and responsive behavior. */
