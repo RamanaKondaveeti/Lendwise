@@ -1156,7 +1156,7 @@ html[data-theme="dark"] .app .participant-list .expense-share-option { border-co
 }
 
 .notification-row:focus-within {
-  background: var(--theme-card-hover, #f6f9f6);
+  background: var(--bg-card-hover, #f6f9f6);
 }
 
 /* Batch 10: unify form controls and dialog behavior without changing form logic. */
