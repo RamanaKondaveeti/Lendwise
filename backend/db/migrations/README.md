@@ -16,6 +16,8 @@ Save all result sets together with the restored backup identifier. No restored t
 
 See [PHASE_B_DESIGN.md](PHASE_B_DESIGN.md) for evidence, sequence, rollback, and outstanding decisions.
 
+The Windows-hosted connectivity diagnostic is `npm run test:integration:preflight`. It reports config, DNS, TCP, MySQL authentication/database, server identity, marker, and temporary-table permission stages separately. It never runs migrations; it verifies server identity and the marker before its session-only temporary-table read/write probe. A failed DNS/TCP stage prevents database credentials from being used.
+
 ## Phase C foundation status
 
 `002_group_account_architecture.migration.sql` is a one-time additive migration for isolated development/test databases. It adds direct account-to-group membership, nullable ownership, group-scoped invitation storage, participant-only access indexes for unresolved historical settlements, and invalidates legacy workspace invitation tokens while preserving their rows/status. It intentionally retains all workspace tables/columns and legacy group memberships. It has **not** been executed. MySQL DDL implicitly commits, so this script is not atomic or safely rerunnable: test it on a disposable restored copy, capture a backup, and restore that copy if execution stops partway through. The runner records a failed/partially applied version and refuses an automatic retry. The updated backend checks the migration ledger and required schema before enabling legacy-token invalidation; startup blocks if it detects incomplete or untracked Phase C objects. This is not yet a complete cutover migration.
