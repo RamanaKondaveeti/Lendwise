@@ -221,15 +221,18 @@
 .users-page .users-empty-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:3px}
 .users-page .users-empty-actions .button{height:34px;border-radius:8px;font-size:10px}
 .users-page .users-no-results{min-height:150px;margin:0;padding:20px}
-.users-page .sent-invitations>.section-title{color:#304536;font-size:15px;font-weight:750}
-.users-page .invitation-history-list{gap:9px}
-.users-page .invitation-history-row{grid-template-columns:minmax(0,1fr) auto auto;gap:14px;min-height:64px;padding:11px 13px;border-color:#e4ece5;border-radius:10px;transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease}
-.users-page .invitation-history-row:hover{border-color:#cddfd1;background:#fcfefc;box-shadow:0 3px 10px #204a3308}
-.users-page .invitation-history-copy b{color:#304536;font-size:11px;line-height:1.4}
-.users-page .invitation-history-copy span{color:#7b897d;font-size:9px;line-height:1.45}
-.users-page .invitation-status{min-width:76px;padding:5px 9px;text-align:center;text-transform:capitalize}
-.users-page .invitation-cancel-button{min-height:32px;padding:0 11px;border-radius:8px;transition:border-color .15s ease,background-color .15s ease,color .15s ease}
-.users-page .invitation-cancel-button:focus-visible,.users-page .user-delete-button:focus-visible{outline-offset:3px}
+:is(.users-page,.invitations-page) .sent-invitations>.section-title{color:#304536;font-size:15px;font-weight:750}
+:is(.users-page,.invitations-page) .invitation-history-list{gap:9px}
+:is(.users-page,.invitations-page) .invitation-history-row{grid-template-columns:minmax(0,1fr) auto auto;gap:14px;min-height:64px;padding:11px 13px;border-color:#e4ece5;border-radius:10px;transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease}
+:is(.users-page,.invitations-page) .invitation-history-row:hover{border-color:#cddfd1;background:#fcfefc;box-shadow:0 3px 10px #204a3308}
+:is(.users-page,.invitations-page) .invitation-history-copy b{color:#304536;font-size:11px;line-height:1.4}
+:is(.users-page,.invitations-page) .invitation-history-copy span{color:#7b897d;font-size:9px;line-height:1.45}
+:is(.users-page,.invitations-page) .invitation-status{min-width:76px;padding:5px 9px;text-align:center;text-transform:capitalize}
+:is(.users-page,.invitations-page) .invitation-cancel-button{min-height:32px;padding:0 11px;border-radius:8px;transition:border-color .15s ease,background-color .15s ease,color .15s ease}
+:is(.users-page,.invitations-page) .invitation-cancel-button:focus-visible,.users-page .user-delete-button:focus-visible{outline-offset:3px}
+.invitations-page>.screen-panel-heading{gap:16px;padding-bottom:18px}
+.invitations-page .user-screen-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.invitations-page .user-screen-actions .button{height:36px;padding:0 12px;border-radius:8px;font-size:10px}
 @media(max-width:800px){
   .users-page .workspace-user-row{grid-template-columns:38px minmax(0,1fr) minmax(100px,auto) 36px;gap:10px;padding:11px}
   .users-page .workspace-user-row>.avatar{width:38px;height:38px}
@@ -246,11 +249,13 @@
   .users-page .workspace-user-balance span{margin-left:0;justify-content:flex-start}
   .users-page .user-delete-button{grid-column:3;grid-row:2;justify-self:end;align-self:center}
   .users-page .users-empty{min-height:190px;padding:22px 14px}
-  .users-page .invitation-history-row{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;padding:11px}
-  .users-page .invitation-history-copy{grid-column:1/-1}
-  .users-page .invitation-history-copy b{white-space:normal;overflow-wrap:anywhere}
-  .users-page .invitation-status{justify-self:start}
-  .users-page .invitation-cancel-button{justify-self:end}
+  :is(.users-page,.invitations-page) .invitation-history-row{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;padding:11px}
+  :is(.users-page,.invitations-page) .invitation-history-copy{grid-column:1/-1}
+  :is(.users-page,.invitations-page) .invitation-history-copy b{white-space:normal;overflow-wrap:anywhere}
+  :is(.users-page,.invitations-page) .invitation-status{justify-self:start}
+  :is(.users-page,.invitations-page) .invitation-cancel-button{justify-self:end}
+  .invitations-page>.screen-panel-heading{align-items:flex-start;flex-direction:column;gap:12px}
+  .invitations-page .user-screen-actions{width:100%;justify-content:flex-start}
 }
 .activity-copy i{font-style:normal;padding:0 6px;color:#b5bab2}
 .range-select select{appearance:none;border:0;outline:0;background:transparent;color:#727b70;font-size:9px;cursor:pointer}
