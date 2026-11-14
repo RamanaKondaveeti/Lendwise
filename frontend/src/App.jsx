@@ -25,6 +25,7 @@ import {
   LayoutDashboard,
   LoaderCircle,
   LogOut,
+  MailPlus,
   Menu,
   Moon,
   Monitor,
@@ -2833,6 +2834,15 @@ function App() {
           ))}
           <button className="nav-item settle-up-nav" type="button" aria-label="Settle up" title="Settle up" disabled={!Number(currentUser?.balance)} onClick={() => { openSettleAll(); setMobileNavOpen(false) }}>
             <Check size={18} />Settle up
+          </button>
+          <button
+            className="nav-item invite-user-nav"
+            type="button"
+            aria-label="Invite user"
+            title="Invite user"
+            onClick={() => { setGlobalUserQuery(''); setGlobalUserResults([]); setManualInviteLink(''); setModal('invite'); setMobileNavOpen(false) }}
+          >
+            <MailPlus size={18} />Invite user
           </button>
         </nav>
         <div className="nav-label groups-label">

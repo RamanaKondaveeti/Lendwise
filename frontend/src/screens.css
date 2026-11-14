@@ -200,7 +200,7 @@
 .users-page .workspace-user-row>.avatar{width:40px;height:40px;border:2px solid #fff;box-shadow:0 0 0 1px #dfe9e0;font-size:10px}
 .users-page .workspace-user-copy{gap:5px}
 .users-page .workspace-user-copy b{color:#304536;font-size:12px;font-weight:700;white-space:nowrap}
-.users-page .workspace-user-copy span{color:#7d8c80;font-size:10px}
+.users-page .workspace-user-copy span{display:-webkit-box;overflow:hidden;color:#7d8c80;font-size:10px;line-height:1.45;-webkit-box-orient:vertical;-webkit-line-clamp:2}
 .users-page .workspace-user-balance{min-width:112px;gap:5px}
 .users-page .workspace-user-balance b{color:#35493a;font-size:12px;font-weight:750;font-variant-numeric:tabular-nums}
 .users-page .workspace-user-balance.is-owed b{color:#21875e}
@@ -212,6 +212,7 @@
 .users-page .workspace-user-balance.is-owing span{border-color:#f0e2d2;background:#fdf6ed;color:#9b642f}
 .users-page .workspace-user-balance.is-owing span::before{background:#d6954e}
 .users-page .user-delete-button{width:36px;height:36px;border-radius:9px}
+.users-page .user-delete-button:not(:disabled){transition:border-color .15s ease,background-color .15s ease,color .15s ease}
 .users-page .user-delete-button:disabled{opacity:.35}
 .users-page .users-empty{display:grid;justify-items:center;gap:9px;min-height:210px;margin-top:14px;padding:28px 18px;border:1px dashed #dce8dd;border-radius:10px;background:#fbfdfb}
 .users-page .users-empty-icon{display:grid;width:46px;height:46px;place-items:center;border:1px solid #e1ede2;border-radius:13px;background:#edf5ed;color:#4f8057}
@@ -220,6 +221,15 @@
 .users-page .users-empty-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:3px}
 .users-page .users-empty-actions .button{height:34px;border-radius:8px;font-size:10px}
 .users-page .users-no-results{min-height:150px;margin:0;padding:20px}
+.users-page .sent-invitations>.section-title{color:#304536;font-size:15px;font-weight:750}
+.users-page .invitation-history-list{gap:9px}
+.users-page .invitation-history-row{grid-template-columns:minmax(0,1fr) auto auto;gap:14px;min-height:64px;padding:11px 13px;border-color:#e4ece5;border-radius:10px;transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease}
+.users-page .invitation-history-row:hover{border-color:#cddfd1;background:#fcfefc;box-shadow:0 3px 10px #204a3308}
+.users-page .invitation-history-copy b{color:#304536;font-size:11px;line-height:1.4}
+.users-page .invitation-history-copy span{color:#7b897d;font-size:9px;line-height:1.45}
+.users-page .invitation-status{min-width:76px;padding:5px 9px;text-align:center;text-transform:capitalize}
+.users-page .invitation-cancel-button{min-height:32px;padding:0 11px;border-radius:8px;transition:border-color .15s ease,background-color .15s ease,color .15s ease}
+.users-page .invitation-cancel-button:focus-visible,.users-page .user-delete-button:focus-visible{outline-offset:3px}
 @media(max-width:800px){
   .users-page .workspace-user-row{grid-template-columns:38px minmax(0,1fr) minmax(100px,auto) 36px;gap:10px;padding:11px}
   .users-page .workspace-user-row>.avatar{width:38px;height:38px}
@@ -236,6 +246,11 @@
   .users-page .workspace-user-balance span{margin-left:0;justify-content:flex-start}
   .users-page .user-delete-button{grid-column:3;grid-row:2;justify-self:end;align-self:center}
   .users-page .users-empty{min-height:190px;padding:22px 14px}
+  .users-page .invitation-history-row{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;padding:11px}
+  .users-page .invitation-history-copy{grid-column:1/-1}
+  .users-page .invitation-history-copy b{white-space:normal;overflow-wrap:anywhere}
+  .users-page .invitation-status{justify-self:start}
+  .users-page .invitation-cancel-button{justify-self:end}
 }
 .activity-copy i{font-style:normal;padding:0 6px;color:#b5bab2}
 .range-select select{appearance:none;border:0;outline:0;background:transparent;color:#727b70;font-size:9px;cursor:pointer}
@@ -2193,6 +2208,21 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
   .budget-history-detail{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px;padding:10px 2px}
   .budget-history-detail b{grid-column:1/-1}
   .budget-history-detail strong{text-align:right}
+}
+
+/* Budget history readability and narrow-screen overflow protection. */
+.budgets-page .budget-history-panel>.empty{display:grid;min-height:92px;place-items:center;padding:18px;border:1px dashed #dce7de;border-radius:10px;background:#fbfdfb;color:#718078;font-size:11px;text-align:center}
+.budgets-page .budget-history-rows{gap:0;margin-top:13px;border-top-color:#e7eee8}
+.budgets-page .budget-history-detail{grid-template-columns:minmax(140px,1.2fr) repeat(4,minmax(86px,1fr));gap:10px;min-height:42px;padding:9px 7px;border-bottom-color:#e9efea;font-size:10px;line-height:1.4}
+.budgets-page .budget-history-detail>b{color:#344b3b;font-size:10px;font-weight:700}
+.budgets-page .budget-history-detail>span{font-variant-numeric:tabular-nums}
+.budgets-page .budget-history-detail>strong{color:#357a53;font-size:10px;font-variant-numeric:tabular-nums;text-align:right}
+@media(max-width:760px){
+  .budgets-page .budget-history-panel{overflow:hidden;padding-right:10px;padding-left:10px}
+  .budgets-page .budget-history-detail{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 10px;padding:10px 4px}
+  .budgets-page .budget-history-detail>b{grid-column:1/-1}
+  .budgets-page .budget-history-detail>span{min-width:0;overflow-wrap:anywhere}
+  .budgets-page .budget-history-detail>strong{align-self:center}
 }
 
 /* Overview analytics and charts: improve hierarchy while keeping their existing data and interactions. */
