@@ -1270,9 +1270,25 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
 .overview-insights-grid .budget-overview-list::-webkit-scrollbar{width:7px}
 .overview-insights-grid .budget-overview-list::-webkit-scrollbar-track{border-radius:8px;background:#edf3ed}
 .overview-insights-grid .budget-overview-list::-webkit-scrollbar-thumb{border:1px solid #edf3ed;border-radius:8px;background:#a8c6ac}
+.overview-insights-grid .budget-overview-heading .section-title{color:#294638;font-size:14px;letter-spacing:-.2px}
+.overview-insights-grid .budget-overview-link{min-height:30px;padding:0 8px;border:1px solid transparent;border-radius:8px;font-size:10px;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
+.overview-insights-grid .budget-overview-link:hover{border-color:#d5e9dc;background:#f1f8f3;color:#176b4c}
+.overview-insights-grid .budget-overview-row{grid-template-columns:minmax(0,1fr) 42px;column-gap:10px;row-gap:7px;padding:9px 10px;border:1px solid #e8f0e9;border-radius:10px;background:#fbfdfb;transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease}
+.overview-insights-grid .budget-overview-row:hover{border-color:#d5e8da;background:#f8fcf9;box-shadow:0 3px 10px #245b380a}
+.overview-insights-grid .budget-overview-label{grid-template-columns:minmax(0,1fr) auto;gap:9px;white-space:normal}
+.overview-insights-grid .budget-overview-label b{color:#31483a;font-size:10px;font-weight:700}
+.overview-insights-grid .budget-overview-label small{padding:3px 6px;border-radius:99px;background:#edf6ef;font-size:8px;font-weight:700}
+.overview-insights-grid .budget-overview-values{display:flex;grid-column:1/-1;align-items:center;justify-content:space-between;gap:12px;color:#52665a;font-size:9px}
+.overview-insights-grid .budget-overview-values>span{display:grid;min-width:0;gap:3px}
+.overview-insights-grid .budget-overview-values>span:last-child{text-align:right}
+.overview-insights-grid .budget-overview-values small{color:#849187;font-size:8px;line-height:1.2}
+.overview-insights-grid .budget-overview-values b{overflow:hidden;color:inherit;font-size:10px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.overview-insights-grid .budget-overview-meter{grid-column:1;grid-row:3;height:7px;background:#e8efe9;box-shadow:inset 0 1px 2px #263b2d0a}
+.overview-insights-grid .budget-overview-meter i{border-radius:99px;box-shadow:0 0 0 1px #ffffff40 inset}
+.overview-insights-grid .budget-overview-percent{grid-column:2;grid-row:3;font-size:9px;font-variant-numeric:tabular-nums}
 @media(max-width:760px){
   .overview-insights-grid .budget-overview-list{grid-template-columns:minmax(0,1fr)}
-  .overview-insights-grid .budget-overview-row{grid-template-columns:minmax(0,1fr) 38px}
+  .overview-insights-grid .budget-overview-row{grid-template-columns:minmax(0,1fr) 42px}
 }
 
 /* Match insight card heights within each dashboard grid row. */

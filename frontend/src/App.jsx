@@ -3195,7 +3195,11 @@ function App() {
                   const level = pct >= 100 ? 'red' : pct >= 80 ? 'amber' : 'green'
                   const status = pct > 100 ? 'Budget exceeded' : pct >= 100 ? 'Budget reached' : pct >= 90 ? 'Near limit' : pct >= 80 ? 'Warning' : 'On track'
                   return <div className="budget-overview-row" key={budget.id}>
-                    <div className="budget-overview-label"><b>{budget.name}</b><small className={`budget-overview-status budget-overview-text-${level}`}>{status}</small><span>{pct >= 100 ? `${formatBudgetMoney(budget, Math.abs(utilization.remaining))} over` : `${formatBudgetMoney(budget, utilization.remaining)} remaining`}</span></div>
+                    <div className="budget-overview-label"><b>{budget.name}</b><small className={`budget-overview-status budget-overview-text-${level}`}>{status}</small></div>
+                    <div className="budget-overview-values">
+                      <span><small>Spent</small><b>{formatBudgetMoney(budget, utilization.spent)}</b></span>
+                      <span className={`budget-overview-text-${level}`}><small>{pct >= 100 ? 'Over' : 'Remaining'}</small><b>{formatBudgetMoney(budget, Math.abs(utilization.remaining))}</b></span>
+                    </div>
                     <div className={`budget-overview-meter budget-overview-${level}`}><i style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} /></div>
                     <span className={`budget-overview-percent budget-overview-text-${level}`}>{pct.toFixed(0)}%</span>
                   </div>
