@@ -498,6 +498,78 @@ test('database-backed GroupBuk workflows on a guarded isolated MySQL database', 
       }
     });
 
+    await t.test('cancels pending invitations, enforces lifecycle permissions, and serializes acceptance races', async () => {
+      const createdIds = [];
+      const createInvitation = async ({ accepted = false, cancelled = false, expired = false } = {}) => {
+        const token = crypto.randomBytes(32).toString('base64url');
+        const [result] = await db.execute(
+          `INSERT INTO workspace_invitations
+             (workspace_id, invitee_account_id, email, token_hash, invited_by, expires_at, accepted_at, cancelled_at)
+           VALUES(?, ?, ?, ?, ?, ${expired ? 'DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)' : 'DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY)'},
+             ${accepted ? 'UTC_TIMESTAMP()' : 'NULL'}, ${cancelled ? 'UTC_TIMESTAMP()' : 'NULL'})`,
+          [primary.workspaceId, second.id, second.email, crypto.createHash('sha256').update(token).digest('hex'), primary.id]
+        );
+        createdIds.push(result.insertId);
+        return { id: Number(result.insertId), token };
+      };
+      try {
+        const pending = await createInvitation();
+        const unauthorized = await api(`/api/invitations/${pending.id}/cancel`, { method: 'POST', cookie: second.cookie });
+        expectStatus(unauthorized, 403, 'unauthorized invitation cancellation');
+
+        const cancelled = await api(`/api/invitations/${pending.id}/cancel`, { method: 'POST', cookie: primary.cookie });
+        expectStatus(cancelled, 200, 'sender cancellation');
+        assert.equal(typeof cancelled.body.emailSent, 'boolean', 'cancellation reports email delivery outcome');
+        const oldLink = await api('/api/invitations/preview', { method: 'POST', body: { token: pending.token } });
+        expectStatus(oldLink, 400, 'cancelled invitation link preview');
+        assert.match(oldLink.body.error, /cancelled by the sender/);
+        const cancelledAccept = await api('/api/invitations/accept', {
+          method: 'POST', cookie: second.cookie, body: { invitationId: pending.id },
+        });
+        expectStatus(cancelledAccept, 400, 'cancelled invitation acceptance');
+        const repeatCancel = await api(`/api/invitations/${pending.id}/cancel`, { method: 'POST', cookie: primary.cookie });
+        expectStatus(repeatCancel, 409, 'repeated invitation cancellation');
+
+        const accepted = await createInvitation({ accepted: true });
+        expectStatus(await api(`/api/invitations/${accepted.id}/cancel`, { method: 'POST', cookie: primary.cookie }), 409, 'accepted invitation cancellation');
+        const expired = await createInvitation({ expired: true });
+        expectStatus(await api(`/api/invitations/${expired.id}/cancel`, { method: 'POST', cookie: primary.cookie }), 409, 'expired invitation cancellation');
+        const previouslyCancelled = await createInvitation({ cancelled: true });
+        expectStatus(await api(`/api/invitations/${previouslyCancelled.id}/cancel`, { method: 'POST', cookie: primary.cookie }), 409, 'already cancelled invitation');
+
+        const race = await createInvitation();
+        const [acceptRace, cancelRace] = await Promise.all([
+          api('/api/invitations/accept', { method: 'POST', cookie: second.cookie, body: { invitationId: race.id } }),
+          api(`/api/invitations/${race.id}/cancel`, { method: 'POST', cookie: primary.cookie }),
+        ]);
+        assert.ok([200, 400, 409].includes(acceptRace.status) && [200, 400, 409].includes(cancelRace.status));
+        assert.equal([acceptRace.status, cancelRace.status].filter(status => status === 200).length, 1,
+          'exactly one operation should win the locked state transition');
+        assert.ok([400, 409].includes(acceptRace.status === 200 ? cancelRace.status : acceptRace.status),
+          'the operation that loses the race should be rejected');
+        const [[raceState]] = await db.execute('SELECT accepted_at, cancelled_at FROM workspace_invitations WHERE id = ?', [race.id]);
+        assert.equal(Boolean(raceState.accepted_at) === Boolean(raceState.cancelled_at), false,
+          'the final invitation state must be exclusively accepted or cancelled');
+      } finally {
+        if (createdIds.length) await db.execute(
+          `DELETE FROM workspace_invitations WHERE id IN (${createdIds.map(() => '?').join(',')})`, createdIds
+        );
+        const [[currentSecond]] = await db.execute('SELECT person_id FROM accounts WHERE id = ?', [second.id]);
+        const movedPersonId = Number(currentSecond.person_id);
+        await db.execute('UPDATE accounts SET workspace_id = ?, person_id = ? WHERE id = ?', [second.workspaceId, second.personId, second.id]);
+        await db.execute(
+          `INSERT INTO workspace_members(account_id, workspace_id, person_id) VALUES(?, ?, ?)
+           ON DUPLICATE KEY UPDATE person_id = VALUES(person_id)`,
+          [second.id, second.workspaceId, second.personId]
+        );
+        await db.execute('UPDATE auth_sessions SET workspace_id = ? WHERE account_id = ?', [second.workspaceId, second.id]);
+        await db.execute('DELETE FROM workspace_members WHERE account_id = ? AND workspace_id = ?', [second.id, primary.workspaceId]);
+        if (movedPersonId !== Number(second.personId)) {
+          await db.execute('DELETE FROM people WHERE id = ? AND workspace_id = ?', [movedPersonId, primary.workspaceId]);
+        }
+      }
+    });
+
     await t.test('group membership, expense persistence/idempotency, edits, settlements, analytics, reports, trips, recurring execution, and IDOR', async () => {
       const groupResult = await api('/api/groups', {
         method: 'POST', cookie: primary.cookie,

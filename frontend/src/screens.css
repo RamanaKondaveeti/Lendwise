@@ -163,6 +163,31 @@
 .user-delete-button:focus-visible{outline:2px solid #b9685e;outline-offset:2px}
 .user-delete-button:disabled{opacity:.42;cursor:not-allowed}
 .users-page{min-width:0;overflow:hidden}
+.sent-invitations{margin-top:28px;padding-top:20px;border-top:1px solid #e8efea}
+.sent-invitations>.section-subtitle{margin:5px 0 12px}
+.invitation-history-list{display:grid;gap:7px}
+.invitation-history-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:12px;min-height:56px;padding:10px 12px;border:1px solid #e7eee8;border-radius:9px;background:#fff}
+.invitation-history-copy{display:grid;gap:4px;min-width:0}
+.invitation-history-copy b{overflow:hidden;color:#344c39;font-size:11px;text-overflow:ellipsis;white-space:nowrap}
+.invitation-history-copy span{color:#7b897d;font-size:9px}
+.invitation-status{padding:5px 9px;border:1px solid #e3e9e3;border-radius:20px;background:#f6f8f6;color:#657367;font-size:9px;font-weight:700}
+.invitation-status.status-pending{border-color:#e9dfbd;background:#fff9e8;color:#876d26}
+.invitation-status.status-accepted{border-color:#d8ebdc;background:#eff8f1;color:#32774b}
+.invitation-status.status-cancelled{border-color:#f0d8d6;background:#fff4f3;color:#a24945}
+.invitation-status.status-expired{border-color:#e5e5e2;background:#f4f4f2;color:#777b76}
+.invitation-cancel-button{height:30px;padding:0 10px;border:1px solid #e8c8c5;border-radius:7px;background:#fff;color:#a34440;font-size:9px;font-weight:700;cursor:pointer}
+.invitation-cancel-button:hover:not(:disabled){border-color:#ce817b;background:#fff5f4}
+.invitation-cancel-button:disabled{opacity:.55;cursor:wait}
+.invitation-empty{margin-top:12px;padding:16px;border:1px dashed #dce8dd;border-radius:9px;color:#7b897d;font-size:10px;text-align:center}
+.invitation-confirm-backdrop{position:fixed;z-index:1200;inset:0;display:grid;place-items:center;padding:20px;background:#17231bb8;backdrop-filter:blur(4px)}
+.invitation-confirm-dialog{display:grid;gap:17px;width:min(440px,100%);padding:25px;border:1px solid #dfe9e3;border-radius:15px;background:#fff;box-shadow:0 20px 60px #10241838}
+.invitation-confirm-dialog .modal-top{align-items:flex-start;margin:0;padding-bottom:13px;border-bottom:1px solid #e8efea}
+.invitation-confirm-dialog h2{margin:4px 0 0;color:#263b2c;font-size:20px}
+.invitation-confirm-dialog p{margin:0;color:#637166;font-size:12px;line-height:1.65}
+.invitation-confirm-dialog p b{color:#344c39;overflow-wrap:anywhere}
+.invitation-confirm-action{height:42px;padding:0 16px;border:1px solid #bb5b55;border-radius:9px;background:#bd514b;color:#fff;font-size:11px;font-weight:700}
+.invitation-confirm-action:hover:not(:disabled){background:#a9413b}
+.invitation-confirm-action:disabled{opacity:.6}
 .users-page>.screen-panel-heading{gap:16px;padding-bottom:18px}
 .users-page .user-screen-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
 .users-page .user-screen-actions .button{height:36px;padding:0 12px;border-radius:8px;font-size:10px}

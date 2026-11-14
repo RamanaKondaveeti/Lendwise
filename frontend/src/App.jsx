@@ -893,6 +893,8 @@ function App() {
   const [globalUserResults, setGlobalUserResults] = useState([])
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false)
   const [manualInviteLink, setManualInviteLink] = useState('')
+  const [sentInvitations, setSentInvitations] = useState([])
+  const [invitationToCancel, setInvitationToCancel] = useState(null)
   const [tab, setTab] = useState('Overview')
   const [installPromptEvent, setInstallPromptEvent] = useState(null)
   const [appInstalled, setAppInstalled] = useState(() => isStandalone({
@@ -1358,6 +1360,13 @@ function App() {
       window.clearTimeout(timer)
     }
   }, [modal, globalUserQuery])
+
+  useEffect(() => {
+    if (tab !== 'Users' || !authUser) return undefined
+    let active = true
+    request('/api/invitations').then(rows => { if (active) setSentInvitations(rows) }).catch(error => { if (active) notify(error.message) })
+    return () => { active = false }
+  }, [tab, authUser?.id, authUser?.workspaceId, reloadKey])
 
   useEffect(() => {
     if (tab !== 'Overview' && tab !== 'Activity' && tab !== 'Group' && tab !== 'Trip') return undefined
@@ -2325,6 +2334,21 @@ function App() {
       setGlobalUserResults(results => results.filter(user => user.account_id !== accountId))
     } catch (error) {
       notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function cancelInvitation(invitation) {
+    setBusy(true)
+    try {
+      const result = await request(`/api/invitations/${invitation.id}/cancel`, { method: 'POST' })
+      setSentInvitations(rows => rows.map(row => row.id === invitation.id ? { ...row, status: 'cancelled', cancelled_at: new Date().toISOString() } : row))
+      setInvitationToCancel(null)
+      notify(result.emailSent ? 'Invitation cancelled and the invitee was notified.' : result.message)
+    } catch (error) {
+      notify(error.message)
+      request('/api/invitations').then(setSentInvitations).catch(() => {})
     } finally {
       setBusy(false)
     }
@@ -3708,6 +3732,24 @@ function App() {
               ) : (
                 <div className="empty users-empty"><span className="users-empty-icon"><Users size={20} /></span><b>No users in this workspace yet</b><span>Add a user or invite someone to get started.</span><div className="users-empty-actions"><button type="button" className="button button-light" onClick={() => setModal('person')}><Plus size={14} />Add user</button><button type="button" className="button button-dark" onClick={() => { setGlobalUserQuery(''); setGlobalUserResults([]); setManualInviteLink(''); setModal('invite') }}><Plus size={14} />Invite user</button></div></div>
               )}
+              <section className="sent-invitations" aria-labelledby="sent-invitations-title">
+                <div className="section-title" id="sent-invitations-title">Sent invitations <span className="title-count">{sentInvitations.length}</span></div>
+                <div className="section-subtitle">Pending invitations can be cancelled. Invitation history is retained here.</div>
+                {sentInvitations.length ? <div className="invitation-history-list">{sentInvitations.map(invitation => (
+                  <article className="invitation-history-row" key={invitation.id}>
+                    <div className="invitation-history-copy"><b>{invitation.email}</b><span>Sent {new Date(invitation.created_at).toLocaleDateString()}</span></div>
+                    <span className={`invitation-status status-${invitation.status}`}>{invitation.status[0].toUpperCase() + invitation.status.slice(1)}</span>
+                    {invitation.status === 'pending' && <button type="button" className="invitation-cancel-button" disabled={busy} onClick={() => setInvitationToCancel(invitation)}>Cancel Invitation</button>}
+                  </article>
+                ))}</div> : <div className="empty invitation-empty">No invitations have been sent from this workspace.</div>}
+              </section>
+              {invitationToCancel && <div className="invitation-confirm-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !busy) setInvitationToCancel(null) }}>
+                <section className="invitation-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="cancel-invitation-title" aria-describedby="cancel-invitation-description">
+                  <div className="modal-top"><div><span className="eyebrow">GROUPBUK</span><h2 id="cancel-invitation-title">Cancel invitation?</h2></div><button type="button" className="icon-button" aria-label="Close dialog" disabled={busy} onClick={() => setInvitationToCancel(null)}><X size={17} /></button></div>
+                  <p id="cancel-invitation-description">The invitation to <b>{invitationToCancel.email}</b> will stop working. We’ll email them that it was cancelled.</p>
+                  <div className="invite-modal-actions"><button type="button" className="button button-light" disabled={busy} onClick={() => setInvitationToCancel(null)}>Keep invitation</button><button type="button" className="button invitation-confirm-action" disabled={busy} onClick={() => cancelInvitation(invitationToCancel)}>{busy ? 'Cancelling…' : 'Cancel Invitation'}</button></div>
+                </section>
+              </div>}
             </section>
           )}
 

@@ -36,6 +36,7 @@ const { buildGroupAnalyticsFilter } = require('./group-analytics');
 const { normalizeActivityQuery, activityTypeClause } = require('./group-activity');
 const { supportedCurrencies, currencyEnumSql, isSupportedCurrency } = require('./currencies');
 const { validTripInput } = require('./trips');
+const { cancellationEmail, cancellationRejection, invitationStatus } = require('./invitation-lifecycle');
 const { hasGroupMembership } = require('./authorization');
 const { createApiAuthGate, createRequireAuth, getSessionToken } = require('./auth-middleware');
 const { claimIdempotency, findIdempotencyReplay, readIdempotencyKey, saveIdempotentResponse } = require('./idempotency');
@@ -637,6 +638,8 @@ async function migrateWorkspaceOwnership() {
   await ensureColumn('accounts', 'workspace_id', 'INT NULL');
   await ensureColumn('auth_sessions', 'workspace_id', 'INT NULL');
   await ensureColumn('workspace_invitations', 'invitee_account_id', 'INT NULL');
+  await ensureColumn('workspace_invitations', 'cancelled_at', 'DATETIME NULL');
+  await ensureColumn('workspace_invitations', 'revoked_token_hash', 'CHAR(64) NULL');
 
   const legacyAccounts = await q(
     `SELECT a.id, a.person_id, p.name, p.initials, p.color
@@ -793,7 +796,6 @@ async function init() {
   await migrateWorkspaceOwnership();
   await q('DELETE FROM auth_sessions WHERE expires_at <= UTC_TIMESTAMP()');
   await q('DELETE FROM email_tokens WHERE expires_at <= UTC_TIMESTAMP()');
-  await q('DELETE FROM workspace_invitations WHERE expires_at <= UTC_TIMESTAMP() AND accepted_at IS NULL');
 }
 
 app.use('/api', publicApiRateLimit);
@@ -831,7 +833,7 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
     if (typeof invitationToken === 'string' && invitationToken) {
       const [invitations] = await connection.execute(
         `SELECT id, workspace_id, email, invitee_account_id FROM workspace_invitations
-         WHERE token_hash = ? AND accepted_at IS NULL AND expires_at > UTC_TIMESTAMP() FOR UPDATE`,
+         WHERE token_hash = ? AND accepted_at IS NULL AND cancelled_at IS NULL AND expires_at > UTC_TIMESTAMP() FOR UPDATE`,
         [hashSessionToken(invitationToken)]
       );
       const invitation = invitations[0];
@@ -883,7 +885,7 @@ app.post('/api/auth/signup', authRateLimit, async (req, res) => {
     if (invitationToken) {
       const [accepted] = await connection.execute(
         `UPDATE workspace_invitations SET accepted_at = UTC_TIMESTAMP()
-         WHERE token_hash = ? AND accepted_at IS NULL`,
+         WHERE token_hash = ? AND accepted_at IS NULL AND cancelled_at IS NULL AND expires_at > UTC_TIMESTAMP()`,
         [hashSessionToken(invitationToken)]
       );
       if (accepted.affectedRows !== 1) throw new Error('Invitation was already accepted.');
@@ -1691,11 +1693,15 @@ async function previewInvitation(req, res, token) {
               w.name AS workspace_name
        FROM workspace_invitations i
        JOIN workspaces w ON w.id = i.workspace_id
-       WHERE i.token_hash = ? AND i.accepted_at IS NULL
+       WHERE i.token_hash = ? AND i.accepted_at IS NULL AND i.cancelled_at IS NULL
          AND i.expires_at > UTC_TIMESTAMP()`,
       [hashSessionToken(token)]
     );
-    if (!invitation) return res.status(400).json({ error: 'Invitation link is invalid or expired.' });
+    if (!invitation) {
+      const [cancelled] = await q('SELECT id FROM workspace_invitations WHERE revoked_token_hash = ?', [hashSessionToken(token)]);
+      if (cancelled) return res.status(400).json({ error: 'This invitation has been cancelled by the sender.' });
+      return res.status(400).json({ error: 'Invitation link is invalid or expired.' });
+    }
     res.json(invitation);
   } catch (error) {
     logError(error);
@@ -1727,7 +1733,7 @@ app.get('/api/users/search', async (req, res) => {
          ON wm.account_id = a.id AND wm.workspace_id = ?
        LEFT JOIN workspace_invitations wi
          ON wi.invitee_account_id = a.id AND wi.workspace_id = ?
-         AND wi.accepted_at IS NULL AND wi.expires_at > UTC_TIMESTAMP()
+         AND wi.accepted_at IS NULL AND wi.cancelled_at IS NULL AND wi.expires_at > UTC_TIMESTAMP()
        WHERE a.id <> ?
          AND (LOCATE(LOWER(?), LOWER(p.name)) > 0
            OR LOCATE(LOWER(?), LOWER(a.email)) > 0)
@@ -1774,7 +1780,7 @@ app.post('/api/invitations', async (req, res) => {
 
     const [pending] = await q(
       `SELECT id FROM workspace_invitations
-       WHERE workspace_id = ? AND accepted_at IS NULL AND expires_at > UTC_TIMESTAMP()
+       WHERE workspace_id = ? AND accepted_at IS NULL AND cancelled_at IS NULL AND expires_at > UTC_TIMESTAMP()
          AND ((? IS NOT NULL AND invitee_account_id = ?) OR email = ?)`,
       [req.account.workspace_id, hasAccountId ? inviteeAccountId : null, hasAccountId ? inviteeAccountId : 0, targetEmail]
     );
@@ -1838,6 +1844,63 @@ app.post('/api/invitations', async (req, res) => {
   }
 });
 
+app.get('/api/invitations', requireAuth, async (req, res) => {
+  try {
+    const invitations = await q(
+      `SELECT id, email, invited_by, created_at, expires_at, accepted_at, cancelled_at,
+         expires_at <= UTC_TIMESTAMP() AS is_expired
+       FROM workspace_invitations WHERE workspace_id = ? ORDER BY created_at DESC, id DESC`,
+      [req.account.workspace_id]
+    );
+    res.json(invitations.map(invitation => ({ ...invitation, status: invitationStatus(invitation) })));
+  } catch (error) {
+    logError(error);
+    res.status(500).json({ error: 'Could not load invitations.' });
+  }
+});
+
+app.post('/api/invitations/:invitationId/cancel', requireAuth, async (req, res) => {
+  const invitationId = Number(req.params.invitationId);
+  if (!Number.isSafeInteger(invitationId) || invitationId < 1) return res.status(400).json({ error: 'Invitation not found.' });
+  let connection;
+  let email;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      `SELECT id, email, invited_by, accepted_at, cancelled_at, expires_at <= UTC_TIMESTAMP() AS is_expired
+       FROM workspace_invitations WHERE id = ? AND workspace_id = ? FOR UPDATE`,
+      [invitationId, req.account.workspace_id]
+    );
+    const invitation = rows[0];
+    if (!invitation) { await connection.rollback(); return res.status(404).json({ error: 'Invitation not found.' }); }
+    if (invitation.invited_by !== req.account.id) { await connection.rollback(); return res.status(403).json({ error: 'Only the person who sent this invitation can cancel it.' }); }
+    const rejection = cancellationRejection(invitation);
+    if (rejection) { await connection.rollback(); return res.status(rejection.status).json({ error: rejection.error }); }
+    const [updated] = await connection.execute(
+      `UPDATE workspace_invitations SET cancelled_at = UTC_TIMESTAMP(), revoked_token_hash = token_hash, token_hash = ?
+       WHERE id = ? AND accepted_at IS NULL AND cancelled_at IS NULL AND expires_at > UTC_TIMESTAMP()`,
+      [hashSessionToken(crypto.randomBytes(32).toString('base64url')), invitationId]
+    );
+    if (updated.affectedRows !== 1) { await connection.rollback(); return res.status(409).json({ error: 'This invitation can no longer be cancelled.' }); }
+    email = invitation.email;
+    await connection.commit();
+    try {
+      await sendEmail({ to: email, ...cancellationEmail() });
+      res.json({ ok: true, emailSent: true });
+    } catch (emailError) {
+      logError('invitation_cancellation_email_failed', emailError);
+      res.json({ ok: true, emailSent: false, message: 'Invitation cancelled, but the notification email could not be delivered.' });
+    }
+  } catch (error) {
+    if (connection) await connection.rollback();
+    logError(error);
+    res.status(500).json({ error: 'Could not cancel this invitation.' });
+  } finally {
+    connection?.release();
+  }
+});
+
 app.post('/api/invitations/accept', requireAuth, async (req, res) => {
   const token = req.body?.token;
   const invitationId = Number(req.body?.invitationId);
@@ -1854,7 +1917,7 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
       `SELECT i.id, i.workspace_id, w.name AS workspace_name FROM workspace_invitations i
        JOIN workspaces w ON w.id = i.workspace_id
        WHERE ((? IS NOT NULL AND i.token_hash = ?) OR (? IS NOT NULL AND i.id = ?))
-         AND i.invitee_account_id = ? AND i.accepted_at IS NULL
+         AND i.invitee_account_id = ? AND i.accepted_at IS NULL AND i.cancelled_at IS NULL
          AND i.expires_at > UTC_TIMESTAMP() FOR UPDATE`,
       [
         hasToken ? hashSessionToken(token) : null,
@@ -1914,7 +1977,7 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
       [req.account.id, invitation.workspace_id]
     );
     await connection.execute(
-      'UPDATE workspace_invitations SET accepted_at = UTC_TIMESTAMP() WHERE id = ?',
+      'UPDATE workspace_invitations SET accepted_at = UTC_TIMESTAMP() WHERE id = ? AND cancelled_at IS NULL AND accepted_at IS NULL',
       [invitation.id]
     );
     await connection.execute(
