@@ -25,7 +25,7 @@ import {
   LayoutDashboard,
   LoaderCircle,
   LogOut,
-  MailPlus,
+  MailOpen,
   Menu,
   Moon,
   Monitor,
@@ -1416,7 +1416,7 @@ function App() {
   }, [modal, globalUserQuery])
 
   useEffect(() => {
-    if (tab !== 'Users' || !authUser) return undefined
+    if (!['Users', 'Invitations'].includes(tab) || !authUser) return undefined
     let active = true
     request('/api/invitations').then(rows => { if (active) setSentInvitations(rows) }).catch(error => { if (active) notify(error.message) })
     return () => { active = false }
@@ -2847,7 +2847,7 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav>
-          {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [Users, 'Groups'], [ReceiptText, 'Activity'], [Wallet, 'Budgets'], [CalendarClock, 'Recurring'], [FileBarChart, 'Reports'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
+          {[[LayoutDashboard, 'Overview'], [Users, 'Users'], [MailOpen, 'Invitations'], [Users, 'Groups'], [ReceiptText, 'Activity'], [Wallet, 'Budgets'], [CalendarClock, 'Recurring'], [FileBarChart, 'Reports'], [ArrowLeftRight, 'Balances']].map(([Icon, name]) => (
             <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => { navigateToTab(name); setMobileNavOpen(false) }}>
               <Icon size={18} />{name}
               {name === 'Activity' && <span className="nav-count">{data.activityCount || 0}</span>}
@@ -2857,15 +2857,6 @@ function App() {
           ))}
           <button className="nav-item settle-up-nav" type="button" aria-label="Settle up" title="Settle up" disabled={!Number(currentUser?.balance)} onClick={() => { openSettleAll(); setMobileNavOpen(false) }}>
             <Check size={18} />Settle up
-          </button>
-          <button
-            className="nav-item invite-user-nav"
-            type="button"
-            aria-label="Invite user"
-            title="Invite user"
-            onClick={() => { setGlobalUserQuery(''); setGlobalUserResults([]); setManualInviteLink(''); setModal('invite'); setMobileNavOpen(false) }}
-          >
-            <MailPlus size={18} />Invite user
           </button>
         </nav>
         <div className="nav-label groups-label">
@@ -3153,6 +3144,7 @@ function App() {
               <p className="subtitle">
                 {tab === 'Overview' && 'Here’s the latest on your shared expenses.'}
                 {tab === 'Users' && 'Everyone added to this workspace.'}
+                {tab === 'Invitations' && 'Manage workspace users and invitations.'}
                 {tab === 'Groups' && 'Your shared circles and their expenses.'}
                 {tab === 'Activity' && 'Every expense recorded across your groups.'}
                 {tab === 'Budgets' && 'Plan spending, track progress, and compare periods.'}
@@ -3766,7 +3758,7 @@ function App() {
             </section>
           )}
 
-          {tab === 'Users' && (
+          {['Users', 'Invitations'].includes(tab) && (
             <section className="screen-panel users-page">
               <div className="panel-heading screen-panel-heading">
                 <div>
