@@ -560,7 +560,7 @@ function ExpenseRows({ expenses, currentUser, onGroupClick, onSettleExpense, onE
                   {expense.group_name}
                 </button>
                 <i>·</i>
-                {date(expense.created_at)}
+                <time className="activity-date" dateTime={expense.created_at}>{date(expense.created_at)}</time>
                 <i>·</i>
                 <span className="activity-category-label">{expense.category || 'Other'}</span>
                 {isVoided && <span className="voided-expense-badge" title={expense.voided_by_name ? `Deleted by ${expense.voided_by_name}` : 'Deleted'}>DELETED</span>}

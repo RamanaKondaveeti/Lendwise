@@ -1798,6 +1798,34 @@ html[data-theme='dark'] .overview-insights-grid .budget-overview-list::-webkit-s
   .balances-empty{min-height:190px;padding:22px 14px}
 }
 
+/* Groups and workspace Activity refinements. Keep these limited to their pages. */
+.groups-screen .group-grid{align-items:stretch;gap:16px}
+.groups-screen .group-card-shell{height:auto;min-height:258px;grid-template-rows:minmax(0,1fr) auto}
+.groups-screen .group-card-shell .group-card{justify-content:flex-start}
+.groups-screen .group-card-avatar{box-shadow:0 0 0 1px #ffffff,0 1px 3px #173b241c}
+.groups-screen .group-card-actions{padding-top:3px;border-top:1px solid #edf2ee}
+.groups-screen .group-card-view:focus-visible,.groups-screen .group-card-settle:focus-visible{outline:2px solid #79ab88;outline-offset:2px}
+.groups-screen .group-balance-note{max-width:720px;margin:16px 0 0;padding:11px 13px;border:1px solid #e6eee7;border-radius:9px;background:#f8fbf8;color:#718078;font-size:10px;line-height:1.5}
+.activity-screen.workspace-activity-screen .activity-copy>span .activity-date{padding:1px 5px;border:1px solid #e8eee9;border-radius:5px;background:#f8faf8;color:#65766b;font-variant-numeric:tabular-nums;white-space:nowrap}
+.activity-screen.workspace-activity-screen .activity-category-label{color:#65766b}
+.activity-screen.workspace-activity-screen .activity-row:focus-within{background:#f7fbf8;border-bottom-color:#dce9df}
+.activity-screen.workspace-activity-screen .activity-row-actions button:focus-visible{outline:2px solid #79ab88;outline-offset:2px}
+@media(max-width:900px){
+  .groups-screen .group-card-shell{min-height:252px}
+}
+@media(max-width:600px){
+  .groups-screen .group-card-shell{min-height:246px;padding:10px}
+  .groups-screen .group-card-actions{padding-right:6px;padding-left:6px}
+  .activity-screen.workspace-activity-screen .data-list .activity-row{grid-template-rows:auto auto;min-height:82px}
+  .activity-screen.workspace-activity-screen .activity-copy{grid-column:2;grid-row:1}
+  .activity-screen.workspace-activity-screen .activity-copy>span{max-height:3em;line-height:1.45}
+  .activity-screen.workspace-activity-screen .activity-payer{display:flex;grid-column:2;grid-row:2;align-self:center;gap:5px;min-width:0}
+  .activity-screen.workspace-activity-screen .activity-payer .avatar.tiny{width:19px;height:19px;border-width:1px;font-size:7px}
+  .activity-screen.workspace-activity-screen .activity-payer>span{font-size:9px}
+  .activity-screen.workspace-activity-screen .activity-amount{grid-column:3;grid-row:1 / span 2}
+  .activity-screen.workspace-activity-screen .activity-row-actions{grid-column:4;grid-row:1 / span 2}
+}
+
 /* Group cards and the compact group rows shown on the overview. */
 .group-grid{gap:15px}
 .group-card{
