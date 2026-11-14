@@ -916,8 +916,9 @@ function App() {
   const [sentInvitations, setSentInvitations] = useState([])
   const [invitationToCancel, setInvitationToCancel] = useState(null)
   const [tab, setTab] = useState('Overview')
+  const mainScrollRef = useRef(null)
   const navigateToTab = nextTab => {
-    if (nextTab === 'Overview') window.scrollTo(0, 0)
+    if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0
     setTab(nextTab)
   }
   const [installPromptEvent, setInstallPromptEvent] = useState(null)
@@ -1042,8 +1043,21 @@ function App() {
   const [budgetHistoryId, setBudgetHistoryId] = useState(null)
   const [budgetBusy, setBudgetBusy] = useState(false)
 
+  const isAppShellReady = Boolean(authUser && data)
+
   useLayoutEffect(() => {
-    if (tab === 'Overview') window.scrollTo(0, 0)
+    const root = document.documentElement
+    if (!isAppShellReady) {
+      root.classList.remove('groupbuk-shell-active')
+      return undefined
+    }
+
+    root.classList.add('groupbuk-shell-active')
+    return () => root.classList.remove('groupbuk-shell-active')
+  }, [isAppShellReady])
+
+  useLayoutEffect(() => {
+    if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0
   }, [tab])
 
   const setTheme = preference => {
@@ -2891,7 +2905,7 @@ function App() {
         </div>
       </aside>
 
-      <main className="main">
+      <main className="main" ref={mainScrollRef}>
         <header className="topbar">
           <div className="topbar-leading">
             <button
