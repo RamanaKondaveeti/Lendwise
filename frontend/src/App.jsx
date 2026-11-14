@@ -1770,10 +1770,10 @@ function App() {
     analyticsCategory,
   ), [analyticsCategory, analyticsGroup, analyticsSource, data?.currentUserId, selectedMonth])
   const reportColumns = reportHeaders(selectedReportType)
-  const hasReportRecords = Number(reportResult?.totalRecords) > 0
   const visibleReportRows = (reportResult?.records || []).map(record =>
     convertReportRow(presentReportRow(record), exchangeRate, currency)
   )
+  const hasReportRecords = visibleReportRows.length > 0
 
   function reportCell(record, key) {
     if (['total_amount', 'personal_share', 'paid_amount', 'balance'].includes(key)) {
@@ -3496,7 +3496,7 @@ function App() {
                     <div className="section-title">Report preview</div>
                     <div className="section-subtitle">
                       {reportResult
-                        ? `${reportResult.totalRecords.toLocaleString()} matching records · showing ${visibleReportRows.length.toLocaleString()}`
+                        ? `${visibleReportRows.length.toLocaleString()} matching records`
                         : 'Generate a report to load matching records from your database.'}
                     </div>
                   </div>
@@ -3557,8 +3557,7 @@ function App() {
                   </div>
                 )}
                 {reportResult && !hasReportRecords && <div className="empty report-empty"><span className="report-empty-icon"><FileBarChart size={20} /></span><b>No expenses found</b><span>No expenses found for the selected filters. Try adjusting the date range, group, member, or category.</span></div>}
-                {hasReportRecords && !visibleReportRows.length && <div className="empty report-empty report-empty-compact"><span className="report-empty-icon"><FileBarChart size={18} /></span><b>No preview rows available</b><span>Matching report records could not be loaded into the preview.</span></div>}
-                {reportResult?.hasMore && (
+                {reportResult?.hasMore && hasReportRecords && (
                   <div className="report-pagination">
                     <span>Preview and exports are capped at 5,000 rows. Narrow filters for larger reports.</span>
                     <button
