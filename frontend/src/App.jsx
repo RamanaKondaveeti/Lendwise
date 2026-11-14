@@ -3215,7 +3215,7 @@ function App() {
                 </article>
               </section>
           <div className="overview-insights-grid">
-          <section className={`panel budget-overview-panel${activeBudgets.length === 4 ? ' budget-overview-four' : ''}`} aria-label="Budget overview">
+          <section className={`panel budget-overview-panel${activeBudgets.length === 4 ? ' budget-overview-four' : activeBudgets.length > 4 ? ' budget-overview-many' : ''}`} aria-label="Budget overview">
             <div className="budget-overview-heading">
               <div><div className="section-title">Budget overview</div><div className="section-subtitle">{activeBudgets.length} active · {activeBudgets.filter(budget => budget.utilization.currentPeriod.percentUsed >= 100).length} exceeded</div></div>
               <button type="button" className="budget-overview-link" onClick={() => setTab('Budgets')}>View budgets<ArrowRight size={14} /></button>
