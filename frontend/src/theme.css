@@ -1107,6 +1107,129 @@ html[data-theme="dark"] .app .exact-allocation-error { color: #ff9292; }
 html[data-theme="dark"] .app .percentage-calculated { color: #a5e0bb; }
 html[data-theme="dark"] .app .participant-list .expense-share-option { border-color: var(--theme-border); background: var(--theme-card); }
 
+/* Batch 9: improve the existing account, workspace, and notification menus. */
+.workspace-menu {
+  max-height: min(50dvh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-border) transparent;
+}
+
+.workspace-menu button {
+  min-height: 40px;
+  color: var(--theme-text);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.workspace-menu button:focus-visible,
+.notification-heading-actions button:focus-visible,
+.notification-toolbar button:focus-visible,
+.notification-mark-read:focus-visible,
+.notification-dismiss:focus-visible,
+.profile-menu-sign-out:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+}
+
+.workspace-menu button[disabled] {
+  border: 1px solid var(--theme-border);
+  background: var(--theme-secondary);
+  color: var(--theme-primary);
+  font-weight: 650;
+}
+
+.profile-menu {
+  width: min(320px, calc(100vw - 24px));
+  transform-origin: top right;
+}
+
+.notification-row {
+  min-width: 0;
+  gap: 8px;
+}
+
+.notification-mark-read,
+.notification-dismiss {
+  width: 32px;
+  height: 32px;
+}
+
+.notification-row:focus-within {
+  background: var(--theme-card-hover, #f6f9f6);
+}
+
+/* Batch 10: unify form controls and dialog behavior without changing form logic. */
+.app .modal :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select) {
+  min-width: 0;
+  min-height: 40px;
+  border-radius: 8px;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.app .modal textarea {
+  min-width: 0;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+
+.app .modal label {
+  line-height: 1.4;
+}
+
+.app .modal :is(input, select, textarea):focus-visible {
+  border-color: var(--theme-primary);
+  outline: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-primary) 16%, transparent);
+}
+
+.app .modal :is(input, select, textarea):user-invalid,
+.app .modal :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--theme-error);
+}
+
+.app .empty {
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+.app .empty[role="alert"] {
+  border-color: var(--theme-danger-border);
+  background: var(--theme-danger-surface);
+  color: var(--theme-danger);
+}
+
+@media (max-width: 540px) {
+  .notification-popover {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 66px);
+    right: 12px;
+    width: min(420px, calc(100vw - 24px));
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 82px);
+  }
+}
+
+@media (max-width: 600px) {
+  .app .modal:not(.expense-modal):not(.invite-user-modal):not(.create-group-modal):not(.settlement-modal) {
+    max-width: 100%;
+    max-height: calc(100dvh - 28px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app *,
+  .app *::before,
+  .app *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* Keep the main dashboard and screen components in sync with the selected theme. */
 html[data-theme="dark"] .app :is(.panel, .screen-panel, .activity-panel, .groups-panel, .group-card, .balance-card, .workspace-error, .monthly-summary, .currency-switcher, .search, .select-button, .button-light, .modal input, .modal select, .modal textarea) {
   background-color: var(--bg-card);
