@@ -1739,7 +1739,13 @@ async function previewInvitation(req, res, token) {
       [hashSessionToken(token)]
     );
     if (!invitation) {
-      const [cancelled] = await q('SELECT id FROM workspace_invitations WHERE revoked_token_hash = ?', [hashSessionToken(token)]);
+      const [cancelled] = await q(
+        'SELECT id, legacy_disabled_at FROM workspace_invitations WHERE revoked_token_hash = ?',
+        [hashSessionToken(token)]
+      );
+      if (cancelled?.legacy_disabled_at) {
+        return res.status(400).json({ error: 'This legacy invitation can no longer grant access. Ask the sender for a new group invitation.' });
+      }
       if (cancelled) return res.status(400).json({ error: 'This invitation has been cancelled by the sender.' });
       return res.status(400).json({ error: 'Invitation link is invalid or expired.' });
     }
@@ -1962,6 +1968,7 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
        JOIN workspaces w ON w.id = i.workspace_id
        WHERE ((? IS NOT NULL AND i.token_hash = ?) OR (? IS NOT NULL AND i.id = ?))
          AND i.invitee_account_id = ? AND i.accepted_at IS NULL AND i.cancelled_at IS NULL
+         AND i.legacy_disabled_at IS NULL
          AND i.expires_at > UTC_TIMESTAMP() FOR UPDATE`,
       [
         hasToken ? hashSessionToken(token) : null,
