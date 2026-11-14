@@ -1412,7 +1412,8 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
 /* Match insight card heights within each dashboard grid row. */
 .overview-insights-grid{align-items:stretch}
 .overview-insights-grid>.budget-overview-panel{display:flex;align-self:stretch;min-height:100%;flex-direction:column}
-.overview-insights-grid .budget-overview-list{min-height:0;max-height:none;flex:1 1 auto;overflow-y:auto}
+.overview-insights-grid .budget-overview-list{min-height:0;max-height:none;flex:1 1 0px;overflow-y:auto}
+@media(max-width:640px){.overview-insights-grid .budget-overview-list{flex:0 0 auto}}
 
 /* Sidebar polish: retain the existing structure, width, and responsive behavior. */
 .sidebar{
