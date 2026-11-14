@@ -1525,6 +1525,9 @@ html[data-theme='dark'] .budget-card{--budget-tone:#65d391;--budget-soft:#123b2d
   .balance-grid>.balance-card:hover{transform:none}
 }
 
+/* Overview now presents two equally sized gross balance cards. */
+.balance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+
 /* Balances page: keep the people ledger easy to scan at every width. */
 .balances-page{min-width:0;overflow:hidden}
 .balances-page>.screen-panel-heading{gap:18px;padding-bottom:18px}

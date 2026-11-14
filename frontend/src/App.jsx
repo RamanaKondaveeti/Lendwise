@@ -1559,7 +1559,6 @@ function App() {
   const balanceSummary = data?.balanceSummary
   const owedToMe = Number(balanceSummary?.owedToMeCents || 0) / 100
   const owedByMe = Number(balanceSummary?.owedByMeCents || 0) / 100
-  const dashboardNetBalance = Number(balanceSummary?.netBalanceCents || 0) / 100
   const selectedGroup = groups.find(group => group.id === Number(selectedGroupId))
   const selectedExpenseGroup = groups.find(group => group.id === Number(expenseGroupId))
   const expenseTotalCents = /^\d+(?:\.\d{1,2})?$/.test(expenseTotalInput)
@@ -3111,28 +3110,16 @@ function App() {
             </div>
           </section>
           <section className="balance-grid">
-                <article className={`balance-card total-card ${dashboardNetBalance < 0 ? 'owes-card' : ''}`}>
-                  <div className="card-top">
-                    <span className="card-title">YOUR NET BALANCE</span>
-                    <span className="card-symbol dark-symbol"><ArrowLeftRight size={17} /></span>
-                  </div>
-                  <div className="amount">{dashboardNetBalance > 0 ? '+' : dashboardNetBalance < 0 ? '−' : ''}{formatMoney(dashboardNetBalance)}</div>
-                  <div className="balance-foot">
-                    <span className="balance-indicator">{dashboardNetBalance > 0 ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}</span>
-                    {dashboardNetBalance > 0 ? 'You are owed overall' : dashboardNetBalance < 0 ? 'You owe overall' : 'You are all settled up'}
-                    <button className="plain-link" onClick={() => setTab('Balances')}>View balances <ArrowRight size={13} /></button>
-                  </div>
-                </article>
                 <article className="balance-card positive-card">
-                  <div className="card-top"><span className="card-title">YOU ARE OWED</span><span className="card-symbol green-symbol"><ArrowDownLeft size={17} /></span></div>
+                  <div className="card-top"><span className="card-title">OTHERS OWE YOU</span><span className="card-symbol green-symbol"><ArrowDownLeft size={17} /></span></div>
                   <div className="amount">{formatMoney(owedToMe)}</div>
-                  <div className="small-detail"><span>Net amount owed to you</span></div>
+                  <div className="small-detail"><span>Outstanding receivables</span></div>
                   <div className="card-bottom-line"><span /><span /></div>
                 </article>
                 <article className="balance-card negative-card">
                   <div className="card-top"><span className="card-title">YOU OWE</span><span className="card-symbol orange-symbol"><ArrowUpRight size={17} /></span></div>
                   <div className="amount">{formatMoney(owedByMe)}</div>
-                  <div className="small-detail"><span>Net amount you owe</span></div>
+                  <div className="small-detail"><span>Outstanding payables</span></div>
                   <div className="card-bottom-line orange-line"><span /><span /></div>
                 </article>
               </section>
