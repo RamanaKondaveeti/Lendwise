@@ -40,6 +40,7 @@ const { cancellationEmail, cancellationRejection, invitationStatus } = require('
 const { buildInvitationEmail } = require('./invitation-email');
 const { calculateWorkspaceBalanceLedger } = require('./personal-balances');
 const { hasGroupMembership } = require('./authorization');
+const { detectMigrationCompatibility } = require('./migration-runner');
 const { createApiAuthGate, createRequireAuth, getSessionToken } = require('./auth-middleware');
 const { claimIdempotency, findIdempotencyReplay, readIdempotencyKey, saveIdempotentResponse } = require('./idempotency');
 const { maxReceiptBytes, prepareReceiptForTextract, scanReceipt, supportedTypes, validateReceiptFile } = require('./receipt-ocr');
@@ -57,6 +58,7 @@ if (isProduction && !process.env.DB_PASSWORD) {
 const scrypt = promisify(crypto.scrypt);
 const passwordHashOptions = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const app = express();
+let groupAccountArchitectureEnabled = false;
 // Production traffic passes through the host Nginx and frontend Nginx before
 // reaching this private backend container. Trust only those two proxy hops.
 app.set('trust proxy', 2);
@@ -835,6 +837,8 @@ async function init() {
   }
   await q("UPDATE expenses SET category = 'Other' WHERE category IS NULL OR TRIM(category) = ''");
   await migrateWorkspaceOwnership();
+  const migrationCompatibility = await detectMigrationCompatibility(pool);
+  groupAccountArchitectureEnabled = migrationCompatibility.groupAccountArchitectureEnabled;
   await q('DELETE FROM auth_sessions WHERE expires_at <= UTC_TIMESTAMP()');
   await q('DELETE FROM email_tokens WHERE expires_at <= UTC_TIMESTAMP()');
 }
@@ -1740,7 +1744,8 @@ async function previewInvitation(req, res, token) {
     );
     if (!invitation) {
       const [cancelled] = await q(
-        'SELECT id, legacy_disabled_at FROM workspace_invitations WHERE revoked_token_hash = ?',
+        `SELECT id${groupAccountArchitectureEnabled ? ', legacy_disabled_at' : ''}
+         FROM workspace_invitations WHERE revoked_token_hash = ?`,
         [hashSessionToken(token)]
       );
       if (cancelled?.legacy_disabled_at) {
@@ -1968,7 +1973,7 @@ app.post('/api/invitations/accept', requireAuth, async (req, res) => {
        JOIN workspaces w ON w.id = i.workspace_id
        WHERE ((? IS NOT NULL AND i.token_hash = ?) OR (? IS NOT NULL AND i.id = ?))
          AND i.invitee_account_id = ? AND i.accepted_at IS NULL AND i.cancelled_at IS NULL
-         AND i.legacy_disabled_at IS NULL
+         ${groupAccountArchitectureEnabled ? 'AND i.legacy_disabled_at IS NULL' : ''}
          AND i.expires_at > UTC_TIMESTAMP() FOR UPDATE`,
       [
         hasToken ? hashSessionToken(token) : null,

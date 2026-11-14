@@ -84,9 +84,3 @@ UPDATE workspace_invitations
 SET revoked_token_hash = COALESCE(revoked_token_hash, token_hash),
     token_hash = SHA2(CONCAT(token_hash, ':legacy-disabled:', id, ':', UUID()), 256),
     legacy_disabled_at = UTC_TIMESTAMP();
-
-CREATE TABLE schema_migrations (
-  version VARCHAR(160) PRIMARY KEY,
-  applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-INSERT INTO schema_migrations (version) VALUES ('002_group_account_architecture');

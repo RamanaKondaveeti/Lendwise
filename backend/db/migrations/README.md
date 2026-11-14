@@ -18,6 +18,28 @@ See [PHASE_B_DESIGN.md](PHASE_B_DESIGN.md) for evidence, sequence, rollback, and
 
 ## Phase C foundation status
 
-`002_group_account_architecture.sql` is a one-time additive migration for isolated development/test databases. It adds direct account-to-group membership, nullable ownership, group-scoped invitation storage, participant-only access indexes for unresolved historical settlements, and invalidates legacy workspace invitation tokens while preserving their rows/status. It intentionally retains all workspace tables/columns and legacy group memberships. It has **not** been executed. MySQL DDL implicitly commits, so this script is not atomic or safely rerunnable: test it on a disposable restored copy, capture a backup, and restore that copy if execution stops partway through. The updated backend preview/acceptance code expects this migration's `legacy_disabled_at` column, so migration ordering and startup schema-version checks must be implemented before the code is used against an existing database. This is not yet a complete cutover migration.
+`002_group_account_architecture.migration.sql` is a one-time additive migration for isolated development/test databases. It adds direct account-to-group membership, nullable ownership, group-scoped invitation storage, participant-only access indexes for unresolved historical settlements, and invalidates legacy workspace invitation tokens while preserving their rows/status. It intentionally retains all workspace tables/columns and legacy group memberships. It has **not** been executed. MySQL DDL implicitly commits, so this script is not atomic or safely rerunnable: test it on a disposable restored copy, capture a backup, and restore that copy if execution stops partway through. The runner records a failed/partially applied version and refuses an automatic retry. The updated backend checks the migration ledger and required schema before enabling legacy-token invalidation; startup blocks if it detects incomplete or untracked Phase C objects. This is not yet a complete cutover migration.
 
-The backend authorization module now has account/group membership and explicit admin/owner checks, in addition to the legacy workspace-aware check. Existing API routes still use workspace-scoped identity and data queries. Group invitation endpoints, ownership assignment endpoints, the historical settlement API, remaining route-family adapters, and a version-aware migration runner are not implemented yet. Do not treat this foundation as production-ready or as completion of Phase C.
+Run manually only after restoring an isolated test copy and reviewing the target:
+
+```powershell
+$env:NODE_ENV = 'test'
+$env:ALLOW_DEVELOPMENT_MIGRATIONS = 'true'
+$env:DB_NAME = 'groupbuk_restored_test'
+$env:DB_USER = 'groupbuk_integration_test'
+$env:GROUPBUK_MIGRATION_EXPECTED_SERVER = 'local-mysql-server-name'
+$env:GROUPBUK_MIGRATION_DB_MARKER = '<unique-random-marker-of-32-or-more-characters>'
+npm run migrate:development
+```
+
+Supply `DB_HOST`, `DB_PORT`, and `DB_PASSWORD` for that local test database. Before running, provision `groupbuk_integration_guard` in the restored test database with a SHA-256 hash of the exact marker, its database name, and server hostname. The runner verifies those against `DATABASE()`, `@@hostname`, and read-only state before creating the migration ledger or executing SQL. It refuses production mode, DB names containing `prod`, `production`, or `live`, and users not named for test/integration. Do not use production credentials, a production DB name, or a production server.
+
+The backend authorization module now has account/group membership and explicit admin/owner checks, in addition to the legacy workspace-aware check. The version-aware runner and startup schema compatibility detection exist, but no authenticated route currently consumes the new authorization helpers. Existing API routes still use workspace-scoped identity and data queries. Group invitation endpoints, ownership assignment endpoints, the historical settlement API, and remaining route-family adapters are not implemented yet. Do not treat this foundation as production-ready or as completion of Phase C.
+
+### Session compatibility status
+
+Migration `002` does not change `auth_sessions`; legacy sessions remain as-is. Login and session lookup still require an active workspace. Account-only sessions, session versioning/revocation policy, legacy-session migration/invalidation, and dual-read compatibility are not implemented. They must be introduced additively and tested before removing any workspace session dependency; no existing sessions should be invalidated implicitly.
+
+### Phase C route status
+
+The account/group helper is not yet wired into route handlers. `/api/groups`, expenses, balances, settlements, budgets, recurring expenses, reports, group activity, notifications, and user/account management still use workspace scoping in `backend/src/index.js`. No new group invitation lifecycle API, owner-resolution endpoint, or participant-only historical settlement read API exists yet. Existing financial calculations have not been changed; no migration-backed reconciliation has been performed.

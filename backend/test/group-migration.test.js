@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const migration = fs.readFileSync(
-  path.join(__dirname, '../db/migrations/002_group_account_architecture.sql'),
+  path.join(__dirname, '../db/migrations/002_group_account_architecture.migration.sql'),
   'utf8'
 );
 
