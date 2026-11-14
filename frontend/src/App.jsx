@@ -3220,8 +3220,8 @@ function App() {
               <button type="button" className="budget-overview-link" onClick={() => setTab('Budgets')}>View budgets<ArrowRight size={14} /></button>
             </div>
             {budgets.filter(budget => !budget.is_paused).length ? (
-              <div className="budget-overview-list">
-                {budgets.filter(budget => !budget.is_paused).slice(0, 3).map(budget => {
+              <div className="budget-overview-list" role="region" aria-label="Active budget list" tabIndex={0}>
+                {budgets.filter(budget => !budget.is_paused).map(budget => {
                   const utilization = budget.utilization.currentPeriod
                   const pct = utilization.percentUsed
                   const level = pct >= 100 ? 'red' : pct >= 80 ? 'amber' : 'green'
